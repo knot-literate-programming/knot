@@ -1,1 +1,8 @@
+# Knot
 *.typ
+*.pdf
+.knot_cache/
+
+# Rust
+/target/
+Cargo.lock
