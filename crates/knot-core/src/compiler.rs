@@ -5,6 +5,7 @@ use crate::executors::{ExecutionResult, LanguageExecutor};
 use crate::parser::Document;
 use crate::get_cache_dir;
 use anyhow::{Context, Result};
+use log::info;
 
 // From section 3.1 and 6.1 (Semaine 2) of the reference document
 
@@ -36,7 +37,7 @@ impl Compiler {
             r_exec.initialize()?;
         }
 
-        println!("🔧 Processing {} code chunks...", doc.chunks.len());
+        info!("🔧 Processing {} code chunks...", doc.chunks.len());
 
         for (index, chunk) in doc.chunks.iter().enumerate() {
             let chunk_name = chunk
@@ -57,10 +58,10 @@ impl Compiler {
             let result = if !chunk.options.eval {
                 ExecutionResult::Text(String::new())
             } else if chunk.options.cache && cache.has_cached_result(&chunk_hash) {
-                println!("  ✓ {} [cached]", chunk_name);
+                info!("  ✓ {} [cached]", chunk_name);
                 cache.get_cached_result(&chunk_hash)?
             } else {
-                println!("  ⚙️ {} [executing]", chunk_name);
+                info!("  ⚙️ {} [executing]", chunk_name);
                 let result = match chunk.language.as_str() {
                     "r" => self
                         .r_executor
@@ -155,7 +156,7 @@ impl Compiler {
             codegen.add_chunk_result(chunk_output_final);
         }
 
-        println!("✓ All chunks processed.");
+        info!("✓ All chunks processed.");
         codegen.generate(doc)
     }
 }

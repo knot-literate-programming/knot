@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use knot_core::{Compiler, Document};
+use log::info;
 use std::fs;
 use std::path::PathBuf;
 
@@ -30,6 +31,9 @@ enum Commands {
 }
 
 fn main() -> Result<()> {
+    // Initialize the logger
+    env_logger::init();
+
     let cli = Cli::parse();
 
     match &cli.command {
@@ -47,18 +51,20 @@ fn main() -> Result<()> {
 // Phase 1, SEMAINE 1, Jour 5
 fn init(file: &PathBuf) -> Result<()> {
     // Use the embedded template instead of reading from file
-    fs::write(file, DEFAULT_TEMPLATE).context(format!("Could not write template to file: {:?}", file))?;
+    fs::write(file, DEFAULT_TEMPLATE)
+        .context(format!("Could not write template to file: {:?}", file))?;
     println!("📄 Created new knot document: {:?}", file);
     Ok(())
 }
 
 // Phase 1, SEMAINE 2 & 3
 fn compile(file: &PathBuf) -> Result<()> {
-    println!("📄 Compiling {:?}...", file);
-    let source = fs::read_to_string(file).context(format!("Failed to read file: {:?}", file))?;
+    info!("📄 Compiling {:?}...", file);
+    let source =
+        fs::read_to_string(file).context(format!("Failed to read file: {:?}", file))?;
 
     let doc = Document::parse(source).context("Failed to parse document")?;
-    println!("✓ Parsed {} chunk(s)", doc.chunks.len());
+    info!("✓ Parsed {} chunk(s)", doc.chunks.len());
 
     let mut compiler = Compiler::new()?;
     let typst_source = compiler.compile(&doc)?;
@@ -68,10 +74,10 @@ fn compile(file: &PathBuf) -> Result<()> {
         "Failed to write intermediate Typst file to {:?}",
         typ_output_path
     ))?;
-    println!("✓ Generated intermediate Typst file: {:?}", typ_output_path);
+    info!("✓ Generated intermediate Typst file: {:?}", typ_output_path);
 
     // Format with typstyle
-    println!("🎨 Formatting with typstyle...");
+    info!("🎨 Formatting with typstyle...");
     let typstyle_status = std::process::Command::new("typstyle")
         .arg("-i") // Format in-place
         .arg(&typ_output_path)
@@ -83,7 +89,7 @@ fn compile(file: &PathBuf) -> Result<()> {
     }
 
     // Final step: compile with Typst
-    println!("📦 Compiling PDF with Typst...");
+    info!("📦 Compiling PDF with Typst...");
     let pdf_output_path = file.with_extension("pdf");
     let output = std::process::Command::new("typst")
         .arg("compile")
@@ -104,7 +110,7 @@ fn compile(file: &PathBuf) -> Result<()> {
         );
     }
 
-    println!("✓ Successfully compiled PDF: {:?}", pdf_output_path);
+    info!("✓ Successfully compiled PDF: {:?}", pdf_output_path);
 
     Ok(())
 }

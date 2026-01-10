@@ -2,6 +2,7 @@ use crate::executors::ExecutionResult;
 use crate::parser::ChunkOptions;
 use anyhow::{anyhow, Result};
 use chrono::Utc;
+use log::warn;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -40,8 +41,8 @@ impl Cache {
             match serde_json::from_str(&content) {
                 Ok(metadata) => metadata,
                 Err(e) => {
-                    eprintln!(
-                        "⚠️  Warning: Failed to parse cache metadata ({:?}). Ignoring cache. Error: {}",
+                    warn!(
+                        "Failed to parse cache metadata ({:?}). Ignoring cache. Error: {}",
                         metadata_path, e
                     );
                     CacheMetadata::default()

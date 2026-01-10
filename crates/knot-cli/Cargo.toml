@@ -7,3 +7,5 @@ edition = "2024"
 knot-core = { path = "../knot-core" }
 clap = { workspace = true }
 anyhow = { workspace = true }
+env_logger = "0.11.8"
+log = "0.4.29"
