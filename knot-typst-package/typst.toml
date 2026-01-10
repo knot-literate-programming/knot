@@ -1,0 +1,10 @@
+[package]
+name = "knot" # This will be the name used in #import "@preview/knot:0.1.0": *
+version = "0.1.0"
+entry = "lib.typ"
+authors = ["Your Name <your.email@example.com>"]
+license = "MIT"
+description = "Typst package for Knot literate programming system"
+repository = "https://github.com/your-org/knot"
+keywords = ["literate-programming", "typst", "r", "python"]
+categories = ["data-science", "education"]
