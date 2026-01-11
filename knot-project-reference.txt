@@ -851,6 +851,73 @@ IMPORT AUTOMATIQUE :
 
 DELIVERABLE : Package publié sur @preview, rendu personnalisable
 
+AMÉLIORATIONS FUTURES - PACKAGE TYPST (#code-chunk adaptive layout)
+--------------------------------------------------------------------------------
+
+NOTE (2026-01-11) : Le package Typst actuel utilise un layout 2 colonnes fixe.
+Il faudra rendre #code-chunk() intelligent selon le contexte :
+
+LAYOUTS ADAPTATIFS :
+
+1. CODE + RÉSULTAT TEXTE (actuel) :
+   → Grid 2 colonnes (code | output)
+   → Code avec coloration syntaxique
+   → Output avec fond grisé
+
+2. CODE SEUL (output: false) :
+   → 1 colonne (pas de grid vide)
+   → Code centré ou pleine largeur
+   → Pas de fond grisé pour l'output absent
+
+3. DATAFRAME/TABLE (via to_typst()) :
+   → 1 colonne (même avec echo: true)
+   → Code en haut si echo: true
+   → Tableau Typst SANS fond grisé (intégré comme texte normal)
+   → Mise en page fluide avec le texte environnant
+
+IMPLÉMENTATION SUGGÉRÉE :
+
+#let code-chunk(
+  lang: none,
+  name: none,
+  echo: true,
+  eval: true,
+  input: none,
+  output: none,
+  caption: none,
+  ..
+) = {
+  // Détecter le type d'output
+  let has_output = output != none
+  let is_table = false
+  if has_output {
+    // Heuristique : si output contient #table(...), c'est un DataFrame
+    is_table = repr(output).contains("#table")
+  }
+
+  if is_table {
+    // Layout 1 colonne pour DataFrame
+    if echo { input }
+    // Tableau sans fond, intégré au flux
+    output
+  } else if has_output {
+    // Layout 2 colonnes pour texte
+    grid(columns: (1fr, 1fr), gutter: 1em,
+      input,
+      block(fill: luma(244), radius: 4pt, inset: 8pt)[#output]
+    )
+  } else {
+    // Layout 1 colonne pour code seul
+    input
+  }
+}
+
+BÉNÉFICES :
+- Meilleure intégration visuelle des DataFrames
+- Pas d'espace perdu pour code-only chunks
+- Expérience utilisateur plus fluide
+- Cohérent avec knitr/RMarkdown best practices
+
 6.6 PHASE 6 : INLINE CHUNKS ET FINITIONS (Semaines 21-24)
 --------------------------------------------------------------------------------
 
