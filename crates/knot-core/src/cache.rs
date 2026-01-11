@@ -94,7 +94,7 @@ impl Cache {
             }
         }
 
-        // For now, we only handle single file results (Text or Plot).
+        // For now, we only handle single file results (Text, Plot, or DataFrame).
         // The Both case will need to be handled more robustly.
         let result_path = self.cache_dir.join(&entry.files[0]);
         let ext = result_path.extension().and_then(|e| e.to_str());
@@ -105,6 +105,7 @@ impl Cache {
                 Ok(ExecutionResult::Text(text))
             }
             Some("svg") | Some("png") => Ok(ExecutionResult::Plot(result_path)),
+            Some("csv") => Ok(ExecutionResult::DataFrame(result_path)),
             _ => Err(anyhow!("Unknown cache file type: {:?}", result_path)),
         }
     }
@@ -127,6 +128,15 @@ impl Cache {
             ExecutionResult::Plot(plot_path) => {
                 // Assuming the plot is already in the cache dir, just get its name
                 let filename = plot_path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string();
+                vec![filename]
+            }
+            ExecutionResult::DataFrame(csv_path) => {
+                // DataFrame CSV is already saved in the cache dir, just get its name
+                let filename = csv_path
                     .file_name()
                     .unwrap()
                     .to_string_lossy()

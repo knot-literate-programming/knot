@@ -1,0 +1,44 @@
+#import "../../knot-typst-package/lib.typ": *
+#show: codly-init
+
+= Test Phase 2: DataFrame Support
+
+This document tests the new DataFrame support in Knot Phase 2.
+
+== Simple DataFrame
+
+Let's create a simple dataframe and display it:
+
+```{r df-test}
+#| eval: true
+#| echo: true
+#| output: true
+df <- data.frame(
+  Name = c("Alice", "Bob", "Charlie"),
+  Age = c(25, 30, 35),
+  Score = c(95.5, 87.3, 92.1)
+)
+to_typst(df)
+```
+
+== Iris Dataset
+
+Now let's display the first few rows of the iris dataset:
+
+```{r iris-test}
+#| eval: true
+#| echo: true
+#| output: true
+to_typst(head(iris))
+```
+
+== Mixed Output
+
+This chunk shows regular text output:
+
+```{r text-output}
+#| eval: true
+#| echo: true
+#| output: true
+summary(iris$Sepal.Length)
+```

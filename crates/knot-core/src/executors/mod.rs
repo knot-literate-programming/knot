@@ -8,6 +8,7 @@ pub mod r;
 pub enum ExecutionResult {
     Text(String),
     Plot(PathBuf),
+    DataFrame(PathBuf),
     Both { text: String, plot: PathBuf },
 }
 

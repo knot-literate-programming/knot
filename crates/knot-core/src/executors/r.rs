@@ -29,6 +29,125 @@ impl RExecutor {
     }
 }
 
+impl RExecutor {
+    /// Attempts to load the knot R package.
+    /// This is called during initialization. If the package is not installed,
+    /// it logs a warning but does not fail - users can still use knot without it.
+    fn load_knot_package(&mut self) -> Result<()> {
+        let stdin = self
+            .stdin
+            .as_mut()
+            .context("R process stdin is not available")?;
+        let stdout = self
+            .stdout
+            .as_mut()
+            .context("R process stdout is not available")?;
+        let stderr = self
+            .stderr
+            .as_mut()
+            .context("R process stderr is not available")?;
+
+        // Try to load the package
+        writeln!(stdin, "library(knot.r.package)")?;
+        writeln!(stdin, "cat('{}\\n', file=stdout())", BOUNDARY)?;
+        writeln!(stdin, "cat('{}\\n', file=stderr())", BOUNDARY)?;
+        stdin.flush()?;
+
+        // Collect output
+        let (_stdout_output, stderr_output) = thread::scope(|s| {
+            let stdout_handle = s.spawn(move || {
+                let mut output = String::new();
+                let mut line_buffer = String::new();
+                loop {
+                    line_buffer.clear();
+                    let bytes_read = stdout.read_line(&mut line_buffer).unwrap_or(0);
+                    if bytes_read == 0 {
+                        break;
+                    }
+                    if line_buffer.trim_end() == BOUNDARY {
+                        break;
+                    }
+                    output.push_str(&line_buffer);
+                }
+                output
+            });
+
+            let stderr_handle = s.spawn(move || {
+                let mut output = String::new();
+                let mut line_buffer = String::new();
+                loop {
+                    line_buffer.clear();
+                    let bytes_read = stderr.read_line(&mut line_buffer).unwrap_or(0);
+                    if bytes_read == 0 {
+                        break;
+                    }
+                    if line_buffer.trim_end() == BOUNDARY {
+                        break;
+                    }
+                    output.push_str(&line_buffer);
+                }
+                output
+            });
+
+            (
+                stdout_handle.join().unwrap(),
+                stderr_handle.join().unwrap(),
+            )
+        });
+
+        // If there's an error, it likely means the package is not installed
+        // We don't fail here - just log a warning
+        if !stderr_output.trim().is_empty() {
+            log::warn!("Could not load knot.r.package: {}", stderr_output.trim());
+            log::warn!("Rich output features (dataframes, plots) will not be available.");
+        } else {
+            log::info!("✓ Loaded knot.r.package");
+        }
+
+        Ok(())
+    }
+
+    /// Parses the output from R to detect serialized data.
+    /// Currently supports __KNOT_SERIALIZED_CSV__ marker for dataframes.
+    fn parse_output(&self, output: &str) -> Result<ExecutionResult> {
+        const CSV_MARKER: &str = "__KNOT_SERIALIZED_CSV__";
+
+        if let Some(csv_start) = output.find(CSV_MARKER) {
+            // Extract the CSV content after the marker
+            let csv_content = &output[csv_start + CSV_MARKER.len()..];
+            let csv_content = csv_content.trim();
+
+            if csv_content.is_empty() {
+                return Ok(ExecutionResult::Text(output.to_string()));
+            }
+
+            // Generate a unique filename based on timestamp and content hash
+            use sha2::{Digest, Sha256};
+            let mut hasher = Sha256::new();
+            hasher.update(csv_content.as_bytes());
+            let hash = format!("{:x}", hasher.finalize());
+            let filename = format!("dataframe_{}.csv", &hash[..16]);
+            let csv_path = self.cache_dir.join(&filename);
+
+            // Save CSV to cache
+            std::fs::write(&csv_path, csv_content)
+                .context("Failed to write CSV to cache")?;
+
+            // Return the rest of the output as text if there's any before the marker
+            let text_before = output[..csv_start].trim();
+            if !text_before.is_empty() {
+                // TODO: Support Both { text, dataframe } in the future
+                log::warn!("Text output before dataframe is currently ignored");
+            }
+
+            Ok(ExecutionResult::DataFrame(csv_path))
+        } else {
+            // No special markers, return as plain text
+            Ok(ExecutionResult::Text(output.to_string()))
+        }
+    }
+}
+
 impl LanguageExecutor for RExecutor {
     /// Spawns a persistent R process.
     fn initialize(&mut self) -> Result<()> {
@@ -51,6 +170,9 @@ impl LanguageExecutor for RExecutor {
         self.stdout = child.stdout.take().map(BufReader::new);
         self.stderr = child.stderr.take().map(BufReader::new);
         self.process = Some(child);
+
+        // Load the knot R package if available
+        self.load_knot_package()?;
 
         Ok(())
     }
@@ -130,7 +252,8 @@ impl LanguageExecutor for RExecutor {
             );
         }
 
-        Ok(ExecutionResult::Text(stdout_output))
+        // Check if output contains serialized data from knot.r.package
+        self.parse_output(&stdout_output)
     }
 }
 

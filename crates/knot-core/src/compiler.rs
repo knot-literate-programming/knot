@@ -114,6 +114,13 @@ impl Compiler {
                     ExecutionResult::Plot(path) => {
                         format!("[#image(\"{}\")]", path.to_string_lossy())
                     }
+                    ExecutionResult::DataFrame(csv_path) => {
+                        // Convert to absolute path for Typst
+                        let abs_csv = csv_path.canonicalize()
+                            .unwrap_or_else(|_| csv_path.clone());
+                        // Generate Typst code that reads CSV once and creates a table
+                        format!("[#{{ let data = csv(\"{}\"); table(columns: data.first().len(), ..data.flatten()) }}]", abs_csv.to_string_lossy())
+                    }
                     ExecutionResult::Both { text, plot } => {
                         format!(
                             "[#image(\"{}\")\n```\n{}```]",

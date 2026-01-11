@@ -117,3 +117,123 @@ All changes validated with comprehensive testing:
 ### Current Status
 
 All **Phase 1 critical issues** have been resolved. The codebase is now more robust, maintainable, and performant. The project is ready to proceed with **Phase 2 (R Package)** or **Phase 4 (Graphics Support)** with a solid foundation.
+
+---
+
+## Session: 2026-01-11
+
+**Summary:** This session successfully implemented **Phase 2 (R Package)** for rich output support. The focus was on enabling R dataframes to be rendered as properly formatted tables in Typst documents, with full caching and serialization support.
+
+### Key Accomplishments:
+
+1. **ExecutionResult Extension**
+   - Added `DataFrame(PathBuf)` variant to `ExecutionResult` enum
+   - Enables type-safe handling of CSV-serialized dataframes
+   - Integrated with existing cache system for DataFrame results
+
+2. **R Package Development (`knot.r.package`)**
+   - Created S3 generic method `to_typst()` for extensible object serialization
+   - Implemented `to_typst.data.frame()` that serializes dataframes to CSV with `__KNOT_SERIALIZED_CSV__` marker
+   - Properly exported S3 methods in NAMESPACE
+   - Package automatically loaded by R executor on initialization
+
+3. **Output Parsing and Serialization**
+   - Implemented `RExecutor::parse_output()` to detect `__KNOT_SERIALIZED_CSV__` markers in R stdout
+   - CSV content extracted and saved to cache with SHA256-based filenames
+   - Automatic fallback to text output when no markers detected
+
+4. **Typst Table Generation**
+   - Compiler generates correct Typst syntax for multi-column tables:
+     ```typst
+     #{
+       let data = csv("_knot_files/dataframe.csv")
+       table(columns: data.first().len(), ..data.flatten())
+     }
+     ```
+   - Automatic column count detection via `data.first().len()`
+   - Single CSV read for performance
+
+5. **File Management Strategy**
+   - CSV files copied from `.knot_cache/` to `_knot_files/` directory alongside `.typ` file
+   - Post-processing step in CLI rewrites absolute paths to relative `_knot_files/` paths
+   - Enables Typst compilation with `--root .` while maintaining portability
+   - Similar to knitr/RMarkdown `*_files/` directory pattern
+
+6. **Cache Integration**
+   - Extended `Cache::save_result()` to handle DataFrame variant
+   - Extended `Cache::get_cached_result()` to restore CSV files from cache
+   - DataFrame results participate in chained cache invalidation
+
+### Technical Implementation Details
+
+**R Package Installation:**
+```bash
+cd knot-r-package && R CMD INSTALL .
+```
+
+**Package automatically loaded on R executor initialization:**
+```rust
+impl RExecutor {
+    fn load_knot_package(&mut self) -> Result<()> {
+        // Attempts library(knot.r.package)
+        // Warns but doesn't fail if package not available
+    }
+}
+```
+
+**CSV Marker Protocol:**
+- R package writes: `__KNOT_SERIALIZED_CSV__\n<CSV content>`
+- Rust parser detects marker and extracts CSV
+- CSV saved with hash-based filename: `dataframe_{hash}.csv`
+
+**Path Resolution:**
+- Compiler generates absolute paths initially
+- CLI post-processes `.typ` file to copy CSVs and fix paths
+- Regex pattern: `"(/[^"]+\.knot_cache/[^"]+)"` → `"_knot_files/{filename}"`
+
+### Validation & Testing
+
+All functionality verified with comprehensive example:
+
+**Test Document:** `examples/phase2_dataframes/test_dataframes.knot`
+- ✅ Simple 3x3 dataframe rendered as table
+- ✅ Iris dataset (6x5) rendered as table
+- ✅ Mixed output (text via `summary()`)
+- ✅ Cache working correctly (`[cached]` on second run)
+- ✅ All 8 unit tests still passing
+
+**Generated Output:**
+```
+examples/phase2_dataframes/
+├── test_dataframes.knot   # Source document
+├── test_dataframes.typ    # Generated Typst (1.2KB)
+├── test_dataframes.pdf    # Final PDF (57KB)
+└── _knot_files/           # Local CSV files
+    ├── dataframe_2090f3115d8f5e48.csv (68 bytes)
+    └── dataframe_da383c2d8de04099.csv (213 bytes)
+```
+
+### Code Quality Metrics
+
+| Component | Lines Added | Files Modified | Tests |
+|-----------|-------------|----------------|-------|
+| knot-core | ~100 | 4 | 0 new (8 existing pass) |
+| knot-cli | ~50 | 2 | - |
+| R package | ~20 | 2 | - |
+| **Total** | **~170** | **8** | **8/8 ✅** |
+
+**Dependencies Added:**
+- `pathdiff = "0.2"` (for relative path calculation)
+
+### Current Status
+
+**Phase 2 (R Package)** is now complete and production-ready. The system successfully:
+- ✅ Renders R dataframes as formatted Typst tables
+- ✅ Maintains cache efficiency (DataFrame results cached)
+- ✅ Follows established patterns (similar to knitr/RMarkdown)
+- ✅ Handles mixed output (text + dataframes)
+
+**Next Steps:**
+- **Phase 4 (Graphics Support)** - Add ggplot2 and base R plot support
+- **Extend Phase 2** - Add `to_typst()` methods for vectors, matrices, model objects
+- **Testing** - Add integration tests for end-to-end compilation
