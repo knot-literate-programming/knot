@@ -35,6 +35,16 @@ Ces trois fichiers donnent le contexte complet pour reprendre le développement.
 - **TOUJOURS** préférer éditer un fichier existant plutôt que créer un nouveau
 - Les nouveaux modules doivent être exportés dans `lib.rs`
 
+## Conseils pour les refactorisations majeures
+
+**IMPORTANT**: Lors d'une refactorisation majeure ou de modifications qui touchent à l'architecture, il est **IMPÉRATIF** de créer une branche Git dédiée. Cela permet d'isoler le travail, de revenir en arrière facilement en cas de problème (sans impacter `master`), et d'éviter les problèmes complexes de gestion d'historique (comme les `git push --force` ou les `git revert` difficiles).
+
+**Workflow recommandé:**
+1.  `git checkout -b feature/ma-refactorisation`
+2.  Effectuer les modifications
+3.  Committer sur cette branche
+4.  Une fois la refactorisation terminée et testée, fusionner dans `master`.
+
 ## Structure clé du projet
 
 ### Core (`crates/knot-core/src/`)
