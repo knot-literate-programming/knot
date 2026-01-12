@@ -50,7 +50,7 @@ Ces trois fichiers donnent le contexte complet pour reprendre le développement.
 - Fonction `fix_paths_in_typst()` : Copie CSVs vers `_knot_files/`
 
 ### Package R (`knot-r-package/`)
-- **`R/to_typst.R`** : Méthodes S3 pour conversion (DataFrames → CSV)
+- **`R/typst.R`** : Méthodes S3 pour conversion (DataFrames → CSV, Plots → SVG/PNG)
 - **`NAMESPACE`** : Exports S3method requis
 
 ### Package Typst (`knot-typst-package/`)

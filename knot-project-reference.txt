@@ -885,7 +885,7 @@ LAYOUTS ADAPTATIFS :
    → Code centré ou pleine largeur
    → Pas de fond grisé pour l'output absent
 
-3. DATAFRAME/TABLE (via to_typst()) :
+3. DATAFRAME/TABLE (via typst()) :
    → 1 colonne (même avec echo: true)
    → Code en haut si echo: true
    → Tableau Typst SANS fond grisé (intégré comme texte normal)
