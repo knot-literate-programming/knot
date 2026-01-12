@@ -208,31 +208,16 @@ fn offset_to_position(source: &str, offset: usize) -> Position {
 /// Extract inline expressions like #r[expr] from the source
 /// Excludes expressions that are inside code chunks
 fn extract_inline_exprs(source: &str, chunks: &[Chunk]) -> Result<Vec<InlineExpr>> {
-    use regex::Regex;
-
-    // Regex for inline expressions: #lang[code]
-    // Supports: #r[...], #python[...], etc.
-    let inline_regex = Regex::new(r"#(r|python|lilypond)\[([^\]]+)\]")?;
+    // Use shared function from lib.rs for consistent inline expression detection
+    let matches = crate::find_inline_expressions(source)?;
 
     let mut inline_exprs = Vec::new();
 
-    for cap in inline_regex.captures_iter(source) {
-        let full_match = cap.get(0).unwrap();
-        let start = full_match.start();
-        let end = full_match.end();
-
-        // Skip if the # is escaped with a backslash
-        if start > 0 && source.as_bytes()[start - 1] == b'\\' {
-            continue;
-        }
-
+    for (language, code, start, end) in matches {
         // Skip if this position is inside a code chunk
         if is_inside_chunk(start, chunks) {
             continue;
         }
-
-        let language = cap.get(1).unwrap().as_str().to_string();
-        let code = cap.get(2).unwrap().as_str().to_string();
 
         inline_exprs.push(InlineExpr {
             language,
@@ -242,9 +227,7 @@ fn extract_inline_exprs(source: &str, chunks: &[Chunk]) -> Result<Vec<InlineExpr
         });
     }
 
-    // Sort by position (start) for orderedprocessing
-    inline_exprs.sort_by_key(|e| e.start);
-
+    // Already sorted by position from find_inline_expressions
     Ok(inline_exprs)
 }
 
