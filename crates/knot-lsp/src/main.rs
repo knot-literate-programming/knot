@@ -7,7 +7,11 @@
 // - Completion (chunk options and names)
 
 mod diagnostics;
+mod symbols;
 
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
@@ -15,6 +19,7 @@ use tower_lsp::{Client, LanguageServer, LspService, Server};
 #[derive(Debug)]
 struct KnotLanguageServer {
     client: Client,
+    documents: Arc<RwLock<HashMap<Url, String>>>,
 }
 
 #[tower_lsp::async_trait]
@@ -67,8 +72,14 @@ impl LanguageServer for KnotLanguageServer {
             .log_message(MessageType::INFO, format!("File opened: {}", params.text_document.uri))
             .await;
 
+        let uri = params.text_document.uri.clone();
+        let text = params.text_document.text.clone();
+
+        // Store document text
+        self.documents.write().await.insert(uri.clone(), text.clone());
+
         // Trigger diagnostics on file open
-        self.on_change(params.text_document.uri, params.text_document.text).await;
+        self.on_change(uri, text).await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
@@ -78,7 +89,13 @@ impl LanguageServer for KnotLanguageServer {
 
         // Get the full document text from the first change (FULL sync mode)
         if let Some(change) = params.content_changes.first() {
-            self.on_change(params.text_document.uri, change.text.clone()).await;
+            let uri = params.text_document.uri.clone();
+            let text = change.text.clone();
+
+            // Update stored document text
+            self.documents.write().await.insert(uri.clone(), text.clone());
+
+            self.on_change(uri, text).await;
         }
     }
 
@@ -102,10 +119,19 @@ impl LanguageServer for KnotLanguageServer {
 
     async fn document_symbol(
         &self,
-        _params: DocumentSymbolParams,
+        params: DocumentSymbolParams,
     ) -> Result<Option<DocumentSymbolResponse>> {
-        // TODO: Implement document symbols (list of chunks)
-        Ok(None)
+        // Get document text
+        let documents = self.documents.read().await;
+        let text = match documents.get(&params.text_document.uri) {
+            Some(text) => text,
+            None => return Ok(None),
+        };
+
+        // Generate symbols
+        let symbols = symbols::get_document_symbols(text);
+
+        Ok(symbols.map(DocumentSymbolResponse::Nested))
     }
 
     async fn hover(&self, _params: HoverParams) -> Result<Option<Hover>> {
@@ -135,6 +161,9 @@ async fn main() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
-    let (service, socket) = LspService::new(|client| KnotLanguageServer { client });
+    let (service, socket) = LspService::new(|client| KnotLanguageServer {
+        client,
+        documents: Arc::new(RwLock::new(HashMap::new())),
+    });
     Server::new(stdin, stdout, socket).serve(service).await;
 }
