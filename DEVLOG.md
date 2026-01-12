@@ -8,7 +8,7 @@ This document tracks the major development steps and architectural decisions mad
 
 ### Key Accomplishments:
 
-1.  **Advanced Templating Architecture (`#code-chunk`)**
+1.  **Advanced Templating Architecture (`#code-chunk`)
     *   Replaced the basic Typst generation with a more powerful and flexible system.
     *   The compiler now generates a single `#code-chunk()` function call for each chunk.
     *   This call passes all relevant metadata (language, name, caption, options) as named arguments, giving template authors full control over layout and presentation.
@@ -189,7 +189,7 @@ impl RExecutor {
 **Path Resolution:**
 - Compiler generates absolute paths initially
 - CLI post-processes `.typ` file to copy CSVs and fix paths
-- Regex pattern: `"(/[^"]+\.knot_cache/[^"]+)"` → `"_knot_files/{filename}"`
+- Regex pattern: `"(/[^\"]+\.knot_cache/[^\"]+)"` → `"_knot_files/{filename}"`
 
 ### Validation & Testing
 
@@ -425,7 +425,7 @@ Created comprehensive test suite in `examples/phase4_plots/`:
 - Extended `Document` struct to include `inline_exprs: Vec<InlineExpr>` field
 - Created `InlineExpr` struct with `language`, `code`, `start`, `end` fields
 - Implemented `extract_inline_exprs()` to parse `#r[expr]` patterns from source
-- Regex pattern: `#(r|python|lilypond)\[([^\]]+)\]`
+- Regex pattern: `# (r|python|lilypond)\[([^\]]+)\]`
 - Correctly skips inline expressions inside code chunks
 - Exported `InlineExpr` in public API (`lib.rs`)
 
@@ -558,3 +558,71 @@ Vector: `[1] 1 2 3 4 5`
 - **Phase 6B** - Watch mode, global configuration (YAML frontmatter)
 - **Phase 7** - LSP implementation
 - **Testing** - Additional edge case coverage
+
+---
+
+## Session: 2026-01-12 (Refactoring & Finalization)
+
+**Summary:** This session involved a deep architectural discussion and a major refactoring of the compiler to correctly support inline expression state, caching, and side-effects. The initial implementation of inline expressions was completely overhauled to be more robust, correct, and maintainable.
+
+### Design Discussion: Inline Expression Behavior
+
+A critical design discussion was held regarding the behavior of inline expressions (`#r[...]`):
+
+1. **Read-Only vs. Side-Effects:** We considered making inline expressions purely "read-only" by technically preventing them from modifying the R environment's state.
+    *   **Conclusion:** This was deemed infeasible to implement reliably and performantly.
+2. **Comparison with Quarto:** We analyzed Quarto's approach, which technically allows side-effects in inline code but discourages it in their documentation.
+3. **Final Design Decision:** We opted for a more explicit approach that improves on Quarto's model:
+    *   **`#r[...]`:** For displaying values. The output is "smartly" formatted (scalars vs vectors) and it errors on complex results. This is the primary, recommended syntax.
+    *   **`#r:run[...]`:** A new verb explicitly for executing code for its side-effects only. This produces no output in the document.
+
+This design makes the user's intent clear, provides power when needed, and avoids ambiguity.
+
+### Architectural Refactoring: Single-Pass Compiler
+
+The most significant change was the refactoring of the `Compiler` to use a single-pass architecture.
+
+**Previous Flawed Architecture:**
+- The compiler first executed all code chunks.
+- Then, it executed all inline expressions separately.
+- **Result:** State changes from inline expressions were not visible to chunks, and inline expressions were not cached.
+
+**New Single-Pass Architecture:**
+1. **Unified Node Model:** Introduced an `ExecutableNode` enum that unifies `Chunk`s and `InlineExpr`s.
+2. **Single, Sorted Pass:** The compiler now builds a single list of all executable nodes, sorts them by their position in the source document, and executes them in that order.
+3. **State Correction:** State is now correctly shared. A variable modified by an inline expression is correctly seen by the next chunk or inline expression.
+4. **Cache Integration for Inline Expressions:** Inline expressions are now fully integrated into the chained caching system. Modifying an inline expression correctly invalidates the cache for all subsequent nodes (chunks or inline).
+
+### Compiler Module Split
+
+To facilitate the refactoring and improve maintainability, the monolithic `compiler.rs` file was split into a dedicated `compiler` module:
+- `compiler/mod.rs`: Contains the main `Compiler` struct and the simplified single-pass loop.
+- `compiler/chunk_processor.rs`: Contains all logic for processing a `Chunk`.
+- `compiler/inline_processor.rs`: Contains all logic for processing an `InlineExpr`.
+
+### Critical Bug Fix: Deadlock in R Executor
+
+During testing of the new features, a critical deadlock was discovered.
+- **Symptom:** Tests involving `#r:run[...]` would hang indefinitely.
+- **Root Cause:** A subtle bug in the new `execute_side_effect_only` function in `r.rs`. The `cat()` command sent to R was missing a newline character (`\n`), causing the `read_line()` call in the Rust host to block forever.
+- **Solution:** Added the missing `\n` to the `cat()` command, resolving the deadlock.
+
+### Validation & Testing
+
+- All 25 existing unit and integration tests were re-verified and are passing.
+- A new integration test, `test_inline_run_verb_and_cache_invalidation`, was added to specifically validate:
+  - ✅ Correct execution of the `#r:run` verb (state is modified, no output is produced).
+  - ✅ Correct cache invalidation (modifying an inline expression correctly triggers re-execution of a subsequent chunk).
+
+### Current Status
+
+The implementation of **Phase 6 (Inline Expressions)** and the surrounding compiler architecture is now complete, robust, and fully tested. The system correctly handles state, caching, and side-effects in a predictable, single-pass execution model. The codebase is significantly more maintainable.
+
+**Completed Work:**
+- ✅ Major compiler refactoring to a single-pass architecture.
+- ✅ `r:run` verb for side-effect-only inline expressions.
+- ✅ Full cache-chain integration for inline expressions.
+- ✅ Critical deadlock bug fixed.
+- ✅ Comprehensive tests for the new functionality.
+
+The project is in an excellent state to proceed with further features.
