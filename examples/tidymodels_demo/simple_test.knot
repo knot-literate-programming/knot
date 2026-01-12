@@ -1,0 +1,23 @@
+= Test Simple
+
+```{r setup}
+#| echo: false
+x <- 42
+name <- "Alice"
+```
+
+Test inline display: The value is #r[x] and the name is #r[name].
+
+```{r calc}
+y <- x * 2
+print(y)
+```
+
+Test with side-effect verb:
+
+#r:run[
+  result_label <- "Final result"
+  multiplier <- 3
+]
+
+The #r[result_label] is #r[x * multiplier].

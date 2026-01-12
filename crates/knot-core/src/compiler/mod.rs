@@ -11,7 +11,7 @@ pub enum ExecutableNode<'a> {
     InlineExpr(&'a InlineExpr),
 }
 
-use crate::cache::{hash_dependencies, Cache};
+use crate::cache::Cache;
 use crate::get_cache_dir;
 use anyhow::{Context, Result};
 use log::info;
