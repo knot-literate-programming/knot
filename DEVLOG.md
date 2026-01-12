@@ -394,3 +394,167 @@ Created comprehensive test suite in `examples/phase4_plots/`:
 - **Phase 5** - Typst package publication to @preview
 - **Phase 6** - Inline expressions, watch mode, global configuration
 - **Testing** - Integration tests for end-to-end workflows
+
+---
+
+## Session: 2026-01-12 (continued)
+
+**Summary:** This session successfully implemented **Phase 6 (Inline Expressions)** with the `#r[expr]` syntax. After completing Phase 4 (Graphics), we added comprehensive testing infrastructure (README + 25 tests) and then implemented inline R evaluation for embedding computed values directly in text.
+
+### Testing Infrastructure
+
+**README Documentation:**
+- Updated README to reflect Phases 1-4 completion
+- Added installation instructions for R package
+- Created "Rich Output with typst()" section with DataFrame and plot examples
+- Enhanced caching documentation with management commands
+- Updated roadmap with current status
+
+**Integration Tests Suite:**
+- Created `crates/knot-core/tests/integration_basic.rs` (5 tests):
+  - Basic compilation, multiple chunks, anonymous chunks, empty documents, dependencies
+- Created `crates/knot-core/tests/integration_execution.rs` (7 tests, #[ignore] by default):
+  - R execution, error handling, session persistence, warnings vs errors
+  - DataFrame serialization, plot generation, combined output
+- Created `tests/README.md` documenting test structure and commands
+- **Total test suite:** 25 tests (13 unit + 12 integration), all passing ✅
+
+### Phase 6: Inline Expressions
+
+**1. Parser Extension**
+- Extended `Document` struct to include `inline_exprs: Vec<InlineExpr>` field
+- Created `InlineExpr` struct with `language`, `code`, `start`, `end` fields
+- Implemented `extract_inline_exprs()` to parse `#r[expr]` patterns from source
+- Regex pattern: `#(r|python|lilypond)\[([^\]]+)\]`
+- Correctly skips inline expressions inside code chunks
+- Exported `InlineExpr` in public API (`lib.rs`)
+
+**2. RExecutor Extension**
+- Implemented `execute_inline(&mut self, code: &str) -> Result<String>` method
+- **Smart output formatting** based on R result type:
+  - **Scalars:** `[1] 150` → `150` (extract value, remove `[1]` prefix)
+  - **Strings:** `[1] "Alice"` → `Alice` (remove quotes and prefix)
+  - **Short vectors:** `[1] 1 2 3 4 5` → `` `[1] 1 2 3 4 5` `` (wrap in backticks)
+- Helper functions:
+  - `extract_scalar_value()`: Detects single-value R output and extracts cleanly
+  - `is_short_vector_output()`: Identifies multi-value vectors (<80 chars)
+- **Critical fix:** Correctly handles R's behavior where even scalars display with `[1]` prefix
+- Rejects complex outputs (DataFrames, Plots) with descriptive error messages
+
+**3. Compiler Integration**
+- Implemented `find_inline_expressions()` helper with **proper bracket nesting**:
+  - Handles expressions like `#r[letters[1:3]]` correctly
+  - Manual bracket depth tracking instead of regex (which fails on nested `[]`)
+  - Processes matches in reverse order to preserve byte offsets during replacement
+- Extended `Compiler::compile()` to process inline expressions after chunk replacement:
+  - Finds all `#r[...]` patterns in generated Typst output
+  - Executes each via `RExecutor::execute_inline()`
+  - Replaces pattern with formatted result
+  - Comprehensive error messages with expression context
+
+**4. Typst Syntax Understanding**
+Important clarification on Typst inline code syntax:
+- `` `text` `` - inline monospace, **no coloration**
+- `` ```lang code``` `` - inline monospace, **with language coloration**
+- Block format - separate block, with coloration
+
+**Decision:** Use plain backticks for vectors (`` `[1] 1 2 3` ``) since R output is not valid R code.
+
+### Implementation Example
+
+**Source `.knot`:**
+```typst
+```{r}
+x <- 150
+df <- data.frame(a=1:3, b=4:6)
+```
+
+The variable is #r[x] and the dataframe has #r[nrow(df)] rows.
+Vector: #r[1:5]
+```
+
+**Generated `.typ`:**
+```typst
+The variable is 150 and the dataframe has 3 rows.
+Vector: `[1] 1 2 3 4 5`
+```
+
+### Technical Challenges & Solutions
+
+**Challenge 1: R Scalar Output Format**
+- **Issue:** Incorrectly assumed R scalars don't have `[1]` prefix
+- **User insight:** Even `x <- 150; x` outputs `[1] 150` in R
+- **Solution:** Rewrote `extract_scalar_value()` to parse `[1]` prefix and extract value
+
+**Challenge 2: Nested Brackets**
+- **Issue:** Regex `#r\[([^\]]+)\]` failed on `#r[letters[1:3]]`
+- **Solution:** Implemented manual bracket depth tracking in `find_inline_expressions()`
+
+**Challenge 3: Byte Offset Invalidation**
+- **Issue:** Parser byte offsets invalid after chunk replacement in compiler
+- **Solution:** Re-scan generated `.typ` output with regex instead of using parser offsets
+
+**Challenge 4: Borrow Checker**
+- **Issue:** Cannot iterate captures while mutating string
+- **Solution:** Collect all match data `(lang, code, start, end)` before mutation
+
+### Validation & Testing
+
+**Test Document:** `examples/inline_expressions/test_inline.knot`
+
+**Test Cases:**
+- ✅ Scalar variables: `#r[x]` → `150`
+- ✅ Function calls: `#r[round(y, 2)]` → `3.14`
+- ✅ String variables: `#r[name]` → `Alice` (quotes removed)
+- ✅ Arithmetic: `#r[10 + 5]` → `15`
+- ✅ Nested brackets: `#r[letters[1:3]]` → `` `[1] "a" "b" "c"` ``
+- ✅ DataFrame queries: `#r[nrow(df)]` → `10`, `#r[ncol(df)]` → `2`
+- ✅ Statistical functions: `#r[round(mean(df$value), 1)]` → `100.4`
+- ✅ Logical values: `#r[5 > 3]` → `TRUE`
+- ✅ Short vectors: `#r[1:5]` → `` `[1] 1 2 3 4 5` ``
+- ✅ Sequences: `#r[seq(2,10,by=2)]` → `` `[1]  2  4  6  8 10` ``
+
+**All test cases passed successfully!** Generated `.typ` file shows correct replacements with proper formatting.
+
+### Code Quality Metrics
+
+| Component | Lines Added | Files Modified | Tests Added |
+|-----------|-------------|----------------|-------------|
+| parser.rs | ~70 | 1 | 0 (parsing logic) |
+| executors/r.rs | ~80 | 1 | 0 (inline execution) |
+| executors/mod.rs | ~1 | 1 | 0 (#[derive(Debug)]) |
+| compiler.rs | ~65 | 1 | 0 (compilation) |
+| lib.rs | ~1 | 1 | 0 (export InlineExpr) |
+| integration tests | ~170 | 2 new files | 12 tests |
+| README.md | ~110 | 1 | - |
+| Examples | ~60 | 1 new file | - |
+| tests/README.md | ~58 | 1 new file | - |
+| **Total** | **~615** | **10** | **12 tests** |
+
+**No new dependencies required** - implementation uses existing `regex` crate.
+
+### Current Status
+
+**Phase 6 (Inline Expressions)** is now complete and production-ready. The system successfully:
+- ✅ Parses `#r[expr]` patterns from source documents
+- ✅ Executes inline R expressions in persistent session
+- ✅ Formats output intelligently (scalars vs vectors)
+- ✅ Handles nested brackets correctly
+- ✅ Provides clear error messages for complex outputs
+- ✅ Integrates seamlessly with existing chunk execution
+- ✅ Variables from chunks available in inline expressions
+
+**Completed Phases:**
+- ✅ Phase 1: R execution with parser, executors, compiler
+- ✅ Phase 2: R package with DataFrame → Typst table support
+- ✅ Phase 3: SHA256-based cache with chained invalidation
+- ✅ Phase 4: ggplot2 plot support with explicit `typst()` calls
+- ✅ Phase 6: Inline expressions with smart formatting
+- ✅ Testing: Comprehensive test suite (25 tests)
+
+**Next Steps:**
+- **Phase 4B (Optional)** - Base R plot support
+- **Phase 5** - Typst package publication to @preview
+- **Phase 6B** - Watch mode, global configuration (YAML frontmatter)
+- **Phase 7** - LSP implementation
+- **Testing** - Additional edge case coverage

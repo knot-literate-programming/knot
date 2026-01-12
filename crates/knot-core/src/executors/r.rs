@@ -275,6 +275,106 @@ impl RExecutor {
 
         Ok(dest_path)
     }
+
+    /// Execute an inline R expression and return formatted result
+    ///
+    /// Returns either:
+    /// - Plain text for scalar values (e.g., "150", "hello", "TRUE")
+    /// - Backtick-wrapped text for vectors (e.g., "`[1] 1 2 3 4 5`")
+    ///
+    /// Fails if the result is too complex (DataFrame, Matrix, etc.)
+    pub fn execute_inline(&mut self, code: &str) -> Result<String> {
+        // Execute the code and get output
+        let result = self.execute(code)?;
+
+        // Extract text output
+        let output = match result {
+            ExecutionResult::Text(text) => text,
+            ExecutionResult::DataFrame(_) => {
+                anyhow::bail!("DataFrames are not supported in inline expressions. Use typst(df) in a chunk instead.")
+            }
+            ExecutionResult::Plot(_) => {
+                anyhow::bail!("Plots are not supported in inline expressions. Use typst(gg) in a chunk instead.")
+            }
+            ExecutionResult::TextAndPlot { .. } | ExecutionResult::DataFrameAndPlot { .. } => {
+                anyhow::bail!("Complex outputs are not supported in inline expressions.")
+            }
+        };
+
+        let trimmed = output.trim();
+
+        // Check if it's a scalar (single value with [1] prefix)
+        if let Some(scalar_value) = extract_scalar_value(trimmed) {
+            // Return just the value without [1] prefix
+            Ok(scalar_value)
+        }
+        // Check if it's a short vector
+        else if is_short_vector_output(trimmed) {
+            // Return with backticks (code inline, no coloration)
+            Ok(format!("`{}`", trimmed))
+        }
+        // Too complex
+        else {
+            anyhow::bail!(
+                "Inline expression result is too complex or long.\n\
+                 Result: {}\n\
+                 Inline expressions should return simple scalar values or short vectors.",
+                if trimmed.len() > 100 { &trimmed[..100] } else { trimmed }
+            )
+        }
+    }
+}
+
+/// Extract scalar value from R output
+/// R prints even scalars with [1] prefix, e.g., "[1] 150" or "[1] TRUE"
+/// This function extracts just the value part for clean inline display
+fn extract_scalar_value(s: &str) -> Option<String> {
+    // Must be single line
+    if s.contains('\n') {
+        return None;
+    }
+
+    // Must start with [1]
+    if !s.starts_with("[1]") {
+        return None;
+    }
+
+    // Extract the part after [1]
+    let after_prefix = s[3..].trim();
+
+    // Check if it's a single token (scalar)
+    let tokens: Vec<&str> = after_prefix.split_whitespace().collect();
+    if tokens.len() != 1 {
+        return None; // Multiple values = vector, not scalar
+    }
+
+    let value = tokens[0];
+
+    // Handle quoted strings: remove quotes
+    // R prints strings as [1] "Alice"
+    if value.starts_with('"') && value.ends_with('"') && value.len() > 1 {
+        Some(value[1..value.len() - 1].to_string())
+    } else {
+        Some(value.to_string())
+    }
+}
+
+/// Check if R output is a short vector (starts with [1], single line, < 80 chars)
+fn is_short_vector_output(s: &str) -> bool {
+    // Vector characteristics:
+    // - Single line
+    // - Starts with [1] (R vector notation)
+    // - More than one value after [1]
+    // - Reasonable length (< 80 chars for inline display)
+
+    if s.contains('\n') || !s.starts_with("[1]") || s.len() >= 80 {
+        return false;
+    }
+
+    // Check if there are multiple values (not handled by extract_scalar_value)
+    let after_prefix = s[3..].trim();
+    let tokens: Vec<&str> = after_prefix.split_whitespace().collect();
+    tokens.len() > 1
 }
 
 impl LanguageExecutor for RExecutor {

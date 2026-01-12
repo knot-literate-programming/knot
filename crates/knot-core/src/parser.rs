@@ -52,16 +52,27 @@ pub struct Chunk {
     pub code_range: Range,  // Position du code seul à l'intérieur
 }
 
+/// Inline expression (e.g., #r[nrow(df)])
+#[derive(Debug, Clone)]
+pub struct InlineExpr {
+    pub language: String,  // "r", "python", etc.
+    pub code: String,      // The expression to evaluate
+    pub start: usize,      // Byte offset in source
+    pub end: usize,        // Byte offset in source (exclusive)
+}
+
 pub struct Document {
     pub source: String,
     pub chunks: Vec<Chunk>,
+    pub inline_exprs: Vec<InlineExpr>,
 }
 
 impl Document {
     // La logique de parsing est basée sur la section 8.1
     pub fn parse(source: String) -> Result<Self> {
         let chunks = extract_chunks(&source)?;
-        Ok(Document { source, chunks })
+        let inline_exprs = extract_inline_exprs(&source, &chunks)?;
+        Ok(Document { source, chunks, inline_exprs })
     }
 }
 
@@ -192,6 +203,52 @@ fn offset_to_position(source: &str, offset: usize) -> Position {
         }
     }
     Position { line, column }
+}
+
+/// Extract inline expressions like #r[expr] from the source
+/// Excludes expressions that are inside code chunks
+fn extract_inline_exprs(source: &str, chunks: &[Chunk]) -> Result<Vec<InlineExpr>> {
+    use regex::Regex;
+
+    // Regex for inline expressions: #lang[code]
+    // Supports: #r[...], #python[...], etc.
+    let inline_regex = Regex::new(r"#(r|python|lilypond)\[([^\]]+)\]")?;
+
+    let mut inline_exprs = Vec::new();
+
+    for cap in inline_regex.captures_iter(source) {
+        let full_match = cap.get(0).unwrap();
+        let start = full_match.start();
+        let end = full_match.end();
+
+        // Skip if this position is inside a code chunk
+        if is_inside_chunk(start, chunks) {
+            continue;
+        }
+
+        let language = cap.get(1).unwrap().as_str().to_string();
+        let code = cap.get(2).unwrap().as_str().to_string();
+
+        inline_exprs.push(InlineExpr {
+            language,
+            code,
+            start,
+            end,
+        });
+    }
+
+    // Sort by position (start) for orderedprocessing
+    inline_exprs.sort_by_key(|e| e.start);
+
+    Ok(inline_exprs)
+}
+
+/// Check if a byte position is inside any code chunk
+fn is_inside_chunk(_pos: usize, _chunks: &[Chunk]) -> bool {
+    // TODO: Track byte offsets in Chunk for accurate detection
+    // For now, we don't exclude any positions (simplified implementation)
+    // A full implementation would check if pos falls within chunk.range byte offsets
+    false
 }
 
 // Section 6.1, Jour 3-4 : "Tests unitaires parser"

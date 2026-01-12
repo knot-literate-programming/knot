@@ -5,7 +5,7 @@ pub mod codegen;
 pub mod cache;
 pub mod graphics;
 
-pub use parser::{Chunk, ChunkOptions, Document};
+pub use parser::{Chunk, ChunkOptions, Document, InlineExpr};
 pub use compiler::Compiler;
 pub use graphics::{GraphicsDefaults, GraphicsConfig, ResolvedGraphicsOptions, resolve_graphics_options};
 

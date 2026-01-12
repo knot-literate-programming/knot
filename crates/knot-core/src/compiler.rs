@@ -9,6 +9,54 @@ use log::info;
 
 // From section 3.1 and 6.1 (Semaine 2) of the reference document
 
+/// Finds all inline expressions in the text, handling nested brackets correctly.
+/// Returns (language, code, start_pos, end_pos) tuples.
+fn find_inline_expressions(text: &str) -> Result<Vec<(String, String, usize, usize)>> {
+    use regex::Regex;
+
+    // Find starting positions of inline expressions: #r[, #python[, etc.
+    let start_regex = Regex::new(r"#(r|python|lilypond)\[")?;
+    let mut results = Vec::new();
+
+    for cap in start_regex.captures_iter(text) {
+        let language = cap.get(1).unwrap().as_str().to_string();
+        let match_start = cap.get(0).unwrap().start();
+        let code_start = cap.get(0).unwrap().end(); // Position after #r[
+
+        // Find the matching closing bracket, handling nesting
+        let mut depth = 1;
+        let mut code_end = code_start;
+
+        for (i, ch) in text[code_start..].char_indices() {
+            match ch {
+                '[' => depth += 1,
+                ']' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        code_end = code_start + i;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if depth != 0 {
+            anyhow::bail!(
+                "Unmatched bracket in inline expression starting at position {}",
+                match_start
+            );
+        }
+
+        let code = text[code_start..code_end].to_string();
+        let match_end = code_end + 1; // +1 for the closing ]
+
+        results.push((language, code, match_start, match_end));
+    }
+
+    Ok(results)
+}
+
 pub struct Compiler {
     r_executor: Option<RExecutor>,
     // In the future, we'll have more executors
@@ -182,6 +230,37 @@ impl Compiler {
         }
 
         info!("✓ All chunks processed.");
-        codegen.generate(doc)
+
+        // Generate Typst output with chunks replaced
+        let mut typst_output = codegen.generate(doc)?;
+
+        // Process inline expressions (e.g., #r[expr])
+        // We need to handle nested brackets properly (e.g., #r[letters[1:3]])
+        if !doc.inline_exprs.is_empty() {
+            info!("📝 Processing {} inline expressions...", doc.inline_exprs.len());
+
+            // Find all inline expressions with proper bracket matching
+            let matches = find_inline_expressions(&typst_output)?;
+
+            // Process in reverse order to maintain byte positions
+            for (language, code, start, end) in matches.into_iter().rev() {
+                if language == "r" {
+                    let result = self.r_executor
+                        .as_mut()
+                        .context("R executor not initialized")?
+                        .execute_inline(&code)
+                        .context(format!(
+                            "Failed to execute inline expression: #r[{}]",
+                            code
+                        ))?;
+
+                    // Replace #r[expr] with the executed result
+                    typst_output.replace_range(start..end, &result);
+                }
+                // Future: support other languages (python, lilypond)
+            }
+        }
+
+        Ok(typst_output)
     }
 }
