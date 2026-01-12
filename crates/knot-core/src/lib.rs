@@ -98,3 +98,92 @@ pub fn find_inline_expressions(text: &str) -> Result<Vec<(String, String, usize,
 
     Ok(results)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_find_inline_expressions_simple() {
+        let text = "The value is #r[x] and the sum is #r[a + b].";
+        let results = find_inline_expressions(text).unwrap();
+
+        assert_eq!(results.len(), 2);
+
+        assert_eq!(results[0].0, "r");
+        assert_eq!(results[0].1, "x");
+        assert_eq!(results[0].2, 13); // start position
+        assert_eq!(results[0].3, 18); // end position
+
+        assert_eq!(results[1].0, "r");
+        assert_eq!(results[1].1, "a + b");
+    }
+
+    #[test]
+    fn test_find_inline_expressions_nested_brackets() {
+        let text = "Vector: #r[letters[1:3]] and matrix #r[m[1,2]].";
+        let results = find_inline_expressions(text).unwrap();
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].1, "letters[1:3]");
+        assert_eq!(results[1].1, "m[1,2]");
+    }
+
+    #[test]
+    fn test_find_inline_expressions_escaped() {
+        let text = "Normal #r[x] and escaped \\#r[y] and another #r[z].";
+        let results = find_inline_expressions(text).unwrap();
+
+        // Only 2 expressions (escaped one should be skipped)
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].1, "x");
+        assert_eq!(results[1].1, "z");
+    }
+
+    #[test]
+    fn test_find_inline_expressions_multiple_languages() {
+        let text = "#r[x] and #python[len(s)] and #lilypond[c4].";
+        let results = find_inline_expressions(text).unwrap();
+
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].0, "r");
+        assert_eq!(results[1].0, "python");
+        assert_eq!(results[2].0, "lilypond");
+    }
+
+    #[test]
+    fn test_find_inline_expressions_unmatched_bracket() {
+        let text = "Incomplete #r[x + y";
+        let result = find_inline_expressions(text);
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Unmatched bracket"));
+    }
+
+    #[test]
+    fn test_find_inline_expressions_deeply_nested() {
+        let text = "#r[list[[1]][[2]]]";
+        let results = find_inline_expressions(text).unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].1, "list[[1]][[2]]");
+    }
+
+    #[test]
+    fn test_find_inline_expressions_empty_text() {
+        let text = "No inline expressions here.";
+        let results = find_inline_expressions(text).unwrap();
+
+        assert_eq!(results.len(), 0);
+    }
+
+    #[test]
+    fn test_find_inline_expressions_at_boundaries() {
+        let text = "#r[start] middle #r[end]";
+        let results = find_inline_expressions(text).unwrap();
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].1, "start");
+        assert_eq!(results[1].1, "end");
+    }
+}
