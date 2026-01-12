@@ -19,8 +19,14 @@ fn find_inline_expressions(text: &str) -> Result<Vec<(String, String, usize, usi
     let mut results = Vec::new();
 
     for cap in start_regex.captures_iter(text) {
-        let language = cap.get(1).unwrap().as_str().to_string();
         let match_start = cap.get(0).unwrap().start();
+
+        // Skip if the # is escaped with a backslash
+        if match_start > 0 && text.as_bytes()[match_start - 1] == b'\\' {
+            continue;
+        }
+
+        let language = cap.get(1).unwrap().as_str().to_string();
         let code_start = cap.get(0).unwrap().end(); // Position after #r[
 
         // Find the matching closing bracket, handling nesting

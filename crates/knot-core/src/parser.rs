@@ -221,6 +221,11 @@ fn extract_inline_exprs(source: &str, chunks: &[Chunk]) -> Result<Vec<InlineExpr
         let start = full_match.start();
         let end = full_match.end();
 
+        // Skip if the # is escaped with a backslash
+        if start > 0 && source.as_bytes()[start - 1] == b'\\' {
+            continue;
+        }
+
         // Skip if this position is inside a code chunk
         if is_inside_chunk(start, chunks) {
             continue;
