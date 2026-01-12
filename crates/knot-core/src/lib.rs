@@ -3,9 +3,11 @@ pub mod executors;
 pub mod compiler;
 pub mod codegen;
 pub mod cache;
+pub mod graphics;
 
 pub use parser::{Chunk, ChunkOptions, Document};
 pub use compiler::Compiler;
+pub use graphics::{GraphicsDefaults, GraphicsConfig, ResolvedGraphicsOptions, resolve_graphics_options};
 
 use once_cell::sync::Lazy;
 use regex::Regex;

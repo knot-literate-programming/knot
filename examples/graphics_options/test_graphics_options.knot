@@ -1,0 +1,64 @@
+#import "../../knot-typst-package/lib.typ": *
+#show: codly-init
+
+= Test Graphics Options
+
+This example demonstrates the new graphics options parsing (Phase 4 preparation).
+
+== Test 1: Default graphics settings
+
+This chunk will use the hardcoded defaults:
+- fig-width: 7 inches
+- fig-height: 5 inches
+- dpi: 300
+- format: svg
+
+```{r plot1}
+#| eval: false
+#| echo: true
+#| output: false
+# Defaults will be: 7x5 inches, 300 dpi, svg
+x <- 1:10
+y <- x^2
+plot(x, y, main = "Default size plot")
+```
+
+== Test 2: Custom chunk-level options
+
+This chunk overrides all graphics settings:
+
+```{r plot2}
+#| eval: false
+#| echo: true
+#| output: false
+#| fig-width: 10
+#| fig-height: 8
+#| dpi: 600
+#| fig-format: png
+#| fig-alt: "A large high-resolution scatter plot"
+library(ggplot2)
+ggplot(iris, aes(Sepal.Length, Sepal.Width, color = Species)) +
+  geom_point(size = 3) +
+  theme_minimal(base_size = 14)
+```
+
+== Test 3: Partial overrides
+
+This chunk only overrides width and dpi:
+
+```{r plot3}
+#| eval: false
+#| echo: true
+#| fig-width: 5
+#| dpi: 150
+# height: 5 (default), format: svg (default)
+hist(rnorm(1000), main = "Small plot, lower DPI")
+```
+
+== Notes
+
+Graphics rendering is not yet implemented (Phase 4).
+These options are parsed and will be used when we implement:
+- R device creation (svg/png/pdf)
+- ggsave() integration
+- Image export to `_knot_files/`

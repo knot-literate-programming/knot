@@ -33,6 +33,13 @@ pub struct ChunkOptions {
     pub label: Option<String>,
     pub caption: Option<String>,
     pub depends: Vec<PathBuf>,
+
+    // Graphics options (Phase 4)
+    pub fig_width: Option<f64>,
+    pub fig_height: Option<f64>,
+    pub dpi: Option<u32>,
+    pub fig_format: Option<String>,
+    pub fig_alt: Option<String>,
 }
 
 #[derive(Debug)]
@@ -94,6 +101,12 @@ fn parse_options(options_block: &str) -> Result<ChunkOptions> {
                         .map(|s| PathBuf::from(s.trim()))
                         .collect();
                 }
+                // Graphics options (Phase 4)
+                "fig-width" => options.fig_width = Some(parse_float(value)?),
+                "fig-height" => options.fig_height = Some(parse_float(value)?),
+                "dpi" => options.dpi = Some(parse_uint(value)?),
+                "fig-format" => options.fig_format = Some(value.to_string()),
+                "fig-alt" => options.fig_alt = Some(value.to_string()),
                 _ => {} // Ignorer les options inconnues pour le moment
             }
         }
@@ -108,6 +121,16 @@ fn parse_bool(s: &str) -> Result<bool> {
         "false" => Ok(false),
         _ => anyhow::bail!("Invalid boolean value: {}", s),
     }
+}
+
+fn parse_float(s: &str) -> Result<f64> {
+    s.parse::<f64>()
+        .map_err(|_| anyhow::anyhow!("Invalid float value: {}", s))
+}
+
+fn parse_uint(s: &str) -> Result<u32> {
+    s.parse::<u32>()
+        .map_err(|_| anyhow::anyhow!("Invalid unsigned integer value: {}", s))
 }
 
 // La logique d'extraction est basée sur la section 8.1
@@ -238,6 +261,28 @@ du texte entre
         let content = "Juste du texte, pas de chunks ici.";
         let doc = Document::parse(content.to_string()).unwrap();
         assert!(doc.chunks.is_empty());
+    }
+
+    #[test]
+    fn test_parse_graphics_options() {
+        let content = r#"```{r plot}
+#| fig-width: 10
+#| fig-height: 8
+#| dpi: 600
+#| fig-format: png
+#| fig-alt: A scatter plot
+ggplot(iris, aes(x, y)) + geom_point()
+```
+        "#;
+        let doc = Document::parse(content.to_string()).unwrap();
+        assert_eq!(doc.chunks.len(), 1);
+        let chunk = &doc.chunks[0];
+
+        assert_eq!(chunk.options.fig_width, Some(10.0));
+        assert_eq!(chunk.options.fig_height, Some(8.0));
+        assert_eq!(chunk.options.dpi, Some(600));
+        assert_eq!(chunk.options.fig_format, Some("png".to_string()));
+        assert_eq!(chunk.options.fig_alt, Some("A scatter plot".to_string()));
     }
 
     #[test]

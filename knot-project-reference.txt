@@ -814,6 +814,22 @@ DELIVERABLE : Recompilation rapide (~100ms pour cache hit complet)
 
 OBJECTIF : Support plots R et ggplot2
 
+NOTE (2026-01-11) : Deux approches possibles
+
+APPROCHE 4A - EXPORT BITMAP/VECTORIEL (PRIORITÉ, décrit ci-dessous) :
+  • Export SVG/PNG via ggsave() ou R devices
+  • Simple, éprouvé, compatible tout R graphics
+  • Utilise ExecutionResult::Plot existant
+
+APPROCHE 4B - EXPORT NATIF TYPST (FUTUR, EXPLORATOIRE) :
+  • Packages Typst : CeTZ ou Lilaq (https://lilaq.org)
+  • Nécessiterait convertisseur ggplot2 → CeTZ/Lilaq
+  • Avantages : vectoriel pur, éditable, thèmes cohérents
+  • Complexité : parser grammaire ggplot2, projet massif
+  • À considérer si convertisseur communautaire émerge
+
+DÉCISION : Commencer par 4A (pragmatique ci-dessous)
+
 IMPLÉMENTATION :
   • Redirection devices R (svg, png, pdf)
   • Méthode typst_output.ggplot()
