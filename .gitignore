@@ -2,6 +2,7 @@
 *.typ
 *.pdf
 .knot_cache/
+_knot_files/
 
 # Rust
 /target/
