@@ -1,0 +1,35 @@
+#set page(width: 210mm, margin: 25mm)
+#set text(font: "New Computer Modern", size: 11pt)
+
+= Minimal Plot Test
+
+== Test 1: Load ggplot2
+
+```{r}
+#| eval: true
+#| echo: true
+#| output: true
+library(ggplot2)
+print("ggplot2 loaded")
+```
+
+== Test 2: Create and export plot
+
+```{r}
+#| eval: true
+#| echo: true
+#| output: true
+gg <- ggplot(iris, aes(x = Sepal.Length, y = Sepal.Width)) +
+  geom_point()
+
+typst(gg)
+```
+
+== Test 3: Verify session persists
+
+```{r}
+#| eval: true
+#| echo: true
+#| output: true
+print(paste("ggplot2 still loaded:", "ggplot2" %in% (.packages())))
+```

@@ -5,3 +5,6 @@ Authors@R: person("Nicolas", "Klutchnikoff", email = "nicolas.klutchnikoff@gmail
 Description: Provides R functions and methods for seamless integration with the Knot literate programming system.
 License: MIT + file LICENSE
 Encoding: UTF-8
+Suggests:
+    ggplot2,
+    digest

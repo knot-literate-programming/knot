@@ -9,7 +9,8 @@ pub enum ExecutionResult {
     Text(String),
     Plot(PathBuf),
     DataFrame(PathBuf),
-    Both { text: String, plot: PathBuf },
+    TextAndPlot { text: String, plot: PathBuf },
+    DataFrameAndPlot { dataframe: PathBuf, plot: PathBuf },
 }
 
 pub trait LanguageExecutor {

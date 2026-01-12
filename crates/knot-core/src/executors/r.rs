@@ -108,43 +108,172 @@ impl RExecutor {
     }
 
     /// Parses the output from R to detect serialized data.
-    /// Currently supports __KNOT_SERIALIZED_CSV__ marker for dataframes.
+    /// Supports:
+    /// - __KNOT_SERIALIZED_CSV__ marker for dataframes
+    /// - __KNOT_SERIALIZED_PLOT__ marker for plots
     fn parse_output(&self, output: &str) -> Result<ExecutionResult> {
         const CSV_MARKER: &str = "__KNOT_SERIALIZED_CSV__";
+        const PLOT_MARKER: &str = "__KNOT_SERIALIZED_PLOT__";
 
-        if let Some(csv_start) = output.find(CSV_MARKER) {
-            // Extract the CSV content after the marker
-            let csv_content = &output[csv_start + CSV_MARKER.len()..];
-            let csv_content = csv_content.trim();
+        let csv_pos = output.find(CSV_MARKER);
+        let plot_pos = output.find(PLOT_MARKER);
 
-            if csv_content.is_empty() {
-                return Ok(ExecutionResult::Text(output.to_string()));
+        match (csv_pos, plot_pos) {
+            // Both markers present
+            (Some(csv_start), Some(plot_start)) => {
+                // Determine which comes first
+                if csv_start < plot_start {
+                    // CSV first, then plot
+                    let csv_content = self.extract_csv_content(output, csv_start)?;
+                    let csv_path = self.save_csv_to_cache(&csv_content)?;
+
+                    let plot_path = self.extract_plot_path(output, plot_start)?;
+                    let plot_cached = self.copy_plot_to_cache(&plot_path)?;
+
+                    Ok(ExecutionResult::DataFrameAndPlot {
+                        dataframe: csv_path,
+                        plot: plot_cached,
+                    })
+                } else {
+                    // Plot first, then CSV
+                    let plot_path = self.extract_plot_path(output, plot_start)?;
+                    let plot_cached = self.copy_plot_to_cache(&plot_path)?;
+
+                    let csv_content = self.extract_csv_content(output, csv_start)?;
+                    let csv_path = self.save_csv_to_cache(&csv_content)?;
+
+                    Ok(ExecutionResult::DataFrameAndPlot {
+                        dataframe: csv_path,
+                        plot: plot_cached,
+                    })
+                }
             }
 
-            // Generate a unique filename based on timestamp and content hash
-            use sha2::{Digest, Sha256};
-            let mut hasher = Sha256::new();
-            hasher.update(csv_content.as_bytes());
-            let hash = format!("{:x}", hasher.finalize());
-            let filename = format!("dataframe_{}.csv", &hash[..16]);
-            let csv_path = self.cache_dir.join(&filename);
+            // Only CSV marker
+            (Some(csv_start), None) => {
+                let csv_content = self.extract_csv_content(output, csv_start)?;
+                let csv_path = self.save_csv_to_cache(&csv_content)?;
 
-            // Save CSV to cache
-            std::fs::write(&csv_path, csv_content)
-                .context("Failed to write CSV to cache")?;
+                // Check if there's text output before the marker
+                let text_before = output[..csv_start].trim();
+                if !text_before.is_empty() {
+                    log::warn!("Text output before dataframe is currently ignored");
+                }
 
-            // Return the rest of the output as text if there's any before the marker
-            let text_before = output[..csv_start].trim();
-            if !text_before.is_empty() {
-                // TODO: Support Both { text, dataframe } in the future
-                log::warn!("Text output before dataframe is currently ignored");
+                Ok(ExecutionResult::DataFrame(csv_path))
             }
 
-            Ok(ExecutionResult::DataFrame(csv_path))
-        } else {
+            // Only plot marker
+            (None, Some(plot_start)) => {
+                let plot_path = self.extract_plot_path(output, plot_start)?;
+                let plot_cached = self.copy_plot_to_cache(&plot_path)?;
+
+                // Check if there's text output before the marker
+                let text_before = output[..plot_start].trim();
+                if !text_before.is_empty() {
+                    log::warn!("Text output before plot is currently ignored");
+                }
+
+                Ok(ExecutionResult::Plot(plot_cached))
+            }
+
             // No special markers, return as plain text
-            Ok(ExecutionResult::Text(output.to_string()))
+            (None, None) => Ok(ExecutionResult::Text(output.to_string())),
         }
+    }
+
+    /// Extracts CSV content after the marker
+    fn extract_csv_content(&self, output: &str, marker_pos: usize) -> Result<String> {
+        const CSV_MARKER: &str = "__KNOT_SERIALIZED_CSV__";
+        const PLOT_MARKER: &str = "__KNOT_SERIALIZED_PLOT__";
+
+        let content_start = marker_pos + CSV_MARKER.len();
+
+        // Find the end: either the next marker or end of string
+        let content_end = output[content_start..]
+            .find(PLOT_MARKER)
+            .map(|pos| content_start + pos)
+            .unwrap_or(output.len());
+
+        let csv_content = output[content_start..content_end].trim();
+
+        if csv_content.is_empty() {
+            anyhow::bail!("Empty CSV content after marker");
+        }
+
+        Ok(csv_content.to_string())
+    }
+
+    /// Extracts plot file path after the marker
+    fn extract_plot_path(&self, output: &str, marker_pos: usize) -> Result<PathBuf> {
+        const PLOT_MARKER: &str = "__KNOT_SERIALIZED_PLOT__";
+        const CSV_MARKER: &str = "__KNOT_SERIALIZED_CSV__";
+
+        let content_start = marker_pos + PLOT_MARKER.len();
+
+        // Find the end: either the next marker or end of string
+        let content_end = output[content_start..]
+            .find(CSV_MARKER)
+            .map(|pos| content_start + pos)
+            .unwrap_or(output.len());
+
+        let plot_path_str = output[content_start..content_end].trim();
+
+        if plot_path_str.is_empty() {
+            anyhow::bail!("Empty plot path after marker");
+        }
+
+        let plot_path = PathBuf::from(plot_path_str);
+
+        if !plot_path.exists() {
+            anyhow::bail!("Plot file not found: {:?}", plot_path);
+        }
+
+        Ok(plot_path)
+    }
+
+    /// Saves CSV content to cache
+    fn save_csv_to_cache(&self, csv_content: &str) -> Result<PathBuf> {
+        use sha2::{Digest, Sha256};
+
+        let mut hasher = Sha256::new();
+        hasher.update(csv_content.as_bytes());
+        let hash = format!("{:x}", hasher.finalize());
+        let filename = format!("dataframe_{}.csv", &hash[..16]);
+        let csv_path = self.cache_dir.join(&filename);
+
+        std::fs::write(&csv_path, csv_content)
+            .context("Failed to write CSV to cache")?;
+
+        Ok(csv_path)
+    }
+
+    /// Copies plot file to cache with content-based naming
+    fn copy_plot_to_cache(&self, source_path: &PathBuf) -> Result<PathBuf> {
+        use sha2::{Digest, Sha256};
+
+        // Read the plot file to compute hash
+        let plot_content = std::fs::read(source_path)
+            .context("Failed to read plot file")?;
+
+        let mut hasher = Sha256::new();
+        hasher.update(&plot_content);
+        let hash = format!("{:x}", hasher.finalize());
+
+        // Preserve the file extension
+        let extension = source_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("svg");
+
+        let filename = format!("plot_{}.{}", &hash[..16], extension);
+        let dest_path = self.cache_dir.join(&filename);
+
+        // Copy the file to cache
+        std::fs::copy(source_path, &dest_path)
+            .context("Failed to copy plot to cache")?;
+
+        Ok(dest_path)
     }
 }
 
@@ -243,13 +372,27 @@ impl LanguageExecutor for RExecutor {
             )
         });
 
+        // Check if stderr contains actual errors (not just warnings/messages)
         if !stderr_output.trim().is_empty() {
-            anyhow::bail!(
-                "R execution failed:\n\n--- Code ---\n{}\n\n--- Stderr ---\n{}\n\n--- Stdout ---\n{}",
-                code,
-                stderr_output.trim(),
-                stdout_output.trim()
-            );
+            let stderr_lower = stderr_output.to_lowercase();
+            let is_error = stderr_lower.contains("error")
+                || stderr_lower.contains("erreur")
+                || stderr_lower.contains("execution arrêtée")
+                || stderr_lower.contains("execution halted")
+                || stderr_lower.contains("could not find function")
+                || stderr_lower.contains("objet") && stderr_lower.contains("introuvable");
+
+            if is_error {
+                anyhow::bail!(
+                    "R execution failed:\n\n--- Code ---\n{}\n\n--- Stderr ---\n{}\n\n--- Stdout ---\n{}",
+                    code,
+                    stderr_output.trim(),
+                    stdout_output.trim()
+                );
+            } else {
+                // Just warnings or informational messages, log them but don't fail
+                log::warn!("R stderr (informational): {}", stderr_output.trim());
+            }
         }
 
         // Check if output contains serialized data from knot.r.package

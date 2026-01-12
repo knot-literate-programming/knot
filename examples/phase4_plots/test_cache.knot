@@ -1,0 +1,24 @@
+#import "../../knot-typst-package/lib.typ": *
+#show: codly-init
+
+= Cache Invalidation Test
+
+This tests that changing plot options invalidates the cache.
+
+== Initial Plot
+
+```{r plot-test}
+#| eval: true
+#| echo: true
+#| output: true
+library(ggplot2)
+
+gg <- ggplot(iris, aes(x = Sepal.Length, y = Sepal.Width)) +
+  geom_point()
+
+# Second compilation: width=10, height=6 (changed!)
+typst(gg, width=10, height=6)
+```
+
+Now change the line above to `typst(gg, width=10, height=6)` and recompile.
+The cache should be invalidated and a new plot should be generated!

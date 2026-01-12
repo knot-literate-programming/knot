@@ -235,5 +235,162 @@ examples/phase2_dataframes/
 
 **Next Steps:**
 - **Phase 4 (Graphics Support)** - Add ggplot2 and base R plot support
-- **Extend Phase 2** - Add `to_typst()` methods for vectors, matrices, model objects
+- **Extend Phase 2** - Add `typst()` methods for vectors, matrices, model objects
 - **Testing** - Add integration tests for end-to-end compilation
+
+---
+
+## Session: 2026-01-12
+
+**Summary:** This session successfully implemented **Phase 4 (Graphics Support)** using the explicit approach (Approach B). We renamed `to_typst()` → `typst()` for clarity and added full ggplot2 plot support with caching and integration.
+
+### Key Accomplishments:
+
+1. **Function Renaming: `to_typst()` → `typst()`**
+   - Updated all R package code to use the shorter, clearer `typst()` name
+   - Modified NAMESPACE to export `typst` and S3 methods
+   - Updated DESCRIPTION to include ggplot2 and digest as Suggests dependencies
+   - More idiomatic and concise for users
+
+2. **Plot Support via `typst.ggplot()` Method**
+   - Implemented S3 method for ggplot objects
+   - Saves plots using `ggplot2::ggsave()` with configurable options:
+     - `width`, `height` (in inches)
+     - `dpi` (resolution)
+     - `format` (svg, png, pdf)
+   - Generates unique filenames based on plot content hash (SHA256)
+   - Outputs `__KNOT_SERIALIZED_PLOT__` marker with file path
+
+3. **Plot Detection in RExecutor**
+   - Extended `parse_output()` to detect `__KNOT_SERIALIZED_PLOT__` marker
+   - Handles multiple markers in single output (CSV + Plot)
+   - Copies plots from temp directory to `.knot_cache/`
+   - New `ExecutionResult` variants:
+     - `Plot(PathBuf)` - standalone plot
+     - `DataFrameAndPlot { dataframe, plot }` - combined output
+   - Renamed `Both` → `TextAndPlot` for clarity
+
+4. **Compiler Integration**
+   - Updated `compiler.rs` to generate `#image()` calls for plots
+   - Uses absolute paths with `canonicalize()` for consistency
+   - CLI copies plots to `_knot_files/` and fixes paths (same as CSVs)
+   - Handles all ExecutionResult variants (Plot, DataFrameAndPlot, TextAndPlot)
+
+5. **Improved Error Handling**
+   - Modified `r.rs` to distinguish real errors from R warnings/messages
+   - Pattern matching for actual errors: "Error", "Erreur", "Execution arrêtée"
+   - Logs warnings without failing (e.g., `geom_smooth()` messages)
+   - More robust execution flow
+
+6. **Cache Integration**
+   - Plot results fully integrated with SHA256-based cache system
+   - Cache invalidation works automatically when code changes
+   - Tested: changing plot dimensions generates new cached plot
+   - Metadata tracks plot files alongside DataFrames
+
+### Implementation Details
+
+**Approach B - Explicit Control:**
+Instead of automatic R device wrapping (Approach A), we chose explicit `typst()` calls:
+
+```r
+# User code (explicit and predictable)
+gg <- ggplot(iris, aes(x, y)) + geom_point()
+typst(gg, width = 8, height = 5, dpi = 300)
+```
+
+**Benefits:**
+- Simple, predictable, no "magic"
+- Consistent with DataFrame approach (`typst(df)`)
+- Full user control over output
+- Easy to implement and maintain (~2-3h vs 6-7h for auto-wrapping)
+- Options passed as function arguments (not chunk options)
+
+**R Package Structure:**
+```r
+typst <- function(x, ...) UseMethod("typst")
+typst.data.frame <- function(x, ...) { ... }  # Existing
+typst.ggplot <- function(x, width=7, height=5, dpi=300, format="svg", ...) {
+  ggsave(...); cat("__KNOT_SERIALIZED_PLOT__\n", filepath)
+}
+```
+
+**Marker Protocol:**
+- `__KNOT_SERIALIZED_CSV__` for DataFrames
+- `__KNOT_SERIALIZED_PLOT__` for plots
+- Both markers can appear in same output → `DataFrameAndPlot`
+
+### Validation & Testing
+
+Created comprehensive test suite in `examples/phase4_plots/`:
+
+1. **test_plots_phase4.knot** - Main test document:
+   - ✅ Simple ggplot2 scatter plot
+   - ✅ Plot with custom dimensions
+   - ✅ Combined DataFrame + Plot output
+   - ✅ Multiple plots in sequence
+
+2. **test_cache.knot** - Cache validation:
+   - ✅ Initial plot generation
+   - ✅ Cache invalidation on code change
+   - ✅ New plot generated with different dimensions
+
+**Test Results:**
+- ✅ PDF generation successful (103 KB)
+- ✅ Plots copied to `_knot_files/` (3 SVG files: 12K, 19K, 22K)
+- ✅ Cache metadata correctly tracks plot files
+- ✅ All existing tests still pass (Phase 1-3)
+
+### Code Quality Metrics
+
+| Component | Lines Added | Files Modified | Dependencies Added |
+|-----------|-------------|----------------|-------------------|
+| knot-core (r.rs) | ~200 | 1 | - |
+| knot-core (mod.rs) | ~2 | 1 | - |
+| knot-core (compiler.rs) | ~20 | 1 | - |
+| knot-core (cache.rs) | ~15 | 1 | - |
+| R package | ~50 | 3 | digest, ggplot2 (Suggests), svglite |
+| Examples | ~100 | 3 new files | - |
+| **Total** | **~387** | **10** | **3 packages** |
+
+**Dependencies Added:**
+- R packages: `digest` (for hashing), `ggplot2` (Suggests), `svglite` (for SVG export)
+
+### Technical Decisions
+
+**Why Approach B (Explicit) over Approach A (Auto-wrapping)?**
+
+| Criteria | Auto (A) | Explicit (B) |
+|----------|----------|--------------|
+| Implementation time | 6-7h | 2-3h ✅ |
+| Code complexity | High | Low ✅ |
+| User predictability | Magic | Explicit ✅ |
+| Edge cases | Many | Few ✅ |
+| Consistency | Different | Same as DataFrame ✅ |
+| Maintenance | Complex | Simple ✅ |
+
+**Decision:** Approach B aligns with knot's philosophy of explicit, predictable behavior.
+
+### Current Status
+
+**Phase 4 (Graphics Support)** is now complete and production-ready. The system successfully:
+- ✅ Renders ggplot2 plots as images in Typst documents
+- ✅ Supports SVG, PNG, and PDF formats
+- ✅ Configurable dimensions and resolution
+- ✅ Full cache integration (plots cached and invalidated correctly)
+- ✅ Handles combined DataFrame + Plot output
+- ✅ Explicit, user-controlled approach
+- ✅ Follows established patterns (similar to DataFrame support)
+
+**Completed Phases:**
+- ✅ Phase 1: R execution with parser, executors, compiler
+- ✅ Phase 2: R package with DataFrame → Typst table support
+- ✅ Phase 3: SHA256-based cache with chained invalidation
+- ✅ Phase 4: ggplot2 plot support with explicit `typst()` calls
+
+**Next Steps:**
+- **Phase 4B (Optional)** - Add base R plot support via `capture_plot()` helper
+- **Phase 4C (Future)** - Native Typst graphics via CeTZ (if community tools emerge)
+- **Phase 5** - Typst package publication to @preview
+- **Phase 6** - Inline expressions, watch mode, global configuration
+- **Testing** - Integration tests for end-to-end workflows

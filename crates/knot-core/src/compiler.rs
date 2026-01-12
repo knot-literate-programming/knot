@@ -112,7 +112,10 @@ impl Compiler {
                         format!("[```\n{}```]", text.trim())
                     }
                     ExecutionResult::Plot(path) => {
-                        format!("[#image(\"{}\")]", path.to_string_lossy())
+                        // Convert to absolute path for Typst
+                        let abs_plot = path.canonicalize()
+                            .unwrap_or_else(|_| path.clone());
+                        format!("[#image(\"{}\")]", abs_plot.to_string_lossy())
                     }
                     ExecutionResult::DataFrame(csv_path) => {
                         // Convert to absolute path for Typst
@@ -121,11 +124,26 @@ impl Compiler {
                         // Generate Typst code that reads CSV once and creates a table
                         format!("[#{{ let data = csv(\"{}\"); table(columns: data.first().len(), ..data.flatten()) }}]", abs_csv.to_string_lossy())
                     }
-                    ExecutionResult::Both { text, plot } => {
+                    ExecutionResult::TextAndPlot { text, plot } => {
+                        let abs_plot = plot.canonicalize()
+                            .unwrap_or_else(|_| plot.clone());
                         format!(
                             "[#image(\"{}\")\n```\n{}```]",
-                            plot.to_string_lossy(),
+                            abs_plot.to_string_lossy(),
                             text.trim()
+                        )
+                    }
+                    ExecutionResult::DataFrameAndPlot { dataframe, plot } => {
+                        let abs_csv = dataframe
+                            .canonicalize()
+                            .unwrap_or_else(|_| dataframe.clone());
+                        let abs_plot = plot
+                            .canonicalize()
+                            .unwrap_or_else(|_| plot.clone());
+                        format!(
+                            "[#{{ let data = csv(\"{}\"); table(columns: data.first().len(), ..data.flatten()) }}\n#image(\"{}\")]",
+                            abs_csv.to_string_lossy(),
+                            abs_plot.to_string_lossy()
                         )
                     }
                     _ => "none".to_string(),

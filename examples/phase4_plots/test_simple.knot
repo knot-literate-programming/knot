@@ -1,0 +1,40 @@
+#import "@local/knot-typst-package:0.1.0": code-chunk
+#show: codly-init
+
+#set page(width: 210mm, margin: 25mm)
+#set text(font: "New Computer Modern", size: 11pt)
+
+#align(center)[
+  #text(size: 18pt, weight: "bold")[Simple Plot Test]
+]
+
+= Test 1: Load ggplot2
+
+```{r}
+#| eval: true
+#| echo: true
+#| output: true
+library(ggplot2)
+print("ggplot2 loaded successfully")
+```
+
+= Test 2: Create simple plot
+
+```{r}
+#| eval: true
+#| echo: true
+#| output: true
+gg <- ggplot(iris, aes(x = Sepal.Length, y = Sepal.Width)) +
+  geom_point()
+
+typst(gg)
+```
+
+= Test 3: Verify ggplot2 is still loaded
+
+```{r}
+#| eval: true
+#| echo: true
+#| output: true
+print(paste("ggplot2 version:", packageVersion("ggplot2")))
+```

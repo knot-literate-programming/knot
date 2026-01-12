@@ -1,3 +1,4 @@
-export(to_typst)
-S3method(to_typst, default)
-S3method(to_typst, data.frame)
+export(typst)
+S3method(typst, default)
+S3method(typst, data.frame)
+S3method(typst, ggplot)

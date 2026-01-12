@@ -143,13 +143,22 @@ impl Cache {
                     .to_string();
                 vec![filename]
             }
-            ExecutionResult::Both { text, plot } => {
+            ExecutionResult::TextAndPlot { text, plot } => {
                 let text_filename = format!("chunk_{}.txt", hash);
                 let text_path = self.cache_dir.join(&text_filename);
                 fs::write(&text_path, text)?;
 
                 let plot_filename = plot.file_name().unwrap().to_string_lossy().to_string();
                 vec![text_filename, plot_filename]
+            }
+            ExecutionResult::DataFrameAndPlot { dataframe, plot } => {
+                let dataframe_filename = dataframe
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string();
+                let plot_filename = plot.file_name().unwrap().to_string_lossy().to_string();
+                vec![dataframe_filename, plot_filename]
             }
             _ => {
                 // Don't cache empty results
