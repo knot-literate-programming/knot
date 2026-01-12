@@ -39,7 +39,7 @@ pub fn get_cache_dir() -> PathBuf {
 /// Shared regex pattern for detecting inline expression starts: #r[, #python[, etc.
 /// Used by both parser and compiler to ensure consistency.
 static INLINE_EXPR_START: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"#(r|python|lilypond)\[")
+    Regex::new(r"#(r|python|lilypond)(?::(\w+))?\[")
         .expect("Failed to compile INLINE_EXPR_START regex")
 });
 
@@ -50,8 +50,8 @@ static INLINE_EXPR_START: Lazy<Regex> = Lazy::new(|| {
 /// - Nested brackets (e.g., `#r[letters[1:3]]`)
 /// - Escaped expressions (e.g., `\#r[x]` is ignored)
 ///
-/// Returns a vector of `(language, code, start_pos, end_pos)` tuples.
-pub fn find_inline_expressions(text: &str) -> Result<Vec<(String, String, usize, usize)>> {
+/// Returns a vector of `(language, code, start_pos, end_pos, verb)` tuples.
+pub fn find_inline_expressions(text: &str) -> Result<Vec<(String, String, usize, usize, Option<String>)>> {
     let mut results = Vec::new();
 
     for cap in INLINE_EXPR_START.captures_iter(text) {
@@ -63,7 +63,8 @@ pub fn find_inline_expressions(text: &str) -> Result<Vec<(String, String, usize,
         }
 
         let language = cap.get(1).unwrap().as_str().to_string();
-        let code_start = cap.get(0).unwrap().end(); // Position after #r[
+        let verb = cap.get(2).map(|m| m.as_str().to_string());
+        let code_start = cap.get(0).unwrap().end(); // Position after #r[ or #r:verb[
 
         // Find the matching closing bracket, handling nesting
         let mut depth = 1;
@@ -93,7 +94,7 @@ pub fn find_inline_expressions(text: &str) -> Result<Vec<(String, String, usize,
         let code = text[code_start..code_end].to_string();
         let match_end = code_end + 1; // +1 for the closing ]
 
-        results.push((language, code, match_start, match_end));
+        results.push((language, code, match_start, match_end, verb));
     }
 
     Ok(results)

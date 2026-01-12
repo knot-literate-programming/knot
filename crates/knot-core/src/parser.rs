@@ -50,6 +50,8 @@ pub struct Chunk {
     pub options: ChunkOptions,
     pub range: Range,       // Position du chunk entier (de ```{r} à ```)
     pub code_range: Range,  // Position du code seul à l'intérieur
+    pub start_byte: usize,
+    pub end_byte: usize,
 }
 
 /// Inline expression (e.g., #r[nrow(df)])
@@ -59,6 +61,7 @@ pub struct InlineExpr {
     pub code: String,      // The expression to evaluate
     pub start: usize,      // Byte offset in source
     pub end: usize,        // Byte offset in source (exclusive)
+    pub verb: Option<String>,
 }
 
 pub struct Document {
@@ -182,6 +185,8 @@ fn extract_chunks(source: &str) -> Result<Vec<Chunk>> {
             options,
             range: chunk_range,
             code_range: code_range,
+            start_byte: chunk_start_offset,
+            end_byte: chunk_end_offset,
         });
     }
 
@@ -213,7 +218,7 @@ fn extract_inline_exprs(source: &str, chunks: &[Chunk]) -> Result<Vec<InlineExpr
 
     let mut inline_exprs = Vec::new();
 
-    for (language, code, start, end) in matches {
+    for (language, code, start, end, verb) in matches {
         // Skip if this position is inside a code chunk
         if is_inside_chunk(start, chunks) {
             continue;
@@ -224,6 +229,7 @@ fn extract_inline_exprs(source: &str, chunks: &[Chunk]) -> Result<Vec<InlineExpr
             code,
             start,
             end,
+            verb,
         });
     }
 

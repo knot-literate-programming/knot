@@ -14,6 +14,7 @@ use std::path::PathBuf;
 pub struct CacheMetadata {
     pub document_hash: String,
     pub chunks: Vec<ChunkCacheEntry>,
+    pub inline_expressions: Vec<InlineCacheEntry>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -23,6 +24,13 @@ pub struct ChunkCacheEntry {
     pub hash: String,
     pub files: Vec<String>,
     pub dependencies: Vec<String>,
+    pub updated_at: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct InlineCacheEntry {
+    pub hash: String,
+    pub result: String,
     pub updated_at: String,
 }
 
@@ -74,6 +82,47 @@ impl Cache {
         let mut hasher = Sha256::new();
         hasher.update(chunk_content.as_bytes());
         format!("{:x}", hasher.finalize())
+    }
+
+    pub fn get_inline_expr_hash(
+        &self,
+        code: &str,
+        verb: &Option<String>,
+        previous_hash: &str,
+    ) -> String {
+        let verb_str = verb.as_deref().unwrap_or("none");
+        let inline_content = format!("{}|{}|{}", code, verb_str, previous_hash);
+
+        let mut hasher = Sha256::new();
+        hasher.update(inline_content.as_bytes());
+        format!("{:x}", hasher.finalize())
+    }
+
+    pub fn has_cached_inline_result(&self, hash: &str) -> bool {
+        self.metadata.inline_expressions.iter().any(|entry| entry.hash == hash)
+    }
+
+    pub fn get_cached_inline_result(&self, hash: &str) -> Result<String> {
+        let entry = self.metadata
+            .inline_expressions
+            .iter()
+            .find(|e| e.hash == hash)
+            .ok_or_else(|| anyhow!("Inline cache entry with hash {} not found", hash))?;
+        Ok(entry.result.clone())
+    }
+
+    pub fn save_inline_result(&mut self, hash: String, result: &str) -> Result<()> {
+        let new_entry = InlineCacheEntry {
+            hash: hash.clone(),
+            result: result.to_string(),
+            updated_at: Utc::now().to_rfc3339(),
+        };
+
+        self.metadata.inline_expressions.retain(|entry| entry.hash != hash);
+        self.metadata.inline_expressions.push(new_entry);
+
+        self.save_metadata()?;
+        Ok(())
     }
 
     pub fn has_cached_result(&self, hash: &str) -> bool {
