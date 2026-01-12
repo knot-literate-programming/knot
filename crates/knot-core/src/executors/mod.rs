@@ -5,6 +5,7 @@ pub mod r;
 
 // From section 3.3 of the reference document
 
+#[derive(Debug)]
 pub enum ExecutionResult {
     Text(String),
     Plot(PathBuf),
