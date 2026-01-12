@@ -94,7 +94,7 @@ All changes validated with comprehensive testing:
 - ✅ `cargo test`: All 8 unit tests passing (parser + cache)
 - ✅ `knot init`: Template creation successful
 - ✅ `knot compile`: PDF generation working correctly
-- ✅ Cache verification: Second compilation shows `[cached]` for all chunks
+- ✅ Cache verification: Second compilation shows `[cached]` on all chunks
 - ✅ Cache location: Files correctly in `.knot_cache/` directory
 
 **Cache structure verified:**
@@ -189,7 +189,7 @@ impl RExecutor {
 **Path Resolution:**
 - Compiler generates absolute paths initially
 - CLI post-processes `.typ` file to copy CSVs and fix paths
-- Regex pattern: `"(/[^\"]+\.knot_cache/[^\"]+)"` → `"_knot_files/{filename}"`
+- Regex pattern: `"(/[^"]+\.knot_cache/[^"]+)"` → `"_knot_files/{filename}"`
 
 ### Validation & Testing
 
@@ -393,7 +393,7 @@ Created comprehensive test suite in `examples/phase4_plots/`:
 - **Phase 4C (Future)** - Native Typst graphics via CeTZ (if community tools emerge)
 - **Phase 5** - Typst package publication to @preview
 - **Phase 6** - Inline expressions, watch mode, global configuration
-- **Testing** - Integration tests for end-to-end workflows
+- **Testing** - Additional edge case coverage
 
 ---
 
@@ -549,11 +549,10 @@ Vector: `[1] 1 2 3 4 5`
 - ✅ Phase 2: R package with DataFrame → Typst table support
 - ✅ Phase 3: SHA256-based cache with chained invalidation
 - ✅ Phase 4: ggplot2 plot support with explicit `typst()` calls
-- ✅ Phase 6: Inline expressions with smart formatting
-- ✅ Testing: Comprehensive test suite (25 tests)
 
 **Next Steps:**
-- **Phase 4B (Optional)** - Base R plot support
+- **Phase 4B (Optional)** - Add base R plot support via `capture_plot()` helper
+- **Phase 4C (Future)** - Native Typst graphics via CeTZ (if community tools emerge)
 - **Phase 5** - Typst package publication to @preview
 - **Phase 6B** - Watch mode, global configuration (YAML frontmatter)
 - **Phase 7** - LSP implementation
