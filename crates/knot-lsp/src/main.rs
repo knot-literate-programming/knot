@@ -80,11 +80,28 @@ impl LanguageServer for KnotLanguageServer {
 
         // Try to spawn tinymist subprocess
         match TinymistProxy::spawn().await {
-            Ok(proxy) => {
+            Ok((proxy, mut notification_rx)) => {
                 self.client
                     .log_message(MessageType::INFO, "Tinymist proxy spawned successfully")
                     .await;
                 *self.tinymist.write().await = Some(proxy);
+
+                // Spawn a task to handle notifications from tinymist
+                let client = self.client.clone();
+                tokio::spawn(async move {
+                    while let Some(msg) = notification_rx.recv().await {
+                        // For now, just log that we received a notification
+                        // In Phase 2, we will process diagnostics here
+                        if let Some(method) = msg.get("method").and_then(|m| m.as_str()) {
+                             client
+                                .log_message(
+                                    MessageType::LOG, 
+                                    format!("Received notification from tinymist: {}", method)
+                                )
+                                .await;
+                        }
+                    }
+                });
             }
             Err(e) => {
                 self.client

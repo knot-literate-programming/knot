@@ -4,23 +4,31 @@
 // It handles:
 // - Spawning and managing the tinymist process
 // - Sending LSP requests via JSON-RPC
-// - Receiving LSP responses and notifications
+// - Receiving LSP responses and notifications asynchronously
 // - Graceful shutdown
 
 use anyhow::{Context, Result};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::process::{Child, ChildStdin, Command};
+use tokio::sync::{mpsc, oneshot, Mutex};
 
 /// A proxy to a tinymist LSP subprocess
 pub struct TinymistProxy {
-    child: Child,
+    /// Writer to send data to tinymist's stdin
     stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
+    /// Handle to the child process (kept for shutdown)
+    child: Option<Child>,
+    /// Counter for request IDs
     request_id: Arc<AtomicU64>,
+    /// Map of pending requests (ID -> Sender)
+    /// When we send a request, we store a sender here.
+    /// The background reader task will look it up when a response arrives.
+    pending_requests: Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value>>>>>,
 }
 
 // ============================================================================
@@ -31,9 +39,9 @@ impl TinymistProxy {
     /// Spawn a new tinymist subprocess
     ///
     /// # Returns
-    /// * `Ok(proxy)` - Successfully spawned and initialized tinymist
+    /// * `Ok((proxy, notification_receiver))` - Proxy for sending requests + Receiver for notifications
     /// * `Err(_)` - Failed to spawn or initialize
-    pub async fn spawn() -> Result<Self> {
+    pub async fn spawn() -> Result<(Self, mpsc::Receiver<Value>)> {
         // Try to find tinymist in PATH
         let tinymist_path = which::which("tinymist")
             .context("tinymist not found in PATH. Install from: https://github.com/Myriad-Dreamin/tinymist")?;
@@ -43,41 +51,127 @@ impl TinymistProxy {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit()) // Forward stderr for debugging
+            .kill_on_drop(true) // Ensure child is killed if handle is dropped
             .spawn()
             .context("Failed to spawn tinymist process")?;
 
         let stdin = child.stdin.take().context("Failed to get stdin")?;
         let stdout = child.stdout.take().context("Failed to get stdout")?;
-        let stdout = BufReader::new(stdout);
+        let stdout_reader = BufReader::new(stdout);
+
+        let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+        let (notification_tx, notification_rx) = mpsc::channel(100);
+
+        // Spawn background task to read from tinymist
+        let pending_requests_clone = pending_requests.clone();
+        tokio::spawn(async move {
+            if let Err(e) = Self::read_loop(stdout_reader, pending_requests_clone, notification_tx).await {
+                eprintln!("Tinymist read loop error: {}", e);
+            }
+        });
 
         let mut proxy = Self {
-            child,
             stdin,
-            stdout,
+            child: Some(child),
             request_id: Arc::new(AtomicU64::new(1)),
+            pending_requests,
         };
 
         // Send initialize request
         proxy.initialize().await?;
 
-        Ok(proxy)
+        Ok((proxy, notification_rx))
     }
 
     /// Shutdown the tinymist subprocess gracefully
     pub async fn shutdown(&mut self) -> Result<()> {
         // Send shutdown request
-        let _response = self.send_request("shutdown", Value::Null).await?;
+        // We ignore the result because we're shutting down anyway
+        let _ = self.send_request("shutdown", Value::Null).await;
 
         // Send exit notification
-        self.send_notification("exit", Value::Null).await?;
+        let _ = self.send_notification("exit", Value::Null).await;
 
         // Wait for process to exit
-        self.child
-            .wait()
-            .await
-            .context("Failed to wait for tinymist to exit")?;
+        if let Some(mut child) = self.child.take() {
+            // Wait with a timeout to avoid hanging forever
+            let _ = tokio::time::timeout(std::time::Duration::from_millis(1000), child.wait()).await;
+        }
 
         Ok(())
+    }
+}
+
+// ============================================================================
+// Reading Loop (Background Task)
+// ============================================================================
+
+impl TinymistProxy {
+    /// Continuous loop that reads JSON-RPC messages from tinymist's stdout
+    async fn read_loop<R: AsyncReadExt + Unpin>(
+        mut reader: BufReader<R>,
+        pending_requests: Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value>>>>>,
+        notification_tx: mpsc::Sender<Value>,
+    ) -> Result<()> {
+        let mut line = String::new();
+
+        loop {
+            // 1. Read Headers (Content-Length)
+            let mut content_length: Option<usize> = None;
+            loop {
+                line.clear();
+                let bytes_read = reader.read_line(&mut line).await?;
+                if bytes_read == 0 {
+                    return Ok(()); // EOF
+                }
+
+                // Check for end of headers (empty line)
+                if line == "\r\n" {
+                    break;
+                }
+
+                if line.starts_with("Content-Length: ") {
+                    let len_str = line.trim_start_matches("Content-Length: ").trim();
+                    content_length = Some(len_str.parse().context("Invalid Content-Length")?);
+                }
+            }
+
+            let content_length = content_length.context("Missing Content-Length header")?;
+
+            // 2. Read Content
+            let mut content_bytes = vec![0u8; content_length];
+            reader.read_exact(&mut content_bytes).await?;
+            
+            let content = String::from_utf8(content_bytes).context("Invalid UTF-8 in message")?;
+            let message: Value = serde_json::from_str(&content).context("Invalid JSON in message")?;
+
+            // 3. Dispatch Message
+            if let Some(id) = message.get("id") {
+                // It's a Request or Response
+                if message.get("method").is_some() {
+                    // It's a Request FROM server (e.g. workspace/configuration)
+                    // We don't support handling requests from tinymist yet
+                    // Just log or ignore
+                } else {
+                    // It's a Response to our request
+                    if let Some(id_val) = id.as_u64() {
+                        let mut map = pending_requests.lock().await;
+                        if let Some(sender) = map.remove(&id_val) {
+                            // Determine if it's a success or error response
+                            if message.get("error").is_some() {
+                                let _ = sender.send(Err(anyhow::anyhow!("LSP Error: {:?}", message["error"])));
+                            } else {
+                                let _ = sender.send(Ok(message));
+                            }
+                        }
+                    }
+                }
+            } else {
+                // It's a Notification (no id)
+                // Forward to main loop
+                let _ = notification_tx.send(message).await;
+            }
+        }
     }
 }
 
@@ -127,6 +221,13 @@ impl TinymistProxy {
     /// The JSON-RPC response from tinymist
     pub async fn send_request(&mut self, method: &str, params: Value) -> Result<Value> {
         let id = self.request_id.fetch_add(1, Ordering::SeqCst);
+        let (tx, rx) = oneshot::channel();
+
+        // Register pending request
+        {
+            let mut map = self.pending_requests.lock().await;
+            map.insert(id, tx);
+        }
 
         let request = serde_json::json!({
             "jsonrpc": "2.0",
@@ -136,10 +237,24 @@ impl TinymistProxy {
         });
 
         // Write request
-        self.write_message(&request).await?;
+        if let Err(e) = self.write_message(&request).await {
+            // Clean up if write fails
+            let mut map = self.pending_requests.lock().await;
+            map.remove(&id);
+            return Err(e);
+        }
 
-        // Read response (async)
-        self.read_response(id).await
+        // Wait for response
+        match rx.await {
+            Ok(result) => result,
+            Err(_) => {
+                // Sender dropped (likely process died or read loop crashed)
+                // Clean up map just in case (though it should be gone)
+                let mut map = self.pending_requests.lock().await;
+                map.remove(&id);
+                Err(anyhow::anyhow!("Tinymist connection closed"))
+            }
+        }
     }
 
     /// Send an LSP notification to tinymist (no response expected)
@@ -156,13 +271,7 @@ impl TinymistProxy {
 
         self.write_message(&notification).await
     }
-}
 
-// ============================================================================
-// JSON-RPC Transport Layer
-// ============================================================================
-
-impl TinymistProxy {
     /// Write a JSON-RPC message with LSP headers
     async fn write_message(&mut self, message: &Value) -> Result<()> {
         let content = serde_json::to_string(message)?;
@@ -179,65 +288,6 @@ impl TinymistProxy {
         self.stdin.flush().await.context("Failed to flush")?;
 
         Ok(())
-    }
-
-    /// Read a JSON-RPC response with the given ID
-    async fn read_response(&mut self, expected_id: u64) -> Result<Value> {
-        loop {
-            let message = self.read_message().await?;
-
-            // Check if this is the response we're waiting for
-            if let Some(id) = message.get("id") {
-                if id.as_u64() == Some(expected_id) {
-                    return Ok(message);
-                }
-            }
-
-            // If it's a different message (notification, different response),
-            // we could queue it, but for now we just skip it
-            // TODO: Handle notifications from tinymist
-        }
-    }
-
-    /// Read a single JSON-RPC message from tinymist
-    async fn read_message(&mut self) -> Result<Value> {
-        // Read headers
-        let mut content_length: Option<usize> = None;
-        let mut line = String::new();
-
-        loop {
-            line.clear();
-            self.stdout
-                .read_line(&mut line)
-                .await
-                .context("Failed to read header line")?;
-
-            if line == "\r\n" {
-                break; // End of headers
-            }
-
-            if line.starts_with("Content-Length: ") {
-                let len_str = line.trim_start_matches("Content-Length: ").trim();
-                content_length = Some(
-                    len_str
-                        .parse()
-                        .context("Invalid Content-Length")?,
-                );
-            }
-        }
-
-        let content_length = content_length.context("Missing Content-Length header")?;
-
-        // Read content
-        let mut content_bytes = vec![0u8; content_length];
-        tokio::io::AsyncReadExt::read_exact(&mut self.stdout, &mut content_bytes)
-            .await
-            .context("Failed to read message content")?;
-
-        let content = String::from_utf8(content_bytes).context("Invalid UTF-8 in message")?;
-        let message: Value = serde_json::from_str(&content).context("Invalid JSON in message")?;
-
-        Ok(message)
     }
 }
 
