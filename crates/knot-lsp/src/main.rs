@@ -23,12 +23,14 @@ use tower_lsp::{Client, LanguageServer, LspService, Server};
 
 use formatter::AirFormatter;
 use knot_core::Document;
+use proxy::TinymistProxy;
+use transform::transform_to_placeholder;
 
-#[derive(Debug)]
 struct KnotLanguageServer {
     client: Client,
     documents: Arc<RwLock<HashMap<Url, String>>>,
     formatter: Option<AirFormatter>,
+    tinymist: Arc<RwLock<Option<TinymistProxy>>>,
 }
 
 #[tower_lsp::async_trait]
@@ -75,9 +77,31 @@ impl LanguageServer for KnotLanguageServer {
         self.client
             .log_message(MessageType::INFO, "Knot LSP server initialized")
             .await;
+
+        // Try to spawn tinymist subprocess
+        match TinymistProxy::spawn() {
+            Ok(proxy) => {
+                self.client
+                    .log_message(MessageType::INFO, "Tinymist proxy spawned successfully")
+                    .await;
+                *self.tinymist.write().await = Some(proxy);
+            }
+            Err(e) => {
+                self.client
+                    .log_message(
+                        MessageType::WARNING,
+                        format!("Failed to spawn tinymist: {}. Typst features will be limited.", e),
+                    )
+                    .await;
+            }
+        }
     }
 
     async fn shutdown(&self) -> Result<()> {
+        // Shutdown tinymist if it's running
+        if let Some(mut proxy) = self.tinymist.write().await.take() {
+            let _ = proxy.shutdown();
+        }
         Ok(())
     }
 
@@ -299,11 +323,31 @@ impl LanguageServer for KnotLanguageServer {
 
 impl KnotLanguageServer {
     async fn on_change(&self, uri: Url, text: String) {
-        // Parse the document and send diagnostics
-        let diagnostics = diagnostics::get_diagnostics(&text);
+        // Transform .knot to .typ placeholder for tinymist
+        let _typ_content = transform_to_placeholder(&text);
 
+        // TODO: Forward to tinymist subprocess
+        // The current TinymistProxy uses std::process which is blocking.
+        // For Phase 2 completion, we need to either:
+        // 1. Refactor TinymistProxy to use tokio::process (async)
+        // 2. Use a dedicated thread + channels for tinymist communication
+        // 3. Use spawn_blocking with careful ownership management
+        //
+        // For now, we have:
+        // - ✅ Transformation working (transform_to_placeholder)
+        // - ✅ Position mapping ready (PositionMapper)
+        // - ✅ Proxy infrastructure (TinymistProxy)
+        // - ⏳ Integration pending (needs async refactor)
+
+        // Get knot-specific diagnostics
+        let knot_diagnostics = diagnostics::get_diagnostics(&text);
+
+        // TODO: Retrieve diagnostics from tinymist and merge with knot_diagnostics
+        // This requires async communication with tinymist subprocess
+
+        // For now, send knot diagnostics only
         self.client
-            .publish_diagnostics(uri, diagnostics, None)
+            .publish_diagnostics(uri, knot_diagnostics, None)
             .await;
     }
 }
@@ -330,6 +374,7 @@ async fn main() {
         client,
         documents: Arc::new(RwLock::new(HashMap::new())),
         formatter,
+        tinymist: Arc::new(RwLock::new(None)), // Will be spawned in initialized()
     });
     Server::new(stdin, stdout, socket).serve(service).await;
 }
