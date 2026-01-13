@@ -310,11 +310,11 @@ mod tests {
     #[tokio::test]
     #[ignore] // Only run if tinymist is installed
     async fn test_spawn_tinymist() {
-        let proxy = TinymistProxy::spawn().await;
-        match proxy {
-            Ok(mut p) => {
+        let result = TinymistProxy::spawn().await;
+        match result {
+            Ok((mut proxy, _notification_rx)) => {
                 println!("tinymist spawned successfully");
-                let _ = p.shutdown().await;
+                let _ = proxy.shutdown().await;
             }
             Err(e) => {
                 eprintln!("tinymist not available: {}", e);
@@ -325,8 +325,8 @@ mod tests {
     #[tokio::test]
     #[ignore] // Only run if tinymist is installed
     async fn test_send_notification() {
-        let mut proxy = match TinymistProxy::spawn().await {
-            Ok(p) => p,
+        let (mut proxy, _notification_rx) = match TinymistProxy::spawn().await {
+            Ok((p, rx)) => (p, rx),
             Err(_) => {
                 eprintln!("tinymist not available, skipping test");
                 return;
