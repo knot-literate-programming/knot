@@ -23,11 +23,6 @@ impl AirFormatter {
         Ok(Self { air_path })
     }
 
-    /// Create a new Air formatter with a custom path
-    pub fn with_path(path: PathBuf) -> Self {
-        Self { air_path: path }
-    }
-
     /// Find the air executable in PATH or common installation locations
     fn find_air() -> Result<PathBuf> {
         // Try to find in PATH first
@@ -112,11 +107,6 @@ impl AirFormatter {
             .context("Failed to remove temporary file")?;
 
         Ok(formatted)
-    }
-
-    /// Check if Air is available
-    pub fn is_available(&self) -> bool {
-        self.air_path.exists()
     }
 
     /// Get the path to the Air executable
