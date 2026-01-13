@@ -17,6 +17,7 @@ use tower_lsp::lsp_types::Position;
 pub struct PositionMapper {
     /// Maps knot line -> typ line
     /// If a knot line was removed (inside chunk), it maps to None
+    #[allow(dead_code)] // Used in future features (Hover, Go to Definition)
     knot_to_typ: Vec<Option<u32>>,
 
     /// Maps typ line -> knot line
@@ -78,6 +79,7 @@ impl PositionMapper {
     /// Map a position from .knot to .typ coordinates
     ///
     /// Returns None if the position is inside a removed chunk
+    #[allow(dead_code)] // Used in future features (Hover, Go to Definition)
     pub fn knot_to_typ_position(&self, pos: Position) -> Option<Position> {
         let knot_line = pos.line as usize;
 
@@ -108,6 +110,7 @@ impl PositionMapper {
     }
 
     /// Check if a knot position is inside a removed chunk
+    #[allow(dead_code)] // Used in future features (Hover logic)
     pub fn is_position_in_chunk(&self, pos: Position) -> bool {
         let knot_line = pos.line as usize;
 
