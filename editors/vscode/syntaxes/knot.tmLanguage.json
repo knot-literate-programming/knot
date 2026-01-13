@@ -1,0 +1,273 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Knot",
+  "scopeName": "source.knot",
+  "patterns": [
+    {
+      "include": "#yaml-frontmatter"
+    },
+    {
+      "include": "#r-code-chunk"
+    },
+    {
+      "include": "#r-inline"
+    },
+    {
+      "include": "#typst-markup"
+    }
+  ],
+  "repository": {
+    "yaml-frontmatter": {
+      "name": "meta.embedded.block.yaml",
+      "begin": "\\A(---)",
+      "end": "^(---|\\.\\.\\.)",
+      "beginCaptures": {
+        "1": {
+          "name": "punctuation.definition.yaml.begin"
+        }
+      },
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.definition.yaml.end"
+        }
+      },
+      "patterns": [
+        {
+          "include": "source.yaml"
+        }
+      ]
+    },
+    "r-code-chunk": {
+      "name": "meta.embedded.block.r",
+      "begin": "^(```)(\\{)(r)(?:\\s+([^}]+))?(\\})",
+      "end": "^(```)",
+      "beginCaptures": {
+        "1": {
+          "name": "punctuation.definition.code-fence.begin.knot"
+        },
+        "2": {
+          "name": "punctuation.definition.chunk-options.begin.knot"
+        },
+        "3": {
+          "name": "entity.name.function.chunk-language.knot"
+        },
+        "4": {
+          "name": "variable.parameter.chunk-name.knot"
+        },
+        "5": {
+          "name": "punctuation.definition.chunk-options.end.knot"
+        }
+      },
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.definition.code-fence.end.knot"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#chunk-options"
+        },
+        {
+          "include": "source.r"
+        }
+      ]
+    },
+    "chunk-options": {
+      "patterns": [
+        {
+          "name": "meta.chunk-option.knot",
+          "match": "^(#\\|)\\s*([a-z-]+)\\s*(:)\\s*(.*)$",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.chunk-option.knot"
+            },
+            "2": {
+              "name": "entity.name.tag.chunk-option-key.knot"
+            },
+            "3": {
+              "name": "punctuation.separator.key-value.knot"
+            },
+            "4": {
+              "name": "string.unquoted.chunk-option-value.knot"
+            }
+          }
+        }
+      ]
+    },
+    "r-inline": {
+      "name": "meta.embedded.inline.r",
+      "begin": "(#r)(\\[)",
+      "end": "(\\])",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.control.inline-r.knot"
+        },
+        "2": {
+          "name": "punctuation.definition.inline-r.begin.knot"
+        }
+      },
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.definition.inline-r.end.knot"
+        }
+      },
+      "patterns": [
+        {
+          "include": "source.r"
+        }
+      ]
+    },
+    "typst-markup": {
+      "patterns": [
+        {
+          "include": "#typst-heading"
+        },
+        {
+          "include": "#typst-bold"
+        },
+        {
+          "include": "#typst-italic"
+        },
+        {
+          "include": "#typst-code"
+        },
+        {
+          "include": "#typst-raw-block"
+        },
+        {
+          "include": "#typst-math"
+        },
+        {
+          "include": "#typst-link"
+        },
+        {
+          "include": "#typst-function-call"
+        },
+        {
+          "include": "#typst-comment"
+        }
+      ]
+    },
+    "typst-heading": {
+      "name": "markup.heading.typst",
+      "match": "^(=+)\\s+(.*)$",
+      "captures": {
+        "1": {
+          "name": "punctuation.definition.heading.typst"
+        },
+        "2": {
+          "name": "entity.name.section.typst"
+        }
+      }
+    },
+    "typst-bold": {
+      "name": "markup.bold.typst",
+      "begin": "(\\*)",
+      "end": "(\\*)",
+      "beginCaptures": {
+        "1": {
+          "name": "punctuation.definition.bold.begin.typst"
+        }
+      },
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.definition.bold.end.typst"
+        }
+      }
+    },
+    "typst-italic": {
+      "name": "markup.italic.typst",
+      "begin": "(_)",
+      "end": "(_)",
+      "beginCaptures": {
+        "1": {
+          "name": "punctuation.definition.italic.begin.typst"
+        }
+      },
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.definition.italic.end.typst"
+        }
+      }
+    },
+    "typst-code": {
+      "name": "markup.inline.raw.typst",
+      "begin": "(`)",
+      "end": "(`)",
+      "beginCaptures": {
+        "1": {
+          "name": "punctuation.definition.raw.begin.typst"
+        }
+      },
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.definition.raw.end.typst"
+        }
+      }
+    },
+    "typst-raw-block": {
+      "name": "markup.raw.block.typst",
+      "begin": "^(```)((?!\\{r)[a-z]*)",
+      "end": "^(```)",
+      "beginCaptures": {
+        "1": {
+          "name": "punctuation.definition.raw.begin.typst"
+        },
+        "2": {
+          "name": "entity.name.function.language.typst"
+        }
+      },
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.definition.raw.end.typst"
+        }
+      }
+    },
+    "typst-math": {
+      "name": "markup.math.typst",
+      "begin": "(\\$)",
+      "end": "(\\$)",
+      "beginCaptures": {
+        "1": {
+          "name": "punctuation.definition.math.begin.typst"
+        }
+      },
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.definition.math.end.typst"
+        }
+      },
+      "patterns": [
+        {
+          "name": "constant.character.escape.typst",
+          "match": "\\\\."
+        }
+      ]
+    },
+    "typst-link": {
+      "name": "markup.underline.link.typst",
+      "match": "(https?://[^\\s\\)\\]]+)",
+      "captures": {
+        "1": {
+          "name": "string.other.link.typst"
+        }
+      }
+    },
+    "typst-function-call": {
+      "name": "meta.function-call.typst",
+      "match": "(#)([a-zA-Z_][a-zA-Z0-9_-]*)",
+      "captures": {
+        "1": {
+          "name": "punctuation.definition.function.typst"
+        },
+        "2": {
+          "name": "entity.name.function.typst"
+        }
+      }
+    },
+    "typst-comment": {
+      "name": "comment.line.double-slash.typst",
+      "match": "//.*$"
+    }
+  }
+}
