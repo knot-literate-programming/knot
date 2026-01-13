@@ -625,3 +625,77 @@ The implementation of **Phase 6 (Inline Expressions)** and the surrounding compi
 - ✅ Comprehensive tests for the new functionality.
 
 The project is in an excellent state to proceed with further features.
+
+---
+
+## Session: 2026-01-13
+
+**Summary:** This session marked the beginning of **Phase 7 (LSP Implementation)**. We established the core architecture for the Knot Language Server, focusing on a proxy-based approach to leverage the existing Typst ecosystem while adding R-specific capabilities.
+
+### Key Accomplishments:
+
+1.  **LSP Architecture: The "Smart Proxy" Strategy**
+    *   Designed a proxy architecture where `knot-lsp` acts as a middleware between the editor (VS Code) and `tinymist` (the Typst LSP).
+    *   **Why?** This avoids reinventing the wheel for Typst support (syntax, formatting, preview) while allowing us to inject R-specific features (chunk execution, diagnostics).
+    *   Implemented `transform.rs` to generate "fake" `.typ` files (replacing R chunks with placeholders) for `tinymist` consumption.
+
+2.  **Asynchronous Communication Infrastructure**
+    *   Refactored the initial synchronous "Talkie-Walkie" communication model to a fully asynchronous "Telephone" model using `tokio`.
+    *   Implemented a robust background task loop in `TinymistProxy` that continuously reads from the subprocess `stdout`.
+    *   Used `oneshot` channels for request/response pairing and `mpsc` channels for spontaneous notifications (like diagnostics).
+    *   This ensures the main LSP loop is never blocked, even when `tinymist` is busy compiling.
+
+3.  **Phase 2 Features: Diagnostics & Mapping**
+    *   Implemented `PositionMapper` to translate line numbers between the source `.knot` file and the generated `.typ` file.
+    *   Successfully merged diagnostics:
+        *   **R Diagnostics:** From `knot-core` parser (syntax errors in chunks).
+        *   **Typst Diagnostics:** Forwarded from `tinymist` and re-mapped to correct source positions.
+    *   Users now see errors from both languages in a unified interface.
+
+4.  **Hover & Completion Support**
+    *   Implemented context-aware **Hover**:
+        *   Over R chunk: Displays metadata (language, options status).
+        *   Over Typst content: Forwards to `tinymist` (e.g., function documentation).
+    *   Implemented context-aware **Completion**:
+        *   Inside R chunk options (`#|`): Suggests `eval`, `echo`, `cache`, etc.
+        *   Inside Typst content: Forwards to `tinymist` (standard Typst auto-completion).
+
+5.  **Refactoring & Modularization**
+    *   Refactored `main.rs` (which had grown to >600 lines) into a clean, modular structure.
+    *   Created `src/state.rs` for centralized server state management.
+    *   Moved feature logic to `src/handlers/{hover,completion,formatting}.rs`.
+    *   This improved code readability and maintainability significantly.
+
+### Technical Implementation Details
+
+**Architecture Diagram:**
+```
+VS Code <--> knot-lsp (Router)
+                 |
+                 +--> [Handler] Hover/Completion (R logic)
+                 |
+                 +--> [Proxy] Tinymist (Typst logic)
+                        ^
+                        | (async JSON-RPC)
+                        v
+                     tinymist subprocess
+```
+
+**Key Modules Created:**
+- `proxy.rs`: Async process management.
+- `position_mapper.rs`: Bidirectional coordinate translation.
+- `handlers/`: Feature-specific logic.
+- `state.rs`: Shared `Arc<RwLock<...>>` state.
+
+### Current Status
+
+The **LSP Foundation** is complete and stable.
+- ✅ Async Proxy working perfectly.
+- ✅ Diagnostics merging active.
+- ✅ Hover and Completion fully functional for both languages.
+- ✅ Codebase is clean and modular.
+
+**Next Steps:**
+- **VS Code Extension:** Finalize the client-side extension to bundle `knot-lsp`.
+- **Phase 4 Integration:** Live preview updates via LSP.
+- **Formatter:** Polish `Air` integration for R formatting.
