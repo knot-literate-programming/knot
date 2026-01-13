@@ -12,3 +12,4 @@ serde_json = { workspace = true }
 anyhow = { workspace = true }
 which = "6.0"
 shellexpand = "3.1"
+uuid = { version = "1.10", features = ["v4"] }

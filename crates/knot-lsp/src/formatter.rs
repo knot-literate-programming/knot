@@ -7,7 +7,7 @@
 
 use anyhow::{Context, Result};
 use std::path::PathBuf;
-use tokio::io::AsyncWriteExt;
+use tokio::fs;
 use tokio::process::Command;
 
 /// Air formatter wrapper
@@ -77,40 +77,41 @@ impl AirFormatter {
     /// * `Ok(formatted_code)` - Successfully formatted code
     /// * `Err(_)` - Formatting failed (syntax error, air not available, etc.)
     pub async fn format_r_code(&self, code: &str) -> Result<String> {
-        // Spawn air process
-        let mut child = Command::new(&self.air_path)
+        // Create a temporary file for the R code
+        let temp_dir = std::env::temp_dir();
+        let temp_file = temp_dir.join(format!("knot_format_{}.R", uuid::Uuid::new_v4()));
+
+        // Write code to temp file
+        fs::write(&temp_file, code)
+            .await
+            .context("Failed to write to temporary file")?;
+
+        // Run air format on the temp file
+        let output = Command::new(&self.air_path)
             .arg("format")
-            .arg("--stdin")
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
+            .arg(&temp_file)
+            .output()
+            .await
             .context("Failed to spawn air formatter")?;
 
-        // Write code to stdin
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin
-                .write_all(code.as_bytes())
+        // Read the formatted result
+        let formatted = if output.status.success() {
+            fs::read_to_string(&temp_file)
                 .await
-                .context("Failed to write to air stdin")?;
-            stdin.flush().await.context("Failed to flush stdin")?;
-            drop(stdin); // Close stdin to signal EOF
-        }
-
-        // Wait for completion and collect output
-        let output = child
-            .wait_with_output()
-            .await
-            .context("Failed to wait for air process")?;
-
-        if output.status.success() {
-            let formatted = String::from_utf8(output.stdout)
-                .context("Air output is not valid UTF-8")?;
-            Ok(formatted)
+                .context("Failed to read formatted file")?
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
+            // Clean up temp file before returning error
+            let _ = fs::remove_file(&temp_file).await;
             anyhow::bail!("Air formatting failed: {}", stderr)
-        }
+        };
+
+        // Clean up temp file
+        fs::remove_file(&temp_file)
+            .await
+            .context("Failed to remove temporary file")?;
+
+        Ok(formatted)
     }
 
     /// Check if Air is available
