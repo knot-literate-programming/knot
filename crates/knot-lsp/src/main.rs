@@ -23,12 +23,16 @@ use tower_lsp::{Client, LanguageServer, LspService, Server};
 
 use formatter::AirFormatter;
 use knot_core::Document;
+use position_mapper::PositionMapper;
 use proxy::TinymistProxy;
 use transform::transform_to_placeholder;
 
 struct KnotLanguageServer {
     client: Client,
     documents: Arc<RwLock<HashMap<Url, String>>>,
+    mappers: Arc<RwLock<HashMap<Url, PositionMapper>>>,
+    knot_diagnostics_cache: Arc<RwLock<HashMap<Url, Vec<Diagnostic>>>>,
+    opened_in_tinymist: Arc<RwLock<HashMap<Url, bool>>>,
     formatter: Option<AirFormatter>,
     tinymist: Arc<RwLock<Option<TinymistProxy>>>,
 }
@@ -88,17 +92,43 @@ impl LanguageServer for KnotLanguageServer {
 
                 // Spawn a task to handle notifications from tinymist
                 let client = self.client.clone();
+                let mappers = self.mappers.clone();
+                let knot_diagnostics_cache = self.knot_diagnostics_cache.clone();
+
                 tokio::spawn(async move {
                     while let Some(msg) = notification_rx.recv().await {
-                        // For now, just log that we received a notification
-                        // In Phase 2, we will process diagnostics here
                         if let Some(method) = msg.get("method").and_then(|m| m.as_str()) {
-                             client
-                                .log_message(
-                                    MessageType::LOG, 
-                                    format!("Received notification from tinymist: {}", method)
-                                )
-                                .await;
+                            if method == "textDocument/publishDiagnostics" {
+                                if let Some(params) = msg.get("params") {
+                                    if let Ok(diag_params) = serde_json::from_value::<PublishDiagnosticsParams>(params.clone()) {
+                                        // Retrieve mapper and knot diagnostics
+                                        let uri = diag_params.uri.clone();
+                                        
+                                        // Get cached knot diagnostics
+                                        let mut merged_diagnostics = {
+                                            let cache = knot_diagnostics_cache.read().await;
+                                            cache.get(&uri).cloned().unwrap_or_default()
+                                        };
+
+                                        // Map tinymist diagnostics
+                                        if let Some(mapper) = mappers.read().await.get(&uri) {
+                                            for mut diag in diag_params.diagnostics {
+                                                if let Some(start) = mapper.typ_to_knot_position(diag.range.start) {
+                                                    if let Some(end) = mapper.typ_to_knot_position(diag.range.end) {
+                                                        diag.range.start = start;
+                                                        diag.range.end = end;
+                                                        diag.source = Some("typst".to_string());
+                                                        merged_diagnostics.push(diag);
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        // Publish merged diagnostics
+                                        client.publish_diagnostics(uri, merged_diagnostics, None).await;
+                                    }
+                                }
+                            }
                         }
                     }
                 });
@@ -138,10 +168,6 @@ impl LanguageServer for KnotLanguageServer {
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        self.client
-            .log_message(MessageType::INFO, format!("File changed: {}", params.text_document.uri))
-            .await;
-
         // Get the full document text from the first change (FULL sync mode)
         if let Some(change) = params.content_changes.first() {
             let uri = params.text_document.uri.clone();
@@ -158,7 +184,7 @@ impl LanguageServer for KnotLanguageServer {
         &self,
         _params: DocumentDiagnosticParams,
     ) -> Result<DocumentDiagnosticReportResult> {
-        // TODO: Implement diagnostics
+        // We handle diagnostics via push (publishDiagnostics)
         Ok(DocumentDiagnosticReportResult::Report(
             DocumentDiagnosticReport::Full(
                 RelatedFullDocumentDiagnosticReport {
@@ -340,32 +366,71 @@ impl LanguageServer for KnotLanguageServer {
 
 impl KnotLanguageServer {
     async fn on_change(&self, uri: Url, text: String) {
-        // Transform .knot to .typ placeholder for tinymist
-        let _typ_content = transform_to_placeholder(&text);
-
-        // TODO: Forward to tinymist subprocess
-        // The current TinymistProxy uses std::process which is blocking.
-        // For Phase 2 completion, we need to either:
-        // 1. Refactor TinymistProxy to use tokio::process (async)
-        // 2. Use a dedicated thread + channels for tinymist communication
-        // 3. Use spawn_blocking with careful ownership management
-        //
-        // For now, we have:
-        // - ✅ Transformation working (transform_to_placeholder)
-        // - ✅ Position mapping ready (PositionMapper)
-        // - ✅ Proxy infrastructure (TinymistProxy)
-        // - ⏳ Integration pending (needs async refactor)
-
-        // Get knot-specific diagnostics
+        // 1. Get knot-specific diagnostics (R chunks parsing)
         let knot_diagnostics = diagnostics::get_diagnostics(&text);
 
-        // TODO: Retrieve diagnostics from tinymist and merge with knot_diagnostics
-        // This requires async communication with tinymist subprocess
+        // 2. Cache knot diagnostics
+        self.knot_diagnostics_cache
+            .write()
+            .await
+            .insert(uri.clone(), knot_diagnostics.clone());
 
-        // For now, send knot diagnostics only
+        // 3. Publish knot diagnostics immediately (fast feedback)
         self.client
-            .publish_diagnostics(uri, knot_diagnostics, None)
+            .publish_diagnostics(uri.clone(), knot_diagnostics, None)
             .await;
+
+        // 4. Transform .knot to .typ placeholder for tinymist
+        let typ_content = transform_to_placeholder(&text);
+        
+        // 5. Create and store PositionMapper
+        let mapper = PositionMapper::new(&text, &typ_content);
+        self.mappers.write().await.insert(uri.clone(), mapper);
+
+        // 6. Forward to tinymist subprocess
+        self.send_to_tinymist(uri, typ_content).await;
+    }
+
+    async fn send_to_tinymist(&self, uri: Url, content: String) {
+        let mut tinymist_guard = self.tinymist.write().await;
+        if let Some(proxy) = tinymist_guard.as_mut() {
+            let mut opened_map = self.opened_in_tinymist.write().await;
+            let is_opened = *opened_map.get(&uri).unwrap_or(&false);
+
+            let method = if is_opened {
+                "textDocument/didChange"
+            } else {
+                "textDocument/didOpen"
+            };
+
+            let params = if is_opened {
+                serde_json::json!({
+                    "textDocument": {
+                        "uri": uri,
+                        "version": 1, // We should track version but static 1 works for simple cases
+                    },
+                    "contentChanges": [
+                        { "text": content }
+                    ]
+                })
+            } else {
+                serde_json::json!({
+                    "textDocument": {
+                        "uri": uri,
+                        "languageId": "typst",
+                        "version": 1,
+                        "text": content
+                    }
+                })
+            };
+
+            // Send notification
+            if let Err(e) = proxy.send_notification(method, params).await {
+                self.client.log_message(MessageType::ERROR, format!("Failed to send to tinymist: {}", e)).await;
+            } else if !is_opened {
+                opened_map.insert(uri, true);
+            }
+        }
     }
 }
 
@@ -390,8 +455,11 @@ async fn main() {
     let (service, socket) = LspService::new(|client| KnotLanguageServer {
         client,
         documents: Arc::new(RwLock::new(HashMap::new())),
+        mappers: Arc::new(RwLock::new(HashMap::new())),
+        knot_diagnostics_cache: Arc::new(RwLock::new(HashMap::new())),
+        opened_in_tinymist: Arc::new(RwLock::new(HashMap::new())),
         formatter,
-        tinymist: Arc::new(RwLock::new(None)), // Will be spawned in initialized()
+        tinymist: Arc::new(RwLock::new(None)),
     });
     Server::new(stdin, stdout, socket).serve(service).await;
 }
