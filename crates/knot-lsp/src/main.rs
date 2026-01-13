@@ -9,7 +9,10 @@
 
 mod diagnostics;
 mod formatter;
+mod position_mapper;
+mod proxy;
 mod symbols;
+mod transform;
 
 use std::collections::HashMap;
 use std::sync::Arc;
