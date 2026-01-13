@@ -9,32 +9,26 @@
 
 mod diagnostics;
 mod formatter;
+mod handlers;
 mod position_mapper;
 mod proxy;
+mod state;
 mod symbols;
 mod transform;
 
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
 use formatter::AirFormatter;
-use knot_core::Document;
 use position_mapper::PositionMapper;
 use proxy::TinymistProxy;
+use state::ServerState;
 use transform::transform_to_placeholder;
 
 struct KnotLanguageServer {
     client: Client,
-    documents: Arc<RwLock<HashMap<Url, String>>>,
-    mappers: Arc<RwLock<HashMap<Url, PositionMapper>>>,
-    knot_diagnostics_cache: Arc<RwLock<HashMap<Url, Vec<Diagnostic>>>>,
-    opened_in_tinymist: Arc<RwLock<HashMap<Url, bool>>>,
-    formatter: Option<AirFormatter>,
-    tinymist: Arc<RwLock<Option<TinymistProxy>>>,
+    state: ServerState,
 }
 
 #[tower_lsp::async_trait]
@@ -88,12 +82,12 @@ impl LanguageServer for KnotLanguageServer {
                 self.client
                     .log_message(MessageType::INFO, "Tinymist proxy spawned successfully")
                     .await;
-                *self.tinymist.write().await = Some(proxy);
+                *self.state.tinymist.write().await = Some(proxy);
 
                 // Spawn a task to handle notifications from tinymist
                 let client = self.client.clone();
-                let mappers = self.mappers.clone();
-                let knot_diagnostics_cache = self.knot_diagnostics_cache.clone();
+                let mappers = self.state.mappers.clone();
+                let knot_diagnostics_cache = self.state.knot_diagnostics_cache.clone();
 
                 tokio::spawn(async move {
                     while let Some(msg) = notification_rx.recv().await {
@@ -146,22 +140,18 @@ impl LanguageServer for KnotLanguageServer {
 
     async fn shutdown(&self) -> Result<()> {
         // Shutdown tinymist if it's running
-        if let Some(mut proxy) = self.tinymist.write().await.take() {
+        if let Some(mut proxy) = self.state.tinymist.write().await.take() {
             let _ = proxy.shutdown().await;
         }
         Ok(())
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        self.client
-            .log_message(MessageType::INFO, format!("File opened: {}", params.text_document.uri))
-            .await;
-
         let uri = params.text_document.uri.clone();
         let text = params.text_document.text.clone();
 
         // Store document text
-        self.documents.write().await.insert(uri.clone(), text.clone());
+        self.state.documents.write().await.insert(uri.clone(), text.clone());
 
         // Trigger diagnostics on file open
         self.on_change(uri, text).await;
@@ -174,7 +164,7 @@ impl LanguageServer for KnotLanguageServer {
             let text = change.text.clone();
 
             // Update stored document text
-            self.documents.write().await.insert(uri.clone(), text.clone());
+            self.state.documents.write().await.insert(uri.clone(), text.clone());
 
             self.on_change(uri, text).await;
         }
@@ -203,7 +193,7 @@ impl LanguageServer for KnotLanguageServer {
         params: DocumentSymbolParams,
     ) -> Result<Option<DocumentSymbolResponse>> {
         // Get document text
-        let documents = self.documents.read().await;
+        let documents = self.state.documents.read().await;
         let text = match documents.get(&params.text_document.uri) {
             Some(text) => text,
             None => return Ok(None),
@@ -215,377 +205,33 @@ impl LanguageServer for KnotLanguageServer {
         Ok(symbols.map(DocumentSymbolResponse::Nested))
     }
 
-        async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
-            let uri = &params.text_document_position_params.text_document.uri;
-            let pos = params.text_document_position_params.position;
-    
-            // 1. Get document text and mapper
-            let (text, mapper) = {            let docs = self.documents.read().await;
-            let mappers = self.mappers.read().await;
-            match (docs.get(uri), mappers.get(uri)) {
-                (Some(t), Some(m)) => (t.clone(), m.clone()),
-                _ => return Ok(None),
-            }
-        };
-
-        // 2. Determine if we are in a chunk
-        if mapper.is_position_in_chunk(pos) {
-            // Knot (R chunk) Hover
-            let doc = match Document::parse(text) {
-                Ok(doc) => doc,
-                Err(_) => return Ok(None),
-            };
-
-            let line = pos.line as usize;
-            let current_chunk = doc.chunks.iter().find(|c| {
-                c.range.start.line <= line && c.range.end.line >= line
-            });
-
-            if let Some(chunk) = current_chunk {
-                let name = chunk.name.as_deref().unwrap_or("unnamed");
-                let mut content = format!("### Knot Chunk: `{}`\n\n", name);
-                content.push_str(&format!("- **Language**: `{}`\n", chunk.language));
-                content.push_str(&format!("- **Eval**: `{}`\n", chunk.options.eval));
-                content.push_str(&format!("- **Echo**: `{}`\n", chunk.options.echo));
-                content.push_str(&format!("- **Cache**: `{}`\n", chunk.options.cache));
-
-                return Ok(Some(Hover {
-                    contents: HoverContents::Markup(MarkupContent {
-                        kind: MarkupKind::Markdown,
-                        value: content,
-                    }),
-                    range: Some(Range {
-                        start: Position { line: chunk.range.start.line as u32, character: 0 },
-                        end: Position { line: chunk.range.end.line as u32, character: 0 },
-                    }),
-                }));
-            }
-        } else {
-            // Typst Hover (forward to tinymist)
-            if let Some(typ_pos) = mapper.knot_to_typ_position(pos) {
-                let mut tinymist_guard = self.tinymist.write().await;
-                if let Some(proxy) = tinymist_guard.as_mut() {
-                    let params = serde_json::json!({
-                        "textDocument": { "uri": uri },
-                        "position": typ_pos
-                    });
-
-                    match proxy.send_request("textDocument/hover", params).await {
-                        Ok(response) => {
-                            if let Some(result) = response.get("result") {
-                                if result.is_null() {
-                                    return Ok(None);
-                                }
-                                
-                                if let Ok(mut hover) = serde_json::from_value::<Hover>(result.clone()) {
-                                    // Map range back if present
-                                    if let Some(range) = hover.range {
-                                        if let (Some(start), Some(end)) = (
-                                            mapper.typ_to_knot_position(range.start),
-                                            mapper.typ_to_knot_position(range.end)
-                                        ) {
-                                            hover.range = Some(Range { start, end });
-                                        }
-                                    }
-                                    return Ok(Some(hover));
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            self.client.log_message(MessageType::WARNING, format!("Tinymist hover error: {}", e)).await;
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(None)
+    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        handlers::hover::handle_hover(&self.state, params).await
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
-        let uri = &params.text_document_position.text_document.uri;
-        let pos = params.text_document_position.position;
-
-        // 1. Get document text and mapper
-        let (text, mapper) = {
-            let docs = self.documents.read().await;
-            let mappers = self.mappers.read().await;
-            match (docs.get(uri), mappers.get(uri)) {
-                (Some(t), Some(m)) => (t.clone(), m.clone()),
-                _ => return Ok(None),
-            }
-        };
-
-        // 2. Determine if we are in a chunk
-        if mapper.is_position_in_chunk(pos) {
-            // Knot (R chunk) Completion
-            let lines: Vec<&str> = text.lines().collect();
-            let line_idx = pos.line as usize;
-            
-            if line_idx < lines.len() {
-                let line_text = lines[line_idx];
-                let trimmed = line_text.trim_start();
-                
-                // If we are on a line starting with #| suggest chunk options
-                if trimmed.starts_with("#|") {
-                    let options = vec![
-                        ("eval", "Evaluate the code chunk (true/false)"),
-                        ("echo", "Display the code in the output (true/false)"),
-                        ("output", "Display the results in the output (true/false)"),
-                        ("cache", "Cache the results of the chunk (true/false)"),
-                        ("fig-width", "Width of the figure in inches"),
-                        ("fig-height", "Height of the figure in inches"),
-                        ("dpi", "DPI for the figure"),
-                    ];
-
-                    let items = options.into_iter().map(|(name, detail)| {
-                        CompletionItem {
-                            label: name.to_string(),
-                            kind: Some(CompletionItemKind::FIELD),
-                            detail: Some(detail.to_string()),
-                            insert_text: Some(format!("{}: ", name)),
-                            ..Default::default()
-                        }
-                    }).collect();
-
-                    return Ok(Some(CompletionResponse::Array(items)));
-                }
-            }
-        } else {
-            // Typst Completion (forward to tinymist)
-            if let Some(typ_pos) = mapper.knot_to_typ_position(pos) {
-                let mut tinymist_guard = self.tinymist.write().await;
-                if let Some(proxy) = tinymist_guard.as_mut() {
-                    let mut typ_params = serde_json::to_value(&params).unwrap_or_default();
-                    if let Some(obj) = typ_params.as_object_mut() {
-                        if let Some(pos_obj) = obj.get_mut("position") {
-                            *pos_obj = serde_json::to_value(typ_pos).unwrap_or_default();
-                        }
-                    }
-
-                    match proxy.send_request("textDocument/completion", typ_params).await {
-                        Ok(response) => {
-                            if let Some(result) = response.get("result") {
-                                if result.is_null() {
-                                    return Ok(None);
-                                }
-                                
-                                if let Ok(mut completion) = serde_json::from_value::<CompletionResponse>(result.clone()) {
-                                    // Map ranges in items back if present
-                                    match &mut completion {
-                                        CompletionResponse::Array(items) => {
-                                            for item in items {
-                                                self.map_completion_item(item, &mapper);
-                                            }
-                                        }
-                                        CompletionResponse::List(list) => {
-                                            for item in &mut list.items {
-                                                self.map_completion_item(item, &mapper);
-                                            }
-                                        }
-                                    }
-                                    return Ok(Some(completion));
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            self.client.log_message(MessageType::WARNING, format!("Tinymist completion error: {}", e)).await;
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(None)
+        handlers::completion::handle_completion(&self.state, params).await
     }
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
-        // Check if formatter is available
-        let formatter = match &self.formatter {
-            Some(f) => f,
-            None => {
-                self.client
-                    .log_message(
-                        MessageType::WARNING,
-                        "Air formatter not available. Install from: https://posit-dev.github.io/air/",
-                    )
-                    .await;
-                return Ok(None);
-            }
-        };
-
-        // Get document text
-        let documents = self.documents.read().await;
-        let text = match documents.get(&params.text_document.uri) {
-            Some(text) => text.clone(),
-            None => return Ok(None),
-        };
-        drop(documents);
-
-        // Parse document
-        let doc = match Document::parse(text) {
-            Ok(doc) => doc,
-            Err(e) => {
-                self.client
-                    .log_message(MessageType::ERROR, format!("Failed to parse document: {}", e))
-                    .await;
-                return Ok(None);
-            }
-        };
-
-        // Format each R chunk
-        let mut edits = Vec::new();
-        for chunk in &doc.chunks {
-            if chunk.language == "r" {
-                match formatter.format_r_code(&chunk.code).await {
-                    Ok(formatted) => {
-                        // Only create edit if code changed
-                        if formatted.trim() != chunk.code.trim() {
-                            edits.push(TextEdit {
-                                range: Range {
-                                    start: Position {
-                                        line: chunk.code_range.start.line as u32,
-                                        character: chunk.code_range.start.column as u32,
-                                    },
-                                    end: Position {
-                                        line: chunk.code_range.end.line as u32,
-                                        character: chunk.code_range.end.column as u32,
-                                    },
-                                },
-                                new_text: formatted,
-                            });
-                        }
-                    }
-                    Err(e) => {
-                        self.client
-                            .log_message(
-                                MessageType::WARNING,
-                                format!("Failed to format chunk '{}': {}", chunk.name.as_ref().unwrap_or(&"unnamed".to_string()), e),
-                            )
-                            .await;
-                    }
-                }
-            }
-        }
-
-        Ok(if edits.is_empty() { None } else { Some(edits) })
+        handlers::formatting::handle_formatting(&self.state, params).await
     }
 
     async fn on_type_formatting(
         &self,
         params: DocumentOnTypeFormattingParams,
     ) -> Result<Option<Vec<TextEdit>>> {
-        // Only format on newline
-        if params.ch != "\n" {
-            return Ok(None);
-        }
-
-        // Check if formatter is available
-        let formatter = match &self.formatter {
-            Some(f) => f,
-            None => return Ok(None),
-        };
-
-        // Get document text
-        let documents = self.documents.read().await;
-        let text = match documents.get(&params.text_document_position.text_document.uri) {
-            Some(text) => text.clone(),
-            None => return Ok(None),
-        };
-        drop(documents);
-
-        // Parse document
-        let doc = match Document::parse(text) {
-            Ok(doc) => doc,
-            Err(_) => return Ok(None),
-        };
-
-        // Find the chunk containing the cursor position
-        let cursor_line = params.text_document_position.position.line as usize;
-        let current_chunk = doc.chunks.iter().find(|chunk| {
-            chunk.language == "r"
-                && chunk.range.start.line <= cursor_line
-                && chunk.range.end.line >= cursor_line
-        });
-
-        // Format only the current chunk
-        if let Some(chunk) = current_chunk {
-            match formatter.format_r_code(&chunk.code).await {
-                Ok(formatted) => {
-                    if formatted.trim() != chunk.code.trim() {
-                        return Ok(Some(vec![TextEdit {
-                            range: Range {
-                                start: Position {
-                                    line: chunk.code_range.start.line as u32,
-                                    character: chunk.code_range.start.column as u32,
-                                },
-                                end: Position {
-                                    line: chunk.code_range.end.line as u32,
-                                    character: chunk.code_range.end.column as u32,
-                                },
-                            },
-                            new_text: formatted,
-                        }]));
-                    }
-                }
-                Err(_) => {
-                    // Silently ignore formatting errors during on-type formatting
-                }
-            }
-        }
-
-        Ok(None)
+        handlers::formatting::handle_on_type_formatting(&self.state, params).await
     }
 }
 
 impl KnotLanguageServer {
-    fn map_completion_item(&self, item: &mut CompletionItem, mapper: &PositionMapper) {
-        if let Some(edit) = &mut item.text_edit {
-            match edit {
-                CompletionTextEdit::Edit(text_edit) => {
-                    if let (Some(start), Some(end)) = (
-                        mapper.typ_to_knot_position(text_edit.range.start),
-                        mapper.typ_to_knot_position(text_edit.range.end)
-                    ) {
-                        text_edit.range.start = start;
-                        text_edit.range.end = end;
-                    }
-                }
-                CompletionTextEdit::InsertAndReplace(iar) => {
-                    if let (Some(insert_start), Some(insert_end), Some(replace_start), Some(replace_end)) = (
-                        mapper.typ_to_knot_position(iar.insert.start),
-                        mapper.typ_to_knot_position(iar.insert.end),
-                        mapper.typ_to_knot_position(iar.replace.start),
-                        mapper.typ_to_knot_position(iar.replace.end)
-                    ) {
-                        iar.insert.start = insert_start;
-                        iar.insert.end = insert_end;
-                        iar.replace.start = replace_start;
-                        iar.replace.end = replace_end;
-                    }
-                }
-            }
-        }
-        
-        if let Some(additional_edits) = &mut item.additional_text_edits {
-            for edit in additional_edits {
-                if let (Some(start), Some(end)) = (
-                    mapper.typ_to_knot_position(edit.range.start),
-                    mapper.typ_to_knot_position(edit.range.end)
-                ) {
-                    edit.range.start = start;
-                    edit.range.end = end;
-                }
-            }
-        }
-    }
-
     async fn on_change(&self, uri: Url, text: String) {
         // 1. Get knot-specific diagnostics (R chunks parsing)
         let knot_diagnostics = diagnostics::get_diagnostics(&text);
 
         // 2. Cache knot diagnostics
-        self.knot_diagnostics_cache
+        self.state.knot_diagnostics_cache
             .write()
             .await
             .insert(uri.clone(), knot_diagnostics.clone());
@@ -600,16 +246,16 @@ impl KnotLanguageServer {
         
         // 5. Create and store PositionMapper
         let mapper = PositionMapper::new(&text, &typ_content);
-        self.mappers.write().await.insert(uri.clone(), mapper);
+        self.state.mappers.write().await.insert(uri.clone(), mapper);
 
         // 6. Forward to tinymist subprocess
         self.send_to_tinymist(uri, typ_content).await;
     }
 
     async fn send_to_tinymist(&self, uri: Url, content: String) {
-        let mut tinymist_guard = self.tinymist.write().await;
+        let mut tinymist_guard = self.state.tinymist.write().await;
         if let Some(proxy) = tinymist_guard.as_mut() {
-            let mut opened_map = self.opened_in_tinymist.write().await;
+            let mut opened_map = self.state.opened_in_tinymist.write().await;
             let is_opened = *opened_map.get(&uri).unwrap_or(&false);
 
             let method = if is_opened {
@@ -622,7 +268,7 @@ impl KnotLanguageServer {
                 serde_json::json!({
                     "textDocument": {
                         "uri": uri,
-                        "version": 1, // We should track version but static 1 works for simple cases
+                        "version": 1,
                     },
                     "contentChanges": [
                         { "text": content }
@@ -669,12 +315,7 @@ async fn main() {
 
     let (service, socket) = LspService::new(|client| KnotLanguageServer {
         client,
-        documents: Arc::new(RwLock::new(HashMap::new())),
-        mappers: Arc::new(RwLock::new(HashMap::new())),
-        knot_diagnostics_cache: Arc::new(RwLock::new(HashMap::new())),
-        opened_in_tinymist: Arc::new(RwLock::new(HashMap::new())),
-        formatter,
-        tinymist: Arc::new(RwLock::new(None)),
+        state: ServerState::new(formatter),
     });
     Server::new(stdin, stdout, socket).serve(service).await;
 }
