@@ -90,7 +90,7 @@ pub async fn handle_completion(state: &ServerState, params: CompletionParams) ->
                         }
                     }
                     Err(_) => {
-                        // Error logging handled by caller
+                        // Error logging handled by caller or proxy
                     }
                 }
             }

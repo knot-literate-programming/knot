@@ -19,7 +19,7 @@ pub async fn handle_hover(state: &ServerState, params: HoverParams) -> Result<Op
 
     // 2. Determine if we are in a chunk
     if mapper.is_position_in_chunk(pos) {
-        // Knot (R chunk) Hover
+        // Check if we're hovering specifically over the chunk fence (header or closing)
         let doc = match Document::parse(text) {
             Ok(doc) => doc,
             Err(_) => return Ok(None),
@@ -32,29 +32,36 @@ pub async fn handle_hover(state: &ServerState, params: HoverParams) -> Result<Op
             .find(|c| c.range.start.line <= line && c.range.end.line >= line);
 
         if let Some(chunk) = current_chunk {
-            let name = chunk.name.as_deref().unwrap_or("unnamed");
-            let mut content = format!("### Knot Chunk: `{}`\n\n", name);
-            content.push_str(&format!("- **Language**: `{}`\n", chunk.language));
-            content.push_str(&format!("- **Eval**: `{}`\n", chunk.options.eval));
-            content.push_str(&format!("- **Echo**: `{}`\n", chunk.options.echo));
-            content.push_str(&format!("- **Cache**: `{}`\n", chunk.options.cache));
+            // Only show chunk metadata if hovering over the fence lines
+            // (chunk.range.start.line is the ```{r line, chunk.range.end.line is the closing ```)
+            if line == chunk.range.start.line || line == chunk.range.end.line {
+                let name = chunk.name.as_deref().unwrap_or("unnamed");
+                let mut content = format!("### Knot Chunk: `{}`\n\n", name);
+                content.push_str(&format!("- **Language**: `{}`\n", chunk.language));
+                content.push_str(&format!("- **Eval**: `{}`\n", chunk.options.eval));
+                content.push_str(&format!("- **Echo**: `{}`\n", chunk.options.echo));
+                content.push_str(&format!("- **Cache**: `{}`\n", chunk.options.cache));
 
-            return Ok(Some(Hover {
-                contents: HoverContents::Markup(MarkupContent {
-                    kind: MarkupKind::Markdown,
-                    value: content,
-                }),
-                range: Some(Range {
-                    start: Position {
-                        line: chunk.range.start.line as u32,
-                        character: 0,
-                    },
-                    end: Position {
-                        line: chunk.range.end.line as u32,
-                        character: 0,
-                    },
-                }),
-            }));
+                return Ok(Some(Hover {
+                    contents: HoverContents::Markup(MarkupContent {
+                        kind: MarkupKind::Markdown,
+                        value: content,
+                    }),
+                    range: Some(Range {
+                        start: Position {
+                            line: chunk.range.start.line as u32,
+                            character: 0,
+                        },
+                        end: Position {
+                            line: chunk.range.end.line as u32,
+                            character: 0,
+                        },
+                    }),
+                }));
+            }
+            // Otherwise (we're hovering over R code content), return None
+            // to allow VSCode to delegate to R language server if installed
+            return Ok(None);
         }
     } else {
         // Typst Hover (forward to tinymist)
