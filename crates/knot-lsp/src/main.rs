@@ -215,13 +215,187 @@ impl LanguageServer for KnotLanguageServer {
         Ok(symbols.map(DocumentSymbolResponse::Nested))
     }
 
-    async fn hover(&self, _params: HoverParams) -> Result<Option<Hover>> {
-        // TODO: Implement hover information
+        async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+            let uri = &params.text_document_position_params.text_document.uri;
+            let pos = params.text_document_position_params.position;
+    
+            // 1. Get document text and mapper
+            let (text, mapper) = {            let docs = self.documents.read().await;
+            let mappers = self.mappers.read().await;
+            match (docs.get(uri), mappers.get(uri)) {
+                (Some(t), Some(m)) => (t.clone(), m.clone()),
+                _ => return Ok(None),
+            }
+        };
+
+        // 2. Determine if we are in a chunk
+        if mapper.is_position_in_chunk(pos) {
+            // Knot (R chunk) Hover
+            let doc = match Document::parse(text) {
+                Ok(doc) => doc,
+                Err(_) => return Ok(None),
+            };
+
+            let line = pos.line as usize;
+            let current_chunk = doc.chunks.iter().find(|c| {
+                c.range.start.line <= line && c.range.end.line >= line
+            });
+
+            if let Some(chunk) = current_chunk {
+                let name = chunk.name.as_deref().unwrap_or("unnamed");
+                let mut content = format!("### Knot Chunk: `{}`\n\n", name);
+                content.push_str(&format!("- **Language**: `{}`\n", chunk.language));
+                content.push_str(&format!("- **Eval**: `{}`\n", chunk.options.eval));
+                content.push_str(&format!("- **Echo**: `{}`\n", chunk.options.echo));
+                content.push_str(&format!("- **Cache**: `{}`\n", chunk.options.cache));
+
+                return Ok(Some(Hover {
+                    contents: HoverContents::Markup(MarkupContent {
+                        kind: MarkupKind::Markdown,
+                        value: content,
+                    }),
+                    range: Some(Range {
+                        start: Position { line: chunk.range.start.line as u32, character: 0 },
+                        end: Position { line: chunk.range.end.line as u32, character: 0 },
+                    }),
+                }));
+            }
+        } else {
+            // Typst Hover (forward to tinymist)
+            if let Some(typ_pos) = mapper.knot_to_typ_position(pos) {
+                let mut tinymist_guard = self.tinymist.write().await;
+                if let Some(proxy) = tinymist_guard.as_mut() {
+                    let params = serde_json::json!({
+                        "textDocument": { "uri": uri },
+                        "position": typ_pos
+                    });
+
+                    match proxy.send_request("textDocument/hover", params).await {
+                        Ok(response) => {
+                            if let Some(result) = response.get("result") {
+                                if result.is_null() {
+                                    return Ok(None);
+                                }
+                                
+                                if let Ok(mut hover) = serde_json::from_value::<Hover>(result.clone()) {
+                                    // Map range back if present
+                                    if let Some(range) = hover.range {
+                                        if let (Some(start), Some(end)) = (
+                                            mapper.typ_to_knot_position(range.start),
+                                            mapper.typ_to_knot_position(range.end)
+                                        ) {
+                                            hover.range = Some(Range { start, end });
+                                        }
+                                    }
+                                    return Ok(Some(hover));
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            self.client.log_message(MessageType::WARNING, format!("Tinymist hover error: {}", e)).await;
+                        }
+                    }
+                }
+            }
+        }
+
         Ok(None)
     }
 
-    async fn completion(&self, _params: CompletionParams) -> Result<Option<CompletionResponse>> {
-        // TODO: Implement completion
+    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        let uri = &params.text_document_position.text_document.uri;
+        let pos = params.text_document_position.position;
+
+        // 1. Get document text and mapper
+        let (text, mapper) = {
+            let docs = self.documents.read().await;
+            let mappers = self.mappers.read().await;
+            match (docs.get(uri), mappers.get(uri)) {
+                (Some(t), Some(m)) => (t.clone(), m.clone()),
+                _ => return Ok(None),
+            }
+        };
+
+        // 2. Determine if we are in a chunk
+        if mapper.is_position_in_chunk(pos) {
+            // Knot (R chunk) Completion
+            let lines: Vec<&str> = text.lines().collect();
+            let line_idx = pos.line as usize;
+            
+            if line_idx < lines.len() {
+                let line_text = lines[line_idx];
+                let trimmed = line_text.trim_start();
+                
+                // If we are on a line starting with #| suggest chunk options
+                if trimmed.starts_with("#|") {
+                    let options = vec![
+                        ("eval", "Evaluate the code chunk (true/false)"),
+                        ("echo", "Display the code in the output (true/false)"),
+                        ("output", "Display the results in the output (true/false)"),
+                        ("cache", "Cache the results of the chunk (true/false)"),
+                        ("fig-width", "Width of the figure in inches"),
+                        ("fig-height", "Height of the figure in inches"),
+                        ("dpi", "DPI for the figure"),
+                    ];
+
+                    let items = options.into_iter().map(|(name, detail)| {
+                        CompletionItem {
+                            label: name.to_string(),
+                            kind: Some(CompletionItemKind::FIELD),
+                            detail: Some(detail.to_string()),
+                            insert_text: Some(format!("{}: ", name)),
+                            ..Default::default()
+                        }
+                    }).collect();
+
+                    return Ok(Some(CompletionResponse::Array(items)));
+                }
+            }
+        } else {
+            // Typst Completion (forward to tinymist)
+            if let Some(typ_pos) = mapper.knot_to_typ_position(pos) {
+                let mut tinymist_guard = self.tinymist.write().await;
+                if let Some(proxy) = tinymist_guard.as_mut() {
+                    let mut typ_params = serde_json::to_value(&params).unwrap_or_default();
+                    if let Some(obj) = typ_params.as_object_mut() {
+                        if let Some(pos_obj) = obj.get_mut("position") {
+                            *pos_obj = serde_json::to_value(typ_pos).unwrap_or_default();
+                        }
+                    }
+
+                    match proxy.send_request("textDocument/completion", typ_params).await {
+                        Ok(response) => {
+                            if let Some(result) = response.get("result") {
+                                if result.is_null() {
+                                    return Ok(None);
+                                }
+                                
+                                if let Ok(mut completion) = serde_json::from_value::<CompletionResponse>(result.clone()) {
+                                    // Map ranges in items back if present
+                                    match &mut completion {
+                                        CompletionResponse::Array(items) => {
+                                            for item in items {
+                                                self.map_completion_item(item, &mapper);
+                                            }
+                                        }
+                                        CompletionResponse::List(list) => {
+                                            for item in &mut list.items {
+                                                self.map_completion_item(item, &mapper);
+                                            }
+                                        }
+                                    }
+                                    return Ok(Some(completion));
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            self.client.log_message(MessageType::WARNING, format!("Tinymist completion error: {}", e)).await;
+                        }
+                    }
+                }
+            }
+        }
+
         Ok(None)
     }
 
@@ -365,6 +539,47 @@ impl LanguageServer for KnotLanguageServer {
 }
 
 impl KnotLanguageServer {
+    fn map_completion_item(&self, item: &mut CompletionItem, mapper: &PositionMapper) {
+        if let Some(edit) = &mut item.text_edit {
+            match edit {
+                CompletionTextEdit::Edit(text_edit) => {
+                    if let (Some(start), Some(end)) = (
+                        mapper.typ_to_knot_position(text_edit.range.start),
+                        mapper.typ_to_knot_position(text_edit.range.end)
+                    ) {
+                        text_edit.range.start = start;
+                        text_edit.range.end = end;
+                    }
+                }
+                CompletionTextEdit::InsertAndReplace(iar) => {
+                    if let (Some(insert_start), Some(insert_end), Some(replace_start), Some(replace_end)) = (
+                        mapper.typ_to_knot_position(iar.insert.start),
+                        mapper.typ_to_knot_position(iar.insert.end),
+                        mapper.typ_to_knot_position(iar.replace.start),
+                        mapper.typ_to_knot_position(iar.replace.end)
+                    ) {
+                        iar.insert.start = insert_start;
+                        iar.insert.end = insert_end;
+                        iar.replace.start = replace_start;
+                        iar.replace.end = replace_end;
+                    }
+                }
+            }
+        }
+        
+        if let Some(additional_edits) = &mut item.additional_text_edits {
+            for edit in additional_edits {
+                if let (Some(start), Some(end)) = (
+                    mapper.typ_to_knot_position(edit.range.start),
+                    mapper.typ_to_knot_position(edit.range.end)
+                ) {
+                    edit.range.start = start;
+                    edit.range.end = end;
+                }
+            }
+        }
+    }
+
     async fn on_change(&self, uri: Url, text: String) {
         // 1. Get knot-specific diagnostics (R chunks parsing)
         let knot_diagnostics = diagnostics::get_diagnostics(&text);
