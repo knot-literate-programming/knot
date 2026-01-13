@@ -9,10 +9,11 @@
 
 use anyhow::{Context, Result};
 use serde_json::Value;
-use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 
 /// A proxy to a tinymist LSP subprocess
 pub struct TinymistProxy {
@@ -32,7 +33,7 @@ impl TinymistProxy {
     /// # Returns
     /// * `Ok(proxy)` - Successfully spawned and initialized tinymist
     /// * `Err(_)` - Failed to spawn or initialize
-    pub fn spawn() -> Result<Self> {
+    pub async fn spawn() -> Result<Self> {
         // Try to find tinymist in PATH
         let tinymist_path = which::which("tinymist")
             .context("tinymist not found in PATH. Install from: https://github.com/Myriad-Dreamin/tinymist")?;
@@ -57,22 +58,23 @@ impl TinymistProxy {
         };
 
         // Send initialize request
-        proxy.initialize()?;
+        proxy.initialize().await?;
 
         Ok(proxy)
     }
 
     /// Shutdown the tinymist subprocess gracefully
-    pub fn shutdown(&mut self) -> Result<()> {
+    pub async fn shutdown(&mut self) -> Result<()> {
         // Send shutdown request
-        let _response = self.send_request("shutdown", Value::Null)?;
+        let _response = self.send_request("shutdown", Value::Null).await?;
 
         // Send exit notification
-        self.send_notification("exit", Value::Null)?;
+        self.send_notification("exit", Value::Null).await?;
 
         // Wait for process to exit
         self.child
             .wait()
+            .await
             .context("Failed to wait for tinymist to exit")?;
 
         Ok(())
@@ -85,7 +87,7 @@ impl TinymistProxy {
 
 impl TinymistProxy {
     /// Send the LSP initialize request to tinymist
-    fn initialize(&mut self) -> Result<()> {
+    async fn initialize(&mut self) -> Result<()> {
         let init_params = serde_json::json!({
             "processId": std::process::id(),
             "clientInfo": {
@@ -102,7 +104,7 @@ impl TinymistProxy {
             "rootUri": null,
         });
 
-        let response = self.send_request("initialize", init_params)?;
+        let response = self.send_request("initialize", init_params).await?;
 
         // Verify we got a successful response
         if response.get("result").is_none() {
@@ -110,7 +112,7 @@ impl TinymistProxy {
         }
 
         // Send initialized notification
-        self.send_notification("initialized", serde_json::json!({}))?;
+        self.send_notification("initialized", serde_json::json!({})).await?;
 
         Ok(())
     }
@@ -123,7 +125,7 @@ impl TinymistProxy {
     ///
     /// # Returns
     /// The JSON-RPC response from tinymist
-    pub fn send_request(&mut self, method: &str, params: Value) -> Result<Value> {
+    pub async fn send_request(&mut self, method: &str, params: Value) -> Result<Value> {
         let id = self.request_id.fetch_add(1, Ordering::SeqCst);
 
         let request = serde_json::json!({
@@ -134,10 +136,10 @@ impl TinymistProxy {
         });
 
         // Write request
-        self.write_message(&request)?;
+        self.write_message(&request).await?;
 
-        // Read response (blocking)
-        self.read_response(id)
+        // Read response (async)
+        self.read_response(id).await
     }
 
     /// Send an LSP notification to tinymist (no response expected)
@@ -145,14 +147,14 @@ impl TinymistProxy {
     /// # Arguments
     /// * `method` - LSP method name (e.g., "textDocument/didChange")
     /// * `params` - Notification parameters as JSON
-    pub fn send_notification(&mut self, method: &str, params: Value) -> Result<()> {
+    pub async fn send_notification(&mut self, method: &str, params: Value) -> Result<()> {
         let notification = serde_json::json!({
             "jsonrpc": "2.0",
             "method": method,
             "params": params,
         });
 
-        self.write_message(&notification)
+        self.write_message(&notification).await
     }
 }
 
@@ -162,25 +164,27 @@ impl TinymistProxy {
 
 impl TinymistProxy {
     /// Write a JSON-RPC message with LSP headers
-    fn write_message(&mut self, message: &Value) -> Result<()> {
+    async fn write_message(&mut self, message: &Value) -> Result<()> {
         let content = serde_json::to_string(message)?;
         let header = format!("Content-Length: {}\r\n\r\n", content.len());
 
         self.stdin
             .write_all(header.as_bytes())
+            .await
             .context("Failed to write header")?;
         self.stdin
             .write_all(content.as_bytes())
+            .await
             .context("Failed to write content")?;
-        self.stdin.flush().context("Failed to flush")?;
+        self.stdin.flush().await.context("Failed to flush")?;
 
         Ok(())
     }
 
     /// Read a JSON-RPC response with the given ID
-    fn read_response(&mut self, expected_id: u64) -> Result<Value> {
+    async fn read_response(&mut self, expected_id: u64) -> Result<Value> {
         loop {
-            let message = self.read_message()?;
+            let message = self.read_message().await?;
 
             // Check if this is the response we're waiting for
             if let Some(id) = message.get("id") {
@@ -196,7 +200,7 @@ impl TinymistProxy {
     }
 
     /// Read a single JSON-RPC message from tinymist
-    fn read_message(&mut self) -> Result<Value> {
+    async fn read_message(&mut self) -> Result<Value> {
         // Read headers
         let mut content_length: Option<usize> = None;
         let mut line = String::new();
@@ -205,6 +209,7 @@ impl TinymistProxy {
             line.clear();
             self.stdout
                 .read_line(&mut line)
+                .await
                 .context("Failed to read header line")?;
 
             if line == "\r\n" {
@@ -225,7 +230,8 @@ impl TinymistProxy {
 
         // Read content
         let mut content_bytes = vec![0u8; content_length];
-        std::io::Read::read_exact(&mut self.stdout, &mut content_bytes)
+        tokio::io::AsyncReadExt::read_exact(&mut self.stdout, &mut content_bytes)
+            .await
             .context("Failed to read message content")?;
 
         let content = String::from_utf8(content_bytes).context("Invalid UTF-8 in message")?;
@@ -239,12 +245,9 @@ impl TinymistProxy {
 // Lifecycle
 // ============================================================================
 
-impl Drop for TinymistProxy {
-    fn drop(&mut self) {
-        // Try to shutdown gracefully, but don't panic if it fails
-        let _ = self.shutdown();
-    }
-}
+// Note: Drop impl removed because shutdown() is async and cannot be called from Drop.
+// Users must explicitly call shutdown() before dropping TinymistProxy.
+// The tokio::process::Child will be killed automatically on drop.
 
 // ============================================================================
 // Tests
@@ -254,14 +257,14 @@ impl Drop for TinymistProxy {
 mod tests {
     use super::*;
 
-    #[test]
+    #[tokio::test]
     #[ignore] // Only run if tinymist is installed
-    fn test_spawn_tinymist() {
-        let proxy = TinymistProxy::spawn();
+    async fn test_spawn_tinymist() {
+        let proxy = TinymistProxy::spawn().await;
         match proxy {
             Ok(mut p) => {
                 println!("tinymist spawned successfully");
-                let _ = p.shutdown();
+                let _ = p.shutdown().await;
             }
             Err(e) => {
                 eprintln!("tinymist not available: {}", e);
@@ -269,10 +272,10 @@ mod tests {
         }
     }
 
-    #[test]
+    #[tokio::test]
     #[ignore] // Only run if tinymist is installed
-    fn test_send_notification() {
-        let mut proxy = match TinymistProxy::spawn() {
+    async fn test_send_notification() {
+        let mut proxy = match TinymistProxy::spawn().await {
             Ok(p) => p,
             Err(_) => {
                 eprintln!("tinymist not available, skipping test");
@@ -281,17 +284,19 @@ mod tests {
         };
 
         // Send a didOpen notification
-        let result = proxy.send_notification(
-            "textDocument/didOpen",
-            serde_json::json!({
-                "textDocument": {
-                    "uri": "file:///test.typ",
-                    "languageId": "typst",
-                    "version": 1,
-                    "text": "= Hello"
-                }
-            }),
-        );
+        let result = proxy
+            .send_notification(
+                "textDocument/didOpen",
+                serde_json::json!({
+                    "textDocument": {
+                        "uri": "file:///test.typ",
+                        "languageId": "typst",
+                        "version": 1,
+                        "text": "= Hello"
+                    }
+                }),
+            )
+            .await;
 
         assert!(result.is_ok(), "Failed to send notification: {:?}", result);
     }

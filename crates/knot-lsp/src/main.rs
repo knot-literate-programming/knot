@@ -79,7 +79,7 @@ impl LanguageServer for KnotLanguageServer {
             .await;
 
         // Try to spawn tinymist subprocess
-        match TinymistProxy::spawn() {
+        match TinymistProxy::spawn().await {
             Ok(proxy) => {
                 self.client
                     .log_message(MessageType::INFO, "Tinymist proxy spawned successfully")
@@ -100,7 +100,7 @@ impl LanguageServer for KnotLanguageServer {
     async fn shutdown(&self) -> Result<()> {
         // Shutdown tinymist if it's running
         if let Some(mut proxy) = self.tinymist.write().await.take() {
-            let _ = proxy.shutdown();
+            let _ = proxy.shutdown().await;
         }
         Ok(())
     }
