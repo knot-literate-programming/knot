@@ -1,0 +1,15 @@
+# Build output
+out/
+*.vsix
+
+# Dependencies
+node_modules/
+package-lock.json
+
+# IDE
+.vscode/
+.vscode-test/
+
+# Temporary files
+TEST-SIMPLE.md
+*.log
