@@ -22,6 +22,10 @@ pub struct TinymistProxy {
     request_id: Arc<AtomicU64>,
 }
 
+// ============================================================================
+// Subprocess Management
+// ============================================================================
+
 impl TinymistProxy {
     /// Spawn a new tinymist subprocess
     ///
@@ -58,6 +62,28 @@ impl TinymistProxy {
         Ok(proxy)
     }
 
+    /// Shutdown the tinymist subprocess gracefully
+    pub fn shutdown(&mut self) -> Result<()> {
+        // Send shutdown request
+        let _response = self.send_request("shutdown", Value::Null)?;
+
+        // Send exit notification
+        self.send_notification("exit", Value::Null)?;
+
+        // Wait for process to exit
+        self.child
+            .wait()
+            .context("Failed to wait for tinymist to exit")?;
+
+        Ok(())
+    }
+}
+
+// ============================================================================
+// LSP Protocol Layer
+// ============================================================================
+
+impl TinymistProxy {
     /// Send the LSP initialize request to tinymist
     fn initialize(&mut self) -> Result<()> {
         let init_params = serde_json::json!({
@@ -128,7 +154,13 @@ impl TinymistProxy {
 
         self.write_message(&notification)
     }
+}
 
+// ============================================================================
+// JSON-RPC Transport Layer
+// ============================================================================
+
+impl TinymistProxy {
     /// Write a JSON-RPC message with LSP headers
     fn write_message(&mut self, message: &Value) -> Result<()> {
         let content = serde_json::to_string(message)?;
@@ -201,23 +233,11 @@ impl TinymistProxy {
 
         Ok(message)
     }
-
-    /// Shutdown the tinymist subprocess gracefully
-    pub fn shutdown(&mut self) -> Result<()> {
-        // Send shutdown request
-        let _response = self.send_request("shutdown", Value::Null)?;
-
-        // Send exit notification
-        self.send_notification("exit", Value::Null)?;
-
-        // Wait for process to exit
-        self.child
-            .wait()
-            .context("Failed to wait for tinymist to exit")?;
-
-        Ok(())
-    }
 }
+
+// ============================================================================
+// Lifecycle
+// ============================================================================
 
 impl Drop for TinymistProxy {
     fn drop(&mut self) {
@@ -225,6 +245,10 @@ impl Drop for TinymistProxy {
         let _ = self.shutdown();
     }
 }
+
+// ============================================================================
+// Tests
+// ============================================================================
 
 #[cfg(test)]
 mod tests {
