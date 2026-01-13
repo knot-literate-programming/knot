@@ -1,0 +1,100 @@
+{
+  "name": "knot",
+  "displayName": "Knot",
+  "description": "Language support for Knot files (.knot) - Literate programming with R and Typst",
+  "version": "0.1.0",
+  "publisher": "knot-dev",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Formatters"
+  ],
+  "keywords": [
+    "knot",
+    "typst",
+    "R",
+    "literate programming",
+    "reproducible research"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onLanguage:knot"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "knot",
+        "aliases": ["Knot", "knot"],
+        "extensions": [".knot"],
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./icons/knot-light.png",
+          "dark": "./icons/knot-dark.png"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "knot",
+        "scopeName": "source.knot",
+        "path": "./syntaxes/knot.tmLanguage.json",
+        "embeddedLanguages": {
+          "source.r": "r",
+          "meta.embedded.block.r": "r",
+          "meta.embedded.inline.r": "r"
+        }
+      }
+    ],
+    "configuration": {
+      "title": "Knot",
+      "properties": {
+        "knot.lsp.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Knot Language Server"
+        },
+        "knot.lsp.path": {
+          "type": "string",
+          "default": "knot-lsp",
+          "description": "Path to knot-lsp executable"
+        },
+        "knot.formatter.air.path": {
+          "type": "string",
+          "default": "air",
+          "description": "Path to Air formatter executable"
+        },
+        "knot.formatter.formatOnType": {
+          "type": "boolean",
+          "default": true,
+          "description": "Format R chunks automatically on new line"
+        },
+        "knot.formatter.formatOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Format R chunks automatically on save"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package",
+    "lint": "eslint src --ext ts"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.x",
+    "@types/vscode": "^1.80.0",
+    "@typescript-eslint/eslint-plugin": "^6.x",
+    "@typescript-eslint/parser": "^6.x",
+    "eslint": "^8.x",
+    "typescript": "^5.3.0",
+    "@vscode/vsce": "^2.22.0"
+  }
+}

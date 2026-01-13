@@ -1,0 +1,15 @@
+[package]
+name = "knot-lsp"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+knot-core = { path = "../knot-core" }
+tower-lsp = "0.20"
+tokio = { version = "1.35", features = ["full"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+which = "6.0"
+shellexpand = "3.1"
+uuid = { version = "1.10", features = ["v4"] }
