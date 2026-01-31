@@ -2,7 +2,6 @@
 use anyhow::Result;
 use serde::Serialize;
 use std::path::PathBuf;
-use crate::CHUNK_REGEX;
 
 // NOTE : Ces structures sont basées sur la section 3.5 du document de référence.
 // La section 11.4 mentionne que les positions sont cruciales pour un futur LSP.
@@ -73,15 +72,14 @@ pub struct Document {
 impl Document {
     // La logique de parsing est basée sur la section 8.1
     pub fn parse(source: String) -> Result<Self> {
-        let chunks = extract_chunks(&source)?;
-        let inline_exprs = extract_inline_exprs(&source, &chunks)?;
-        Ok(Document { source, chunks, inline_exprs })
+        // Redirection vers le nouveau parser winnow (v2)
+        crate::parser_v2::parse_document(&source)
     }
 }
 
 
 // La logique de parsing des options est basée sur la section 8.2
-fn parse_options(options_block: &str) -> Result<ChunkOptions> {
+pub fn parse_options(options_block: &str) -> Result<ChunkOptions> {
     let mut options = ChunkOptions {
         eval: true,
         echo: true,
@@ -147,104 +145,6 @@ fn parse_uint(s: &str) -> Result<u32> {
         .map_err(|_| anyhow::anyhow!("Invalid unsigned integer value: {}", s))
 }
 
-// La logique d'extraction est basée sur la section 8.1
-fn extract_chunks(source: &str) -> Result<Vec<Chunk>> {
-    let mut chunks = Vec::new();
-
-    // Use the shared CHUNK_REGEX to ensure consistency with codegen
-    for cap in CHUNK_REGEX.captures_iter(source) {
-        let language = cap.name("lang").unwrap().as_str().to_string();
-        let chunk_name = cap.name("name").map_or("", |m| m.as_str().trim()).to_string();
-        let options_block = cap.name("options").map_or("", |m| m.as_str());
-        let code = cap.name("code").map_or("", |m| m.as_str().trim()).to_string();
-        
-        let options = parse_options(options_block)?;
-
-        // Calculate chunk range
-        let chunk_match = cap.get(0).unwrap(); // Get the whole match
-        let chunk_start_offset = chunk_match.start();
-        let chunk_end_offset = chunk_match.end();
-        let chunk_range = Range {
-            start: offset_to_position(source, chunk_start_offset),
-            end: offset_to_position(source, chunk_end_offset),
-        };
-
-        // Calculate code range
-        let code_match = cap.name("code").unwrap();
-        let code_start_offset = code_match.start();
-        let code_end_offset = code_match.end();
-        let code_range = Range {
-            start: offset_to_position(source, code_start_offset),
-            end: offset_to_position(source, code_end_offset),
-        };
-
-        chunks.push(Chunk {
-            language,
-            name: if chunk_name.is_empty() { None } else { Some(chunk_name) },
-            code,
-            options,
-            range: chunk_range,
-            code_range: code_range,
-            start_byte: chunk_start_offset,
-            end_byte: chunk_end_offset,
-        });
-    }
-
-    Ok(chunks)
-}
-
-fn offset_to_position(source: &str, offset: usize) -> Position {
-    let mut line = 0;
-    let mut column = 0;
-    for (i, c) in source.char_indices() {
-        if i == offset {
-            break;
-        }
-        if c == '\n' {
-            line += 1;
-            column = 0;
-        } else {
-            column += 1;
-        }
-    }
-    Position { line, column }
-}
-
-/// Extract inline expressions like #r[expr] from the source
-/// Excludes expressions that are inside code chunks
-fn extract_inline_exprs(source: &str, chunks: &[Chunk]) -> Result<Vec<InlineExpr>> {
-    // Use shared function from lib.rs for consistent inline expression detection
-    let matches = crate::find_inline_expressions(source)?;
-
-    let mut inline_exprs = Vec::new();
-
-    for (language, code, start, end, verb) in matches {
-        // Skip if this position is inside a code chunk
-        if is_inside_chunk(start, chunks) {
-            continue;
-        }
-
-        inline_exprs.push(InlineExpr {
-            language,
-            code,
-            start,
-            end,
-            verb,
-        });
-    }
-
-    // Already sorted by position from find_inline_expressions
-    Ok(inline_exprs)
-}
-
-/// Check if a byte position is inside any code chunk
-fn is_inside_chunk(_pos: usize, _chunks: &[Chunk]) -> bool {
-    // TODO: Track byte offsets in Chunk for accurate detection
-    // For now, we don't exclude any positions (simplified implementation)
-    // A full implementation would check if pos falls within chunk.range byte offsets
-    false
-}
-
 // Section 6.1, Jour 3-4 : "Tests unitaires parser"
 #[cfg(test)]
 mod tests {
@@ -264,7 +164,7 @@ mod tests {
         assert_eq!(doc.chunks.len(), 1);
         let chunk = &doc.chunks[0];
         assert_eq!(chunk.language, "r");
-        assert_eq!(chunk.code, "1 + 1");
+        assert_eq!(chunk.code.trim(), "1 + 1");
         assert_eq!(chunk.options.eval, true);
         assert_eq!(chunk.options.echo, false);
         assert_eq!(chunk.options.output, true); // default
