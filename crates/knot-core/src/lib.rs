@@ -1,5 +1,4 @@
 pub mod parser;
-pub mod parser_v2;
 pub mod executors;
 pub mod compiler;
 pub mod codegen;
