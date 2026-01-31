@@ -96,14 +96,23 @@
     },
     "r-inline": {
       "name": "meta.embedded.inline.r",
-      "begin": "(#r)(\\[)",
-      "end": "(\\])",
+      "begin": "(`)(\\{)(r)(?:,\\s*([^}]+))?(\\})",
+      "end": "(`)",
       "beginCaptures": {
         "1": {
-          "name": "keyword.control.inline-r.knot"
+          "name": "punctuation.definition.inline-r.begin.knot"
         },
         "2": {
-          "name": "punctuation.definition.inline-r.begin.knot"
+          "name": "punctuation.definition.inline-r.bracket.begin.knot"
+        },
+        "3": {
+          "name": "keyword.control.inline-r.knot"
+        },
+        "4": {
+          "name": "variable.parameter.inline-options.knot"
+        },
+        "5": {
+          "name": "punctuation.definition.inline-r.bracket.end.knot"
         }
       },
       "endCaptures": {
