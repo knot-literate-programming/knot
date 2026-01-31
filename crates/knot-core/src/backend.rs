@@ -20,22 +20,14 @@ impl Backend for TypstBackend {
         args.push(format!("lang: \"{}\"", chunk.language));
         if let Some(name) = &chunk.name {
             args.push(format!("name: \"{}\"", name));
-        }
-        // Note: Caption handling might be split between #code-chunk arg and #figure wrapper.
-        // In current implementation, caption is passed to #code-chunk IF no label is present?
-        // Let's reproduce exactly what was in chunk_processor.rs for now.
-        if let Some(caption) = &chunk.options.caption {
-             // In chunk_processor logic, caption was added to args list.
-             // But also used in #figure later if label exists.
-             // Wait, let's look at the original code.
-             // "args.push(format!(\"caption: {}\", caption));" is always added.
-             // And figure wrapper is added if there is a name.
-             // This seems redundant but let's stick to it for compatibility.
-             args.push(format!("caption: {}", caption));
+        } else {
+            // Only pass caption to code-chunk if there is no name wrapper (no figure)
+            if let Some(caption) = &chunk.options.caption {
+                 args.push(format!("caption: {}", caption));
+            }
         }
         
         args.push(format!("echo: {}", chunk.options.echo));
-        args.push(format!("eval: {}", chunk.options.eval));
 
         if chunk.options.echo {
             let input_str = format!("[```{}\n{}```]", chunk.language, chunk.code.trim());
