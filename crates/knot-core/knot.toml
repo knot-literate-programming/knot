@@ -1,0 +1,7 @@
+# Configuration for knot-core tests
+#
+# This file is used by integration tests to locate the R helper file.
+# In production, users would have their own knot.toml in their project root.
+
+[helpers]
+r = "../../knot-r-package/R/typst.R"
