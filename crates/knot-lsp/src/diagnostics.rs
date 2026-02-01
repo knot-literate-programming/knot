@@ -49,3 +49,90 @@ pub fn get_diagnostics(text: &str) -> Vec<Diagnostic> {
 
     diagnostics
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_diagnostics_valid_document() {
+        let text = r###"
+= My Document
+
+Some text here.
+
+```{r}
+#| eval: true
+x <- 1
+```
+
+More text.
+"###;
+        let diagnostics = get_diagnostics(text);
+        assert_eq!(diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn test_get_diagnostics_empty_document() {
+        let text = "";
+        let diagnostics = get_diagnostics(text);
+        assert_eq!(diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn test_get_diagnostics_plain_text() {
+        let text = "Just some plain text without any chunks.";
+        let diagnostics = get_diagnostics(text);
+        assert_eq!(diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn test_get_diagnostics_with_inline_expressions() {
+        let text = r###"
+= Analysis
+
+The mean is `{r} mean(x)` and the sum is `{r} sum(x)`.
+"###;
+        let diagnostics = get_diagnostics(text);
+        assert_eq!(diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn test_get_diagnostics_multiple_chunks() {
+        let text = r###"
+```{r}
+x <- 1
+```
+
+```{r}
+y <- 2
+```
+"###;
+        let diagnostics = get_diagnostics(text);
+        assert_eq!(diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn test_get_diagnostics_chunk_with_options() {
+        let text = r###"
+```{r my-chunk}
+#| eval: false
+#| echo: true
+#| output: true
+#| cache: false
+#| fig-width: 10
+#| fig-height: 8
+plot(1:10)
+```
+"###;
+        let diagnostics = get_diagnostics(text);
+        assert_eq!(diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn test_get_diagnostics_inline_with_options() {
+        let text = "Result: `{r digits=3} pi` is approximately 3.142.";
+        let diagnostics = get_diagnostics(text);
+        assert_eq!(diagnostics.len(), 0);
+    }
+}
