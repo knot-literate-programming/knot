@@ -5,11 +5,16 @@
 // - Outputs are captured correctly
 // - Errors are handled properly
 //
-// Note: These tests require R to be installed and are ignored by default.
+// Requirements:
+// - R must be installed
+// - Some tests require R packages: ggplot2, svglite
+//
+// Note: These tests are ignored by default.
 // Run with: cargo test --test integration_execution -- --ignored
 
 use knot_core::executors::{r::RExecutor, LanguageExecutor, ExecutionResult};
 use std::fs;
+use std::path::PathBuf;
 use tempfile::TempDir;
 
 fn setup_executor() -> (TempDir, RExecutor) {
@@ -17,7 +22,16 @@ fn setup_executor() -> (TempDir, RExecutor) {
     let cache_dir = temp_dir.path().join(".knot_cache");
     fs::create_dir_all(&cache_dir).unwrap();
 
-    let mut executor = RExecutor::new(cache_dir, None).expect("Failed to create R executor");
+    // Use the knot R package source file from the repo
+    let r_helper_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("knot-r-package/R/typst.R");
+
+    let mut executor = RExecutor::new(cache_dir, Some(r_helper_path))
+        .expect("Failed to create R executor");
     executor.initialize().expect("Failed to initialize R");
 
     (temp_dir, executor)
@@ -54,12 +68,11 @@ fn test_r_error_handling() {
 }
 
 #[test]
-#[ignore] // Requires R and knot.r.package
+#[ignore] // Requires R
 fn test_dataframe_serialization() {
     let (_temp, mut executor) = setup_executor();
 
     let code = r#"
-library(knot.r.package)
 df <- data.frame(x = 1:3, y = 4:6)
 typst(df)
 "#;
@@ -80,13 +93,12 @@ typst(df)
 }
 
 #[test]
-#[ignore] // Requires R, ggplot2, and knot.r.package
+#[ignore] // Requires R, ggplot2, and svglite packages
 fn test_plot_generation() {
     let (_temp, mut executor) = setup_executor();
 
     let code = r#"
 library(ggplot2)
-library(knot.r.package)
 gg <- ggplot(iris, aes(x = Sepal.Length, y = Sepal.Width)) +
   geom_point()
 typst(gg)
@@ -107,13 +119,12 @@ typst(gg)
 }
 
 #[test]
-#[ignore] // Requires R and knot.r.package
+#[ignore] // Requires R, ggplot2, and svglite packages
 fn test_combined_dataframe_and_plot() {
     let (_temp, mut executor) = setup_executor();
 
     let code = r#"
 library(ggplot2)
-library(knot.r.package)
 
 df <- data.frame(x = 1:3, y = 4:6)
 typst(df)
