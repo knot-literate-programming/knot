@@ -175,15 +175,17 @@ r = "lib/knot.R"
 "#;
 
         let config: Config = toml::from_str(toml).unwrap();
-        let path = config.r_helper_path();
+        let project_root = Path::new("/project");
+        let path = config.r_helper_path(project_root);
         assert!(path.is_some());
-        assert_eq!(path.unwrap(), PathBuf::from("lib/knot.R"));
+        assert_eq!(path.unwrap(), PathBuf::from("/project/lib/knot.R"));
     }
 
     #[test]
     fn test_r_helper_path_none() {
         let config = Config::default();
-        assert!(config.r_helper_path().is_none());
+        let project_root = Path::new("/project");
+        assert!(config.r_helper_path(project_root).is_none());
     }
 
     #[test]
@@ -194,15 +196,17 @@ typst = "lib/knot.typ"
 "#;
 
         let config: Config = toml::from_str(toml).unwrap();
-        let path = config.typst_helper_path();
+        let project_root = Path::new("/project");
+        let path = config.typst_helper_path(project_root);
         assert!(path.is_some());
-        assert_eq!(path.unwrap(), PathBuf::from("lib/knot.typ"));
+        assert_eq!(path.unwrap(), PathBuf::from("/project/lib/knot.typ"));
     }
 
     #[test]
     fn test_typst_helper_path_none() {
         let config = Config::default();
-        assert!(config.typst_helper_path().is_none());
+        let project_root = Path::new("/project");
+        assert!(config.typst_helper_path(project_root).is_none());
     }
 
     #[test]
