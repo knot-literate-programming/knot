@@ -31,6 +31,8 @@ enum Commands {
         /// The main knot file to compile
         file: PathBuf,
     },
+    /// Install the VSCode extension
+    InstallVscode,
 }
 
 fn main() -> Result<()> {
@@ -45,6 +47,9 @@ fn main() -> Result<()> {
         }
         Commands::Compile { file } => {
             compile(file)?;
+        }
+        Commands::InstallVscode => {
+            install_vscode()?;
         }
     }
 
@@ -196,6 +201,114 @@ fn compile(file: &PathBuf) -> Result<()> {
     }
 
     info!("✓ Successfully compiled PDF: {:?}", pdf_output_path);
+
+    Ok(())
+}
+
+/// Install the VSCode extension
+fn install_vscode() -> Result<()> {
+    use std::env;
+    use std::process::Command;
+
+    info!("🔧 Installing VSCode extension...");
+
+    // Find the editors/vscode directory
+    // Start from current directory and go up to find the knot repo root
+    let mut current_dir = env::current_dir()?;
+    let vscode_dir = loop {
+        let candidate = current_dir.join("editors").join("vscode");
+        if candidate.exists() && candidate.is_dir() {
+            break candidate;
+        }
+
+        // Try going up one level
+        match current_dir.parent() {
+            Some(parent) => current_dir = parent.to_path_buf(),
+            None => anyhow::bail!(
+                "Could not find editors/vscode directory. \
+                 Please run this command from within the knot repository."
+            ),
+        }
+    };
+
+    println!("📂 Found extension at: {:?}", vscode_dir);
+
+    // Step 1: npm install
+    println!("\n📦 Installing npm dependencies...");
+    let npm_install = Command::new("npm")
+        .arg("install")
+        .current_dir(&vscode_dir)
+        .status()
+        .context("Failed to run 'npm install'. Is npm installed?")?;
+
+    if !npm_install.success() {
+        anyhow::bail!("npm install failed");
+    }
+    println!("  ✓ Dependencies installed");
+
+    // Step 2: npm run compile
+    println!("\n🔨 Compiling TypeScript...");
+    let npm_compile = Command::new("npm")
+        .arg("run")
+        .arg("compile")
+        .current_dir(&vscode_dir)
+        .status()
+        .context("Failed to run 'npm run compile'")?;
+
+    if !npm_compile.success() {
+        anyhow::bail!("npm run compile failed");
+    }
+    println!("  ✓ TypeScript compiled");
+
+    // Step 3: npm run package (creates .vsix)
+    println!("\n📦 Packaging extension...");
+    let npm_package = Command::new("npm")
+        .arg("run")
+        .arg("package")
+        .current_dir(&vscode_dir)
+        .status()
+        .context("Failed to run 'npm run package'. Is @vscode/vsce installed?")?;
+
+    if !npm_package.success() {
+        anyhow::bail!("npm run package failed");
+    }
+    println!("  ✓ Extension packaged");
+
+    // Step 4: Find the .vsix file
+    let vsix_files: Vec<_> = fs::read_dir(&vscode_dir)?
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry.path().extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| ext == "vsix")
+                .unwrap_or(false)
+        })
+        .collect();
+
+    if vsix_files.is_empty() {
+        anyhow::bail!("No .vsix file found after packaging");
+    }
+
+    let vsix_path = vsix_files[0].path();
+    println!("\n📦 Found package: {:?}", vsix_path.file_name().unwrap());
+
+    // Step 5: Install with code --install-extension
+    println!("\n🚀 Installing extension in VSCode...");
+    let install_output = Command::new("code")
+        .arg("--install-extension")
+        .arg(&vsix_path)
+        .current_dir(&vscode_dir)
+        .output()
+        .context("Failed to run 'code --install-extension'. Is VSCode CLI installed?")?;
+
+    if !install_output.status.success() {
+        let stderr = String::from_utf8_lossy(&install_output.stderr);
+        anyhow::bail!("VSCode installation failed:\n{}", stderr);
+    }
+
+    println!("  ✓ Extension installed successfully!");
+    println!("\n✅ Done! Restart VSCode to activate the Knot extension.");
+    println!("\n💡 Tip: Open a .knot file to see syntax highlighting and LSP features.");
 
     Ok(())
 }
