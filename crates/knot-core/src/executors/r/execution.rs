@@ -3,16 +3,23 @@
 // Handles two types of R code execution:
 // 1. Full chunk execution (with rich output support)
 // 2. Inline expression execution (formatted for inline display)
+//
+// Uses side-channel (via KNOT_METADATA_FILE) for robust communication,
+// with fallback to stdout parsing for backward compatibility.
 
 use super::{formatters, output_parser, process::RProcess, RExecutor, BOUNDARY};
-use crate::executors::{ExecutionResult, LanguageExecutor};
+use crate::executors::{ExecutionResult, LanguageExecutor, OutputMetadata, SideChannel};
 use anyhow::{Context, Result};
 use std::io::{BufRead, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::thread;
 
 /// Executes a code chunk in the persistent R process
 pub fn execute(process: &mut RProcess, cache_dir: &Path, code: &str) -> Result<ExecutionResult> {
+    // Create side-channel for this chunk
+    let channel = SideChannel::new()?;
+    channel.setup_env()?;
+
     let stdin = process
         .stdin
         .as_mut()
@@ -96,7 +103,15 @@ pub fn execute(process: &mut RProcess, cache_dir: &Path, code: &str) -> Result<E
         }
     }
 
-    // Check if output contains serialized data from knot.r.package
+    // Read metadata from side-channel
+    let metadata = channel.read_metadata()?;
+
+    // Priority: side-channel metadata > stdout parsing (fallback)
+    if !metadata.is_empty() {
+        return metadata_to_execution_result(metadata, &stdout_output);
+    }
+
+    // Fallback to old stdout parsing for backward compatibility
     output_parser::parse_output(&stdout_output, cache_dir)
 }
 
@@ -120,5 +135,56 @@ pub fn execute_inline(executor: &mut RExecutor, code: &str) -> Result<String> {
     };
 
     formatters::format_inline_output(&output)
+}
+
+/// Convert side-channel metadata to ExecutionResult
+///
+/// Priority: side-channel metadata > stdout parsing (fallback)
+fn metadata_to_execution_result(
+    metadata: Vec<OutputMetadata>,
+    stdout_text: &str,
+) -> Result<ExecutionResult> {
+    let mut text_content = String::new();
+    let mut plot_path: Option<PathBuf> = None;
+    let mut dataframe_path: Option<PathBuf> = None;
+
+    // Process metadata from side-channel
+    for item in metadata {
+        match item {
+            OutputMetadata::Text { content } => {
+                if !text_content.is_empty() {
+                    text_content.push('\n');
+                }
+                text_content.push_str(&content);
+            }
+            OutputMetadata::Plot { path, .. } => {
+                plot_path = Some(path);
+            }
+            OutputMetadata::DataFrame { path } => {
+                dataframe_path = Some(path);
+            }
+        }
+    }
+
+    // If no metadata from side-channel, use stdout text
+    if text_content.is_empty() && !stdout_text.trim().is_empty() {
+        text_content = stdout_text.to_string();
+    }
+
+    // Build ExecutionResult based on what we have
+    match (text_content.is_empty(), dataframe_path, plot_path) {
+        (false, None, None) => Ok(ExecutionResult::Text(text_content)),
+        (_, Some(df), None) => Ok(ExecutionResult::DataFrame(df)),
+        (false, None, Some(plot)) => Ok(ExecutionResult::TextAndPlot {
+            text: text_content,
+            plot,
+        }),
+        (_, None, Some(plot)) => Ok(ExecutionResult::Plot(plot)),
+        (_, Some(df), Some(plot)) => Ok(ExecutionResult::DataFrameAndPlot {
+            dataframe: df,
+            plot,
+        }),
+        (true, None, None) => Ok(ExecutionResult::Text(String::new())),
+    }
 }
 
