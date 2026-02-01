@@ -111,4 +111,103 @@ r = "@cran/knot"
         assert_eq!(config.helpers.typst, Some("@preview/knot".to_string()));
         assert_eq!(config.helpers.r, Some("@cran/knot".to_string()));
     }
+
+    #[test]
+    fn test_load_from_nonexistent_file() {
+        // Should return default config without error
+        let result = Config::load_from_path("/nonexistent/path/knot.toml");
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert!(config.document.main.is_none());
+        assert!(config.helpers.r.is_none());
+    }
+
+    #[test]
+    fn test_load_from_invalid_toml() {
+        use std::fs;
+        use tempfile::NamedTempFile;
+
+        let temp_file = NamedTempFile::new().unwrap();
+        fs::write(temp_file.path(), "this is not valid TOML [[[\n").unwrap();
+
+        let result = Config::load_from_path(temp_file.path());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Failed to parse"));
+    }
+
+    #[test]
+    fn test_r_helper_path() {
+        let toml = r#"
+[helpers]
+r = "lib/knot.R"
+"#;
+
+        let config: Config = toml::from_str(toml).unwrap();
+        let path = config.r_helper_path();
+        assert!(path.is_some());
+        assert_eq!(path.unwrap(), PathBuf::from("lib/knot.R"));
+    }
+
+    #[test]
+    fn test_r_helper_path_none() {
+        let config = Config::default();
+        assert!(config.r_helper_path().is_none());
+    }
+
+    #[test]
+    fn test_typst_helper_path() {
+        let toml = r#"
+[helpers]
+typst = "lib/knot.typ"
+"#;
+
+        let config: Config = toml::from_str(toml).unwrap();
+        let path = config.typst_helper_path();
+        assert!(path.is_some());
+        assert_eq!(path.unwrap(), PathBuf::from("lib/knot.typ"));
+    }
+
+    #[test]
+    fn test_typst_helper_path_none() {
+        let config = Config::default();
+        assert!(config.typst_helper_path().is_none());
+    }
+
+    #[test]
+    fn test_default_config() {
+        let config = Config::default();
+        assert!(config.document.main.is_none());
+        assert!(config.helpers.typst.is_none());
+        assert!(config.helpers.r.is_none());
+    }
+
+    #[test]
+    fn test_config_with_all_fields() {
+        let toml = r#"
+[document]
+main = "main.knot"
+
+[helpers]
+typst = "lib/knot.typ"
+r = "lib/knot.R"
+"#;
+
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.document.main, Some("main.knot".to_string()));
+        assert_eq!(config.helpers.typst, Some("lib/knot.typ".to_string()));
+        assert_eq!(config.helpers.r, Some("lib/knot.R".to_string()));
+    }
+
+    #[test]
+    fn test_config_partial_fields() {
+        let toml = r#"
+[document]
+main = "main.knot"
+"#;
+
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.document.main, Some("main.knot".to_string()));
+        assert!(config.helpers.typst.is_none());
+        assert!(config.helpers.r.is_none());
+    }
 }
