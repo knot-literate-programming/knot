@@ -31,18 +31,10 @@ enum Commands {
         /// The .knot file to compile
         file: PathBuf,
     },
-    /// Watch project files and regenerate on changes (with live PDF preview)
-    Watch {
-        /// Optional: specific .knot file to watch (defaults to project main)
-        #[arg(default_value = None)]
-        file: Option<PathBuf>,
-    },
+    /// Watch project and regenerate on changes (with live PDF preview)
+    Watch,
     /// Build the entire project and generate final PDF
-    Build {
-        /// Optional: specific .knot file to build (defaults to project main)
-        #[arg(default_value = None)]
-        file: Option<PathBuf>,
-    },
+    Build,
     /// Install the VSCode extension
     InstallVscode,
 }
@@ -60,11 +52,11 @@ fn main() -> Result<()> {
         Commands::Compile { file } => {
             compile(file)?;
         }
-        Commands::Watch { file } => {
-            watch(file.as_ref())?;
+        Commands::Watch => {
+            watch()?;
         }
-        Commands::Build { file } => {
-            build(file.as_ref())?;
+        Commands::Build => {
+            build()?;
         }
         Commands::InstallVscode => {
             install_vscode()?;
@@ -196,59 +188,64 @@ fn compile(file: &PathBuf) -> Result<()> {
 /// Build the project and generate final PDF
 ///
 /// This command:
-/// - Compiles .knot files that have changed (hash-based)
-/// - Generates .typ files
-/// - Compiles the final PDF with typst
-/// - Names the PDF according to project name (from knot.toml)
-fn build(file: Option<&PathBuf>) -> Result<()> {
+/// - Finds project root (knot.toml)
+/// - Reads main file from knot.toml
+/// - Compiles .knot → .typ
+/// - Compiles final PDF with typst (using --root for imports)
+/// - Names PDF according to main file
+fn build() -> Result<()> {
     use knot_core::config::Config;
 
-    // Determine which file to build
-    let main_file = if let Some(f) = file {
-        f.clone()
-    } else {
-        // Try to find main file from knot.toml
-        let (config, _project_root) = Config::find_and_load(std::path::Path::new("."))?;
-        if let Some(main) = config.document.main {
-            PathBuf::from(main)
-        } else {
-            anyhow::bail!("No file specified and no 'main' found in knot.toml. Usage: knot build <file.knot>");
-        }
-    };
+    info!("🔨 Building project...");
 
-    info!("🔨 Building project from {:?}...", main_file);
+    // Step 1: Find project root by searching for knot.toml
+    let current_dir = std::env::current_dir()
+        .context("Failed to get current directory")?;
+    let (config, project_root) = Config::find_and_load(&current_dir)?;
 
-    // Step 1: Compile .knot → .typ
+    // Step 2: Get main file from knot.toml
+    let main_file_name = config.document.main
+        .ok_or_else(|| anyhow::anyhow!(
+            "No 'main' file specified in knot.toml.\n\
+             Add: [document]\n     main = \"main.knot\""
+        ))?;
+
+    let main_file = project_root.join(&main_file_name);
+
+    if !main_file.exists() {
+        anyhow::bail!(
+            "Main file not found: {:?}\n\
+             Specified in knot.toml as: {}",
+            main_file,
+            main_file_name
+        );
+    }
+
+    info!("📄 Main file: {}", main_file.display());
+    info!("📁 Project root: {}", project_root.display());
+
+    // Step 3: Compile .knot → .typ
     compile(&main_file)?;
 
-    // Step 2: Determine .typ output path (dotfile)
+    // Step 4: Determine .typ output path (dotfile)
     let typ_output_path = {
-        let parent = main_file.parent().unwrap_or(std::path::Path::new("."));
         let stem = main_file.file_stem().unwrap_or(std::ffi::OsStr::new("main"));
-        parent.join(format!(".{}.typ", stem.to_string_lossy()))
+        project_root.join(format!(".{}.typ", stem.to_string_lossy()))
     };
 
-    // Step 3: Compile PDF with typst
-    info!("📦 Compiling PDF with Typst...");
-
-    // Determine PDF name from project config or file stem
-    let pdf_name = {
-        let (_config, _project_root) = Config::find_and_load(
-            main_file.parent().unwrap_or(std::path::Path::new("."))
-        )?;
-
-        // Try to get project name from knot.toml
-        // For now, just use the file stem (we'll add package.name to config later)
+    // Step 5: Determine PDF output path
+    let pdf_output_path = {
         let stem = main_file.file_stem().unwrap_or(std::ffi::OsStr::new("output"));
-        format!("{}.pdf", stem.to_string_lossy())
+        project_root.join(format!("{}.pdf", stem.to_string_lossy()))
     };
 
-    let pdf_output_path = main_file.parent()
-        .unwrap_or(std::path::Path::new("."))
-        .join(&pdf_name);
+    // Step 6: Compile PDF with typst (with --root for imports)
+    info!("📦 Compiling PDF with Typst...");
 
     let output = std::process::Command::new("typst")
         .arg("compile")
+        .arg("--root")
+        .arg(&project_root)
         .arg(&typ_output_path)
         .arg(&pdf_output_path)
         .output()
@@ -270,52 +267,67 @@ fn build(file: Option<&PathBuf>) -> Result<()> {
     Ok(())
 }
 
-/// Watch project files and regenerate on changes
+/// Watch project and regenerate on changes
 ///
 /// This command:
-/// - Does an initial build
-/// - Launches 'typst watch' for live PDF preview
-/// - Watches .knot files for changes and recompiles as needed
-fn watch(file: Option<&PathBuf>) -> Result<()> {
+/// - Finds project root (knot.toml)
+/// - Does initial compile
+/// - Launches 'typst watch' for live PDF preview (with --root)
+/// - TODO: Watch .knot files for changes and recompile
+fn watch() -> Result<()> {
     use knot_core::config::Config;
 
-    // Determine which file to watch
-    let main_file = if let Some(f) = file {
-        f.clone()
-    } else {
-        // Try to find main file from knot.toml
-        let (config, _project_root) = Config::find_and_load(std::path::Path::new("."))?;
-        if let Some(main) = config.document.main {
-            PathBuf::from(main)
-        } else {
-            anyhow::bail!("No file specified and no 'main' found in knot.toml. Usage: knot watch <file.knot>");
-        }
-    };
+    info!("👀 Starting watch mode...");
 
-    info!("👀 Watching {:?}...", main_file);
+    // Step 1: Find project root by searching for knot.toml
+    let current_dir = std::env::current_dir()
+        .context("Failed to get current directory")?;
+    let (config, project_root) = Config::find_and_load(&current_dir)?;
 
-    // Step 1: Initial compile
+    // Step 2: Get main file from knot.toml
+    let main_file_name = config.document.main
+        .ok_or_else(|| anyhow::anyhow!(
+            "No 'main' file specified in knot.toml.\n\
+             Add: [document]\n     main = \"main.knot\""
+        ))?;
+
+    let main_file = project_root.join(&main_file_name);
+
+    if !main_file.exists() {
+        anyhow::bail!(
+            "Main file not found: {:?}\n\
+             Specified in knot.toml as: {}",
+            main_file,
+            main_file_name
+        );
+    }
+
+    info!("📄 Main file: {}", main_file.display());
+    info!("📁 Project root: {}", project_root.display());
+
+    // Step 3: Initial compile
     compile(&main_file)?;
 
-    // Step 2: Determine .typ output path (dotfile)
+    // Step 4: Determine .typ output path (dotfile)
     let typ_output_path = {
-        let parent = main_file.parent().unwrap_or(std::path::Path::new("."));
         let stem = main_file.file_stem().unwrap_or(std::ffi::OsStr::new("main"));
-        parent.join(format!(".{}.typ", stem.to_string_lossy()))
+        project_root.join(format!(".{}.typ", stem.to_string_lossy()))
     };
 
-    // Step 3: Launch typst watch in background
+    // Step 5: Launch typst watch with --root for imports
     info!("🔍 Launching typst watch for live preview...");
     println!("👀 Watching for changes. Press Ctrl+C to stop.");
-    println!("💡 Edit {:?} to see live updates.", main_file);
+    println!("💡 Edit {} to see live updates.", main_file.display());
 
     let mut typst_watch = std::process::Command::new("typst")
         .arg("watch")
+        .arg("--root")
+        .arg(&project_root)
         .arg(&typ_output_path)
         .spawn()
         .context("Failed to launch 'typst watch'. Is Typst installed?")?;
 
-    // For now, just wait for typst watch to finish (user Ctrl+C)
+    // Wait for typst watch to finish (user Ctrl+C)
     // TODO: Add file watching for .knot changes and recompile
     let status = typst_watch.wait()?;
 
