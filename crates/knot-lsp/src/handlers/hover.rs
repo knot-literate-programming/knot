@@ -103,3 +103,173 @@ pub async fn handle_hover(state: &ServerState, params: HoverParams) -> Result<Op
     }
     Ok(None)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::ServerState;
+    use crate::position_mapper::PositionMapper;
+
+    async fn create_test_state(uri: &str, text: &str) -> (ServerState, Url) {
+        let state = ServerState::new(None);
+        let url = Url::parse(uri).unwrap();
+
+        // Insert document
+        {
+            let mut docs = state.documents.write().await;
+            docs.insert(url.clone(), text.to_string());
+        }
+
+        // Insert mapper (needs typ_content, use same text for simplicity in tests)
+        let mapper = PositionMapper::new(text, text);
+        {
+            let mut mappers = state.mappers.write().await;
+            mappers.insert(url.clone(), mapper);
+        }
+
+        (state, url)
+    }
+
+    fn create_hover_params(uri: &Url, line: u32, character: u32) -> HoverParams {
+        HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position { line, character },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_hover_on_chunk_fence() {
+        let text = r#"= Document
+
+```{r my-chunk}
+#| eval: true
+#| echo: false
+x <- 1:10
+mean(x)
+```
+
+More text.
+"#;
+
+        let (state, uri) = create_test_state("file:///test.knot", text).await;
+
+        // Hover on the opening fence (line 2: ```{r my-chunk})
+        let params = create_hover_params(&uri, 2, 0);
+        let result = handle_hover(&state, params).await.unwrap();
+
+        assert!(result.is_some());
+        let hover = result.unwrap();
+
+        if let HoverContents::Markup(content) = hover.contents {
+            assert!(content.value.contains("my-chunk"));
+            assert!(content.value.contains("Language"));
+            assert!(content.value.contains("r"));
+            assert!(content.value.contains("Eval"));
+            assert!(content.value.contains("true"));
+            assert!(content.value.contains("Echo"));
+            assert!(content.value.contains("false"));
+        } else {
+            panic!("Expected Markup hover contents");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_hover_in_chunk_code() {
+        let text = r#"```{r}
+x <- 1:10
+mean(x)
+```"#;
+
+        let (state, uri) = create_test_state("file:///test.knot", text).await;
+
+        // Hover inside R code (line 1: x <- 1:10)
+        let params = create_hover_params(&uri, 1, 5);
+        let result = handle_hover(&state, params).await.unwrap();
+
+        // Should return None to allow R LSP to handle
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_hover_on_closing_fence() {
+        let text = r#"```{r test}
+x <- 1
+```"#;
+
+        let (state, uri) = create_test_state("file:///test.knot", text).await;
+
+        // Hover on closing fence (line 2: ```)
+        let params = create_hover_params(&uri, 2, 0);
+        let result = handle_hover(&state, params).await.unwrap();
+
+        assert!(result.is_some());
+        let hover = result.unwrap();
+
+        if let HoverContents::Markup(content) = hover.contents {
+            assert!(content.value.contains("test"));
+        } else {
+            panic!("Expected Markup hover contents");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_hover_outside_chunk() {
+        let text = r#"= Document
+
+```{r}
+x <- 1
+```
+
+Regular text here.
+"#;
+
+        let (state, uri) = create_test_state("file:///test.knot", text).await;
+
+        // Hover on regular text (line 6)
+        let params = create_hover_params(&uri, 6, 0);
+        let result = handle_hover(&state, params).await.unwrap();
+
+        // Should return None (would forward to tinymist if available)
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_hover_unnamed_chunk() {
+        let text = r#"```{r}
+#| cache: true
+x <- 1
+```"#;
+
+        let (state, uri) = create_test_state("file:///test.knot", text).await;
+
+        // Hover on opening fence
+        let params = create_hover_params(&uri, 0, 0);
+        let result = handle_hover(&state, params).await.unwrap();
+
+        assert!(result.is_some());
+        let hover = result.unwrap();
+
+        if let HoverContents::Markup(content) = hover.contents {
+            assert!(content.value.contains("unnamed"));
+            assert!(content.value.contains("Cache"));
+            assert!(content.value.contains("true"));
+        } else {
+            panic!("Expected Markup hover contents");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_hover_document_not_found() {
+        let state = ServerState::new(None);
+        let uri = Url::parse("file:///nonexistent.knot").unwrap();
+
+        let params = create_hover_params(&uri, 0, 0);
+        let result = handle_hover(&state, params).await.unwrap();
+
+        // Should return None when document not found
+        assert!(result.is_none());
+    }
+}

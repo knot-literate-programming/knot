@@ -13,6 +13,8 @@ pub struct PositionMapper {
     /// List of byte ranges that are masked (chunks or inline)
     /// Used to check if a position is in a masked region.
     masked_byte_ranges: Vec<(usize, usize)>,
+    /// Original content for position-to-byte conversion
+    knot_content: String,
 }
 
 impl PositionMapper {
@@ -20,7 +22,7 @@ impl PositionMapper {
     /// Note: we only need knot_content because the mapping is 1:1.
     pub fn new(knot_content: &str, _typ_content: &str) -> Self {
         let mut masked_byte_ranges = Vec::new();
-        
+
         if let Ok(doc) = Document::parse(knot_content.to_string()) {
             for chunk in doc.chunks {
                 masked_byte_ranges.push((chunk.start_byte, chunk.end_byte));
@@ -29,9 +31,10 @@ impl PositionMapper {
                 masked_byte_ranges.push((inline.start, inline.end));
             }
         }
-        
+
         Self {
             masked_byte_ranges,
+            knot_content: knot_content.to_string(),
         }
     }
 
@@ -47,11 +50,40 @@ impl PositionMapper {
         Some(pos)
     }
 
-    /// Check if a knot position is inside a masked region
-    #[allow(dead_code)]
-    pub fn is_position_in_chunk(&self, _pos: Position) -> bool {
-        // For now, identity mapping is sufficient for diagnostics.
+    /// Check if a knot position is inside a masked region (chunk or inline expression)
+    pub fn is_position_in_chunk(&self, pos: Position) -> bool {
+        // Convert Position (line, character) to byte offset
+        let byte_offset = self.position_to_byte_offset(pos);
+
+        // Check if byte_offset is within any masked range
+        for (start, end) in &self.masked_byte_ranges {
+            if byte_offset >= *start && byte_offset < *end {
+                return true;
+            }
+        }
         false
+    }
+
+    /// Convert LSP Position (line, character) to byte offset in the document
+    fn position_to_byte_offset(&self, pos: Position) -> usize {
+        let mut line = 0;
+        let mut col = 0;
+
+        for (byte_idx, ch) in self.knot_content.char_indices() {
+            if line == pos.line as usize && col == pos.character as usize {
+                return byte_idx;
+            }
+
+            if ch == '\n' {
+                line += 1;
+                col = 0;
+            } else {
+                col += 1;
+            }
+        }
+
+        // If we reach the end, return the length
+        self.knot_content.len()
     }
 }
 
