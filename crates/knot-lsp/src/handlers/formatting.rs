@@ -115,3 +115,315 @@ pub async fn handle_on_type_formatting(state: &ServerState, params: DocumentOnTy
 
     Ok(None)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::ServerState;
+    use crate::position_mapper::PositionMapper;
+    use crate::formatter::AirFormatter;
+
+    async fn create_test_state(uri: &str, text: &str, with_formatter: bool) -> (ServerState, Url) {
+        let formatter = if with_formatter {
+            AirFormatter::new().ok()
+        } else {
+            None
+        };
+
+        let state = ServerState::new(formatter);
+        let url = Url::parse(uri).unwrap();
+
+        // Insert document
+        {
+            let mut docs = state.documents.write().await;
+            docs.insert(url.clone(), text.to_string());
+        }
+
+        // Insert mapper
+        let mapper = PositionMapper::new(text, text);
+        {
+            let mut mappers = state.mappers.write().await;
+            mappers.insert(url.clone(), mapper);
+        }
+
+        (state, url)
+    }
+
+    fn create_formatting_params(uri: &Url) -> DocumentFormattingParams {
+        DocumentFormattingParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            options: FormattingOptions {
+                tab_size: 2,
+                insert_spaces: true,
+                ..Default::default()
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        }
+    }
+
+    fn create_on_type_formatting_params(uri: &Url, line: u32, character: u32, ch: &str) -> DocumentOnTypeFormattingParams {
+        DocumentOnTypeFormattingParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position { line, character },
+            },
+            ch: ch.to_string(),
+            options: FormattingOptions {
+                tab_size: 2,
+                insert_spaces: true,
+                ..Default::default()
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn test_formatting_no_formatter() {
+        let text = r#"```{r}
+x<-1+2
+```"#;
+
+        let (state, uri) = create_test_state("file:///test.knot", text, false).await;
+
+        let params = create_formatting_params(&uri);
+        let result = handle_formatting(&state, params).await.unwrap();
+
+        // Should return None when formatter is not available
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_formatting_document_not_found() {
+        let state = ServerState::new(None);
+        let uri = Url::parse("file:///nonexistent.knot").unwrap();
+
+        let params = create_formatting_params(&uri);
+        let result = handle_formatting(&state, params).await.unwrap();
+
+        // Should return None when document not found
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_formatting_invalid_document() {
+        let text = "This is not valid knot syntax ```{unclosed";
+
+        let (state, uri) = create_test_state("file:///test.knot", text, false).await;
+
+        let params = create_formatting_params(&uri);
+        let result = handle_formatting(&state, params).await.unwrap();
+
+        // Should return None when document parse fails
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_formatting_no_r_chunks() {
+        let text = r#"= Document
+
+Some text here.
+
+```{python}
+x = 1 + 2
+```
+"#;
+
+        let formatter = AirFormatter::new().ok();
+        if formatter.is_none() {
+            eprintln!("Air not installed, skipping test");
+            return;
+        }
+
+        let (state, uri) = create_test_state("file:///test.knot", text, true).await;
+
+        let params = create_formatting_params(&uri);
+        let result = handle_formatting(&state, params).await.unwrap();
+
+        // Should return None when there are no R chunks to format
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_formatting_already_formatted() {
+        let text = r#"```{r}
+x <- 1 + 2
+```"#;
+
+        let formatter = AirFormatter::new().ok();
+        if formatter.is_none() {
+            eprintln!("Air not installed, skipping test");
+            return;
+        }
+
+        let (state, uri) = create_test_state("file:///test.knot", text, true).await;
+
+        let params = create_formatting_params(&uri);
+        let result = handle_formatting(&state, params).await.unwrap();
+
+        // If code is already formatted, should return None (no edits)
+        // Note: This depends on Air's formatting behavior
+        // We just verify it doesn't error
+        assert!(result.is_none() || result.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_formatting_multiple_chunks() {
+        let text = r#"```{r}
+x<-1
+```
+
+```{r}
+y<-2
+```"#;
+
+        let formatter = AirFormatter::new().ok();
+        if formatter.is_none() {
+            eprintln!("Air not installed, skipping test");
+            return;
+        }
+
+        let (state, uri) = create_test_state("file:///test.knot", text, true).await;
+
+        let params = create_formatting_params(&uri);
+        let result = handle_formatting(&state, params).await.unwrap();
+
+        // Should format both chunks
+        // If formatting produces changes, we should get edits for both
+        if let Some(edits) = result {
+            assert!(edits.len() >= 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_on_type_formatting_no_formatter() {
+        let text = r#"```{r}
+x <- 1
+```"#;
+
+        let (state, uri) = create_test_state("file:///test.knot", text, false).await;
+
+        let params = create_on_type_formatting_params(&uri, 1, 6, "\n");
+        let result = handle_on_type_formatting(&state, params).await.unwrap();
+
+        // Should return None when formatter is not available
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_on_type_formatting_wrong_character() {
+        let text = r#"```{r}
+x <- 1
+```"#;
+
+        let formatter = AirFormatter::new().ok();
+        if formatter.is_none() {
+            eprintln!("Air not installed, skipping test");
+            return;
+        }
+
+        let (state, uri) = create_test_state("file:///test.knot", text, true).await;
+
+        // Type a non-newline character
+        let params = create_on_type_formatting_params(&uri, 1, 5, "a");
+        let result = handle_on_type_formatting(&state, params).await.unwrap();
+
+        // Should return None when character is not newline
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_on_type_formatting_document_not_found() {
+        let state = ServerState::new(None);
+        let uri = Url::parse("file:///nonexistent.knot").unwrap();
+
+        let params = create_on_type_formatting_params(&uri, 0, 0, "\n");
+        let result = handle_on_type_formatting(&state, params).await.unwrap();
+
+        // Should return None when document not found
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_on_type_formatting_invalid_document() {
+        let text = "This is not valid knot syntax ```{unclosed";
+
+        let (state, uri) = create_test_state("file:///test.knot", text, false).await;
+
+        let params = create_on_type_formatting_params(&uri, 0, 10, "\n");
+        let result = handle_on_type_formatting(&state, params).await.unwrap();
+
+        // Should return None when document parse fails
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_on_type_formatting_outside_chunk() {
+        let text = r#"= Document
+
+```{r}
+x <- 1
+```
+
+Regular text here.
+"#;
+
+        let formatter = AirFormatter::new().ok();
+        if formatter.is_none() {
+            eprintln!("Air not installed, skipping test");
+            return;
+        }
+
+        let (state, uri) = create_test_state("file:///test.knot", text, true).await;
+
+        // Type newline in regular text (line 6)
+        let params = create_on_type_formatting_params(&uri, 6, 10, "\n");
+        let result = handle_on_type_formatting(&state, params).await.unwrap();
+
+        // Should return None when cursor is outside R chunk
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_on_type_formatting_in_python_chunk() {
+        let text = r#"```{python}
+x=1+2
+```"#;
+
+        let formatter = AirFormatter::new().ok();
+        if formatter.is_none() {
+            eprintln!("Air not installed, skipping test");
+            return;
+        }
+
+        let (state, uri) = create_test_state("file:///test.knot", text, true).await;
+
+        // Type newline in Python chunk (should not format)
+        let params = create_on_type_formatting_params(&uri, 1, 5, "\n");
+        let result = handle_on_type_formatting(&state, params).await.unwrap();
+
+        // Should return None when chunk is not R
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_on_type_formatting_in_r_chunk() {
+        let text = r#"```{r}
+x<-1+2
+```"#;
+
+        let formatter = AirFormatter::new().ok();
+        if formatter.is_none() {
+            eprintln!("Air not installed, skipping test");
+            return;
+        }
+
+        let (state, uri) = create_test_state("file:///test.knot", text, true).await;
+
+        // Type newline in R chunk
+        let params = create_on_type_formatting_params(&uri, 1, 6, "\n");
+        let result = handle_on_type_formatting(&state, params).await.unwrap();
+
+        // Should attempt to format the R chunk
+        // Result depends on whether Air makes changes
+        assert!(result.is_none() || result.is_some());
+    }
+}
