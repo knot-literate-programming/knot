@@ -76,3 +76,230 @@ impl Drop for RExecutor {
         self.process.terminate();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+    use std::path::PathBuf;
+
+    fn get_r_helper_path() -> PathBuf {
+        // Get workspace root (2 levels up from knot-core crate)
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let workspace_root = manifest_dir.parent().unwrap().parent().unwrap();
+        workspace_root.join("knot-r-package/R/typst.R")
+    }
+
+    fn setup_executor() -> (TempDir, RExecutor) {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_dir = temp_dir.path().to_path_buf();
+        let r_helper_path = Some(get_r_helper_path());
+
+        let mut executor = RExecutor::new(cache_dir, r_helper_path).unwrap();
+        executor.initialize().unwrap();
+
+        (temp_dir, executor)
+    }
+
+    #[test]
+    #[ignore] // Requires R installation
+    fn test_execute_simple_expression() {
+        let (_temp_dir, mut executor) = setup_executor();
+
+        let result = executor.execute("1 + 1").unwrap();
+
+        match result {
+            ExecutionResult::Text(output) => {
+                assert!(output.contains("2"));
+            }
+            _ => panic!("Expected Text result"),
+        }
+    }
+
+    #[test]
+    #[ignore] // Requires R installation
+    fn test_execute_variable_assignment() {
+        let (_temp_dir, mut executor) = setup_executor();
+
+        // Assign variable
+        executor.execute("x <- 42").unwrap();
+
+        // Use variable
+        let result = executor.execute("x").unwrap();
+
+        match result {
+            ExecutionResult::Text(output) => {
+                assert!(output.contains("42"));
+            }
+            _ => panic!("Expected Text result"),
+        }
+    }
+
+    #[test]
+    #[ignore] // Requires R installation
+    fn test_execute_persistence_across_chunks() {
+        let (_temp_dir, mut executor) = setup_executor();
+
+        // First chunk
+        executor.execute("x <- 10").unwrap();
+
+        // Second chunk uses variable from first
+        let result = executor.execute("y <- x * 2; y").unwrap();
+
+        match result {
+            ExecutionResult::Text(output) => {
+                assert!(output.contains("20"));
+            }
+            _ => panic!("Expected Text result"),
+        }
+    }
+
+    #[test]
+    #[ignore] // Requires R installation
+    fn test_execute_dataframe() {
+        let (_temp_dir, mut executor) = setup_executor();
+
+        let code = r#"
+df <- data.frame(a = 1:3, b = 4:6)
+typst(df)
+"#;
+
+        let result = executor.execute(code).unwrap();
+
+        match result {
+            ExecutionResult::DataFrame(path) => {
+                assert!(path.exists());
+                assert_eq!(path.extension().unwrap(), "csv");
+
+                // Check CSV content
+                let content = std::fs::read_to_string(&path).unwrap();
+                eprintln!("CSV content:\n{}", content);
+
+                // CSV should contain column names and data
+                // (Format may vary, so just check it's valid CSV with data)
+                assert!(!content.is_empty());
+                assert!(content.contains("a") && content.contains("b"));
+                assert!(content.contains("1") && content.contains("4"));
+            }
+            _ => panic!("Expected DataFrame result, got {:?}", result),
+        }
+    }
+
+    #[test]
+    #[ignore] // Requires R installation
+    fn test_execute_inline_scalar() {
+        let (_temp_dir, mut executor) = setup_executor();
+
+        let result = executor.execute_inline("2 + 2").unwrap();
+
+        // Should extract just the value
+        assert_eq!(result.trim(), "4");
+    }
+
+    #[test]
+    #[ignore] // Requires R installation
+    fn test_execute_inline_string() {
+        let (_temp_dir, mut executor) = setup_executor();
+
+        let result = executor.execute_inline("'hello'").unwrap();
+
+        assert!(result.contains("hello"));
+    }
+
+    #[test]
+    #[ignore] // Requires R installation
+    fn test_execute_inline_with_variable() {
+        let (_temp_dir, mut executor) = setup_executor();
+
+        // Set up variable in chunk
+        executor.execute("x <- 100").unwrap();
+
+        // Use in inline
+        let result = executor.execute_inline("x * 2").unwrap();
+
+        assert_eq!(result.trim(), "200");
+    }
+
+    #[test]
+    #[ignore] // Requires R installation
+    fn test_execute_inline_vector_formatted() {
+        let (_temp_dir, mut executor) = setup_executor();
+
+        let result = executor.execute_inline("1:5").unwrap();
+
+        // Vectors should be wrapped in backticks
+        assert!(result.starts_with("`"));
+        assert!(result.ends_with("`"));
+    }
+
+    #[test]
+    #[ignore] // Requires R installation
+    fn test_execute_inline_rejects_dataframe() {
+        let (_temp_dir, mut executor) = setup_executor();
+
+        // Try to use typst(df) in inline - should fail
+        let code = "df <- data.frame(a = 1:3); typst(df)";
+        let result = executor.execute_inline(code);
+
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        eprintln!("Error message: {}", error_msg);
+        assert!(error_msg.contains("DataFrames are not supported in inline"));
+    }
+
+    #[test]
+    #[ignore] // Requires R installation
+    fn test_execute_error_handling() {
+        let (_temp_dir, mut executor) = setup_executor();
+
+        // Invalid R code
+        let result = executor.execute("this_function_does_not_exist()");
+
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("could not find function") || error_msg.contains("introuvable"));
+    }
+
+    #[test]
+    #[ignore] // Requires R installation
+    fn test_execute_multiline_code() {
+        let (_temp_dir, mut executor) = setup_executor();
+
+        let code = r#"
+x <- 1
+y <- 2
+z <- x + y
+z
+"#;
+
+        let result = executor.execute(code).unwrap();
+
+        match result {
+            ExecutionResult::Text(output) => {
+                assert!(output.contains("3"));
+            }
+            _ => panic!("Expected Text result"),
+        }
+    }
+
+    #[test]
+    #[ignore] // Requires R installation
+    fn test_execute_with_comments() {
+        let (_temp_dir, mut executor) = setup_executor();
+
+        let code = r#"
+# This is a comment
+x <- 5  # Assign 5 to x
+x * 2   # Multiply by 2
+"#;
+
+        let result = executor.execute(code).unwrap();
+
+        match result {
+            ExecutionResult::Text(output) => {
+                assert!(output.contains("10"));
+            }
+            _ => panic!("Expected Text result"),
+        }
+    }
+}
