@@ -24,7 +24,7 @@ data("penguins")
 glimpse(penguins)
 ```
 
-The dataset contains #r[nrow(penguins)] observations of #r[ncol(penguins)] variables describing penguin characteristics.
+The dataset contains `{r} nrow(penguins)` observations of `{r} ncol(penguins)` variables describing penguin characteristics.
 
 == Data Splitting
 
@@ -43,7 +43,7 @@ penguins_train <- training(penguins_split)
 penguins_test <- testing(penguins_split)
 ```
 
-Our training set has #r[nrow(penguins_train)] observations, while the test set has #r[nrow(penguins_test)] observations.
+Our training set has `{r} nrow(penguins_train)` observations, while the test set has `{r} nrow(penguins_test)` observations.
 
 == Exploratory Data Analysis
 
@@ -83,13 +83,13 @@ penguin_recipe <- recipe(species ~ bill_length_mm + bill_depth_mm + flipper_leng
   step_normalize(all_predictors())
 ```
 
-#r:run[
+`{r, output=false}
 # Store model info for later
 model_name <- "Logistic Regression"
 n_predictors <- 4
-]
+`
 
-Our #r[model_name] model uses #r[n_predictors] predictors.
+Our `{r} model_name` model uses `{r} n_predictors` predictors.
 
 == Model Training
 
@@ -116,7 +116,7 @@ predictions <- predict(penguin_fit, penguins_test) %>%
 accuracy_val <- accuracy(predictions, truth = species, estimate = .pred_class)
 ```
 
-The model achieves an accuracy of #r[round(accuracy_val$.estimate * 100, 1)]% on the test set.
+The model achieves an accuracy of `{r} round(accuracy_val$.estimate * 100, 1)`% on the test set.
 
 ```{r confusion-matrix}
 # Create confusion matrix

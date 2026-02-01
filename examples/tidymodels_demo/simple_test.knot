@@ -6,18 +6,18 @@ x <- 42
 name <- "Alice"
 ```
 
-Test inline display: The value is #r[x] and the name is #r[name].
+Test inline display: The value is `{r} x` and the name is `{r} name`.
 
 ```{r calc}
 y <- x * 2
 print(y)
 ```
 
-Test with side-effect verb:
+Test with side-effect (output=false):
 
-#r:run[
+`{r, output=false}
   result_label <- "Final result"
   multiplier <- 3
-]
+`
 
-The #r[result_label] is #r[x * multiplier].
+The `{r} result_label` is `{r} x * multiplier`.

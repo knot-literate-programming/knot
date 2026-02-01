@@ -1,9 +1,8 @@
 // R Code Execution Logic
 //
-// Handles three types of R code execution:
+// Handles two types of R code execution:
 // 1. Full chunk execution (with rich output support)
 // 2. Inline expression execution (formatted for inline display)
-// 3. Side-effect only execution (for :run verb)
 
 use super::{formatters, output_parser, process::RProcess, RExecutor, BOUNDARY};
 use crate::executors::{ExecutionResult, LanguageExecutor};
@@ -123,80 +122,3 @@ pub fn execute_inline(executor: &mut RExecutor, code: &str) -> Result<String> {
     formatters::format_inline_output(&output)
 }
 
-/// Execute an R expression for its side effects, discarding all output
-pub fn execute_side_effect_only(process: &mut RProcess, code: &str) -> Result<()> {
-    let stdin = process
-        .stdin
-        .as_mut()
-        .context("R process stdin is not available")?;
-    let stdout = process
-        .stdout
-        .as_mut()
-        .context("R process stdout is not available")?;
-    let stderr = process
-        .stderr
-        .as_mut()
-        .context("R process stderr is not available")?;
-
-    // Write the code, followed by boundary markers
-    writeln!(stdin, "{}", code)?;
-    writeln!(stdin, "cat('{}\\n', file=stdout())", BOUNDARY)?;
-    writeln!(stdin, "cat('{}\\n', file=stderr())", BOUNDARY)?;
-    stdin.flush()?;
-
-    let (_stdout_output, stderr_output) = thread::scope(|s| {
-        let stdout_handle = s.spawn(move || {
-            let mut output = String::new();
-            let mut line_buffer = String::new();
-            loop {
-                line_buffer.clear();
-                if stdout.read_line(&mut line_buffer).unwrap_or(0) == 0 {
-                    break;
-                }
-                if line_buffer.trim_end() == BOUNDARY {
-                    break;
-                }
-                output.push_str(&line_buffer);
-            }
-            output
-        });
-
-        let stderr_handle = s.spawn(move || {
-            let mut output = String::new();
-            let mut line_buffer = String::new();
-            loop {
-                line_buffer.clear();
-                if stderr.read_line(&mut line_buffer).unwrap_or(0) == 0 {
-                    break;
-                }
-                if line_buffer.trim_end() == BOUNDARY {
-                    break;
-                }
-                output.push_str(&line_buffer);
-            }
-            output
-        });
-        (stdout_handle.join().unwrap(), stderr_handle.join().unwrap())
-    });
-
-    // Check if stderr contains actual errors (not just warnings/messages)
-    if !stderr_output.trim().is_empty() {
-        let stderr_lower = stderr_output.to_lowercase();
-        let is_error = stderr_lower.contains("error")
-            || stderr_lower.contains("erreur")
-            || stderr_lower.contains("execution arrêtée")
-            || stderr_lower.contains("execution halted")
-            || stderr_lower.contains("could not find function")
-            || stderr_lower.contains("objet") && stderr_lower.contains("introuvable");
-
-        if is_error {
-            anyhow::bail!(
-                "R execution failed in side-effect-only block:\n\n--- Code ---\n{}\n\n--- Stderr ---\n{}",
-                code,
-                stderr_output.trim()
-            );
-        }
-    }
-
-    Ok(())
-}

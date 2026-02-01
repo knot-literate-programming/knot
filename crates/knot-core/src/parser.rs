@@ -67,6 +67,7 @@ pub struct Chunk {
 pub struct InlineOptions {
     pub echo: bool,   // Show the inline code (default: false)
     pub eval: bool,   // Evaluate the code (default: true)
+    pub output: bool, // Show the result in the document (default: true)
     pub digits: Option<u32>, // Number of digits for numeric formatting
 }
 
@@ -75,6 +76,7 @@ impl Default for InlineOptions {
         Self {
             echo: false,  // Don't show code by default for inline
             eval: true,   // Always evaluate by default
+            output: true, // Show result by default
             digits: None, // Use default formatting
         }
     }
@@ -310,7 +312,7 @@ fn parse_inline_expr<'a>(original_source: &'a str) -> impl FnMut(&mut &'a str) -
         let end = Offset::offset_from(&*input, &original_source);
 
         // Parse inline options from the captured string
-        let options = parse_inline_options(options_str.trim());
+        let options = parse_inline_options(options_str);
 
         Ok(InlineExpr {
             language: lang.to_string(),
@@ -322,16 +324,29 @@ fn parse_inline_expr<'a>(original_source: &'a str) -> impl FnMut(&mut &'a str) -
     }
 }
 
-/// Parse inline options from a string like "echo=false digits=3"
+/// Parse inline options from a string like "echo=false, digits=3"
 fn parse_inline_options(options_str: &str) -> InlineOptions {
     let mut options = InlineOptions::default();
 
-    if options_str.is_empty() {
+    let trimmed = options_str.trim();
+    if trimmed.is_empty() {
         return options;
     }
 
-    // Split by whitespace to get individual key=value pairs
-    for part in options_str.split_whitespace() {
+    // Handle initial comma if present (e.g., "{r, echo=false}")
+    let cleaned = if trimmed.starts_with(',') {
+        &trimmed[1..]
+    } else {
+        trimmed
+    };
+
+    // Split by comma or whitespace to get individual key=value pairs
+    for part in cleaned.split(|c| c == ',' || c == ' ') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        
         if let Some((key, value)) = part.split_once('=') {
             match key.trim() {
                 "echo" => {
@@ -339,6 +354,9 @@ fn parse_inline_options(options_str: &str) -> InlineOptions {
                 }
                 "eval" => {
                     options.eval = value.trim() == "true";
+                }
+                "output" => {
+                    options.output = value.trim() == "true";
                 }
                 "digits" => {
                     if let Ok(n) = value.trim().parse::<u32>() {

@@ -8,18 +8,18 @@ This example demonstrates how to use knot for writing a machine learning book wi
 
 **Display values:**
 ```typst
-The dataset has #r[nrow(data)] rows.
+The dataset has `{r} nrow(data)` rows.
 ```
 
-**Side-effects only (`:run` verb):**
+**Side-effects only (`output=false`):**
 ```typst
-#r:run[
+`{r, output=false}
   model_name <- "Logistic Regression"
   n_predictors <- 4
-]
+`
 ```
 
-The `:run` verb executes code for its side-effects without producing output in the document.
+Using `output=false` executes code for its side-effects without producing output in the document.
 
 ### 2. Rich Output
 
@@ -73,4 +73,4 @@ cd knot-r-package && R CMD INSTALL .
 2. **Live values:** Inline expressions show computed values directly in text
 3. **Publication quality:** Typst output for professional documents
 4. **Fast iteration:** Caching makes recompilation instant
-5. **Clear intent:** `:run` verb makes side-effects explicit
+5. **Clear intent:** `output=false` makes side-effects explicit

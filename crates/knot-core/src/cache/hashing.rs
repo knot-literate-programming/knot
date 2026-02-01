@@ -2,7 +2,7 @@
 //
 // Handles SHA256-based hashing for:
 // - Chunk code with options and dependencies (with chaining)
-// - Inline expressions with verb
+// - Inline expressions with options
 // - File dependencies (path + mtime + size)
 
 use crate::parser::ChunkOptions;
@@ -39,12 +39,12 @@ pub fn get_chunk_hash(
 ///
 /// Hash includes:
 /// - Code content
-/// - Options (echo, eval, digits)
+/// - Options (echo, eval, output, digits)
 /// - Previous inline expression hash (for sequential invalidation)
 pub fn get_inline_expr_hash(code: &str, options: &crate::parser::InlineOptions, previous_hash: &str) -> String {
     // Include options in hash to invalidate cache when options change
-    let options_str = format!("echo={},eval={},digits={:?}",
-        options.echo, options.eval, options.digits);
+    let options_str = format!("echo={},eval={},output={},digits={:?}",
+        options.echo, options.eval, options.output, options.digits);
     let inline_content = format!("{}|{}|{}", code, options_str, previous_hash);
 
     let mut hasher = Sha256::new();

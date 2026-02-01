@@ -40,10 +40,17 @@ pub fn process_inline_expr(
             inline_expr.code
         ))?;
 
-    // Cache the result
-    cache.save_inline_result(inline_hash.clone(), &result)?;
+    // If output=false, we discard the result for the document
+    let final_result = if inline_expr.options.output {
+        result
+    } else {
+        String::new()
+    };
 
-    Ok((result, inline_hash))
+    // Cache the result (either the actual result or empty string)
+    cache.save_inline_result(inline_hash.clone(), &final_result)?;
+
+    Ok((final_result, inline_hash))
 }
 
 #[cfg(test)]
@@ -126,14 +133,18 @@ mod tests {
     fn test_process_inline_hash_changes_with_options() {
         let inline_default = create_inline_expr("x <- 1", crate::parser::InlineOptions::default());
         let inline_eval_false = create_inline_expr("x <- 1", crate::parser::InlineOptions { eval: false, ..Default::default() });
+        let inline_output_false = create_inline_expr("x <- 1", crate::parser::InlineOptions { output: false, ..Default::default() });
 
         let (_temp_dir, cache) = setup_test_cache();
 
         let hash1 = cache.get_inline_expr_hash(&inline_default.code, &inline_default.options, "prev_hash");
         let hash2 = cache.get_inline_expr_hash(&inline_eval_false.code, &inline_eval_false.options, "prev_hash");
+        let hash3 = cache.get_inline_expr_hash(&inline_output_false.code, &inline_output_false.options, "prev_hash");
 
         // Different options should produce different hash
         assert_ne!(hash1, hash2);
+        assert_ne!(hash1, hash3);
+        assert_ne!(hash2, hash3);
     }
 
     #[test]
@@ -165,6 +176,7 @@ mod tests {
         assert_eq!(inline.code, "mean(1:10)");
         assert_eq!(inline.options.echo, false);
         assert_eq!(inline.options.eval, true);
+        assert_eq!(inline.options.output, true);
         assert_eq!(inline.options.digits, None);
         assert_eq!(inline.start, 0);
         assert_eq!(inline.end, "mean(1:10)".len());
@@ -172,12 +184,13 @@ mod tests {
 
     #[test]
     fn test_inline_expr_with_options_structure() {
-        let inline = create_inline_expr("library(dplyr)", crate::parser::InlineOptions { eval: false, echo: true, digits: Some(3) });
+        let inline = create_inline_expr("library(dplyr)", crate::parser::InlineOptions { eval: false, echo: true, output: false, digits: Some(3) });
 
         assert_eq!(inline.language, "r");
         assert_eq!(inline.code, "library(dplyr)");
         assert_eq!(inline.options.eval, false);
         assert_eq!(inline.options.echo, true);
+        assert_eq!(inline.options.output, false);
         assert_eq!(inline.options.digits, Some(3));
     }
 
