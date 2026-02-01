@@ -55,10 +55,6 @@ impl RExecutor {
         execution::execute_inline(self, code)
     }
 
-    /// Execute an R expression for its side effects, discarding all output.
-    pub fn execute_side_effect_only(&mut self, code: &str) -> Result<()> {
-        execution::execute_side_effect_only(&mut self.process, code)
-    }
 }
 
 impl LanguageExecutor for RExecutor {
