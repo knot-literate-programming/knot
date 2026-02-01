@@ -25,14 +25,22 @@ const BOUNDARY: &str = "---KNOT_CHUNK_BOUNDARY---";
 pub struct RExecutor {
     process: RProcess,
     cache_dir: PathBuf,
+    r_helper_path: Option<PathBuf>,
 }
 
 impl RExecutor {
-    pub fn new(cache_dir: PathBuf) -> Result<Self> {
+    /// Create a new R executor
+    ///
+    /// # Arguments
+    /// * `cache_dir` - Directory for caching R outputs
+    /// * `r_helper_path` - Optional path to R helper file (e.g., "lib/knot.R")
+    ///                     If None, will try to load the installed knot.r.package
+    pub fn new(cache_dir: PathBuf, r_helper_path: Option<PathBuf>) -> Result<Self> {
         std::fs::create_dir_all(&cache_dir)?;
         Ok(Self {
             process: RProcess::uninitialized(),
             cache_dir,
+            r_helper_path,
         })
     }
 
@@ -55,7 +63,7 @@ impl RExecutor {
 
 impl LanguageExecutor for RExecutor {
     fn initialize(&mut self) -> Result<()> {
-        self.process.initialize()
+        self.process.initialize(self.r_helper_path.clone())
     }
 
     fn execute(&mut self, code: &str) -> Result<ExecutionResult> {

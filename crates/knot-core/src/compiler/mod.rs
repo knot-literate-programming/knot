@@ -1,6 +1,7 @@
 use crate::executors::r::RExecutor;
 use crate::executors::LanguageExecutor;
 use crate::parser::{Chunk, Document, InlineExpr};
+use crate::config::Config;
 
 pub mod chunk_processor;
 pub mod inline_processor;
@@ -27,8 +28,17 @@ pub struct Compiler {
 
 impl Compiler {
     pub fn new() -> Result<Self> {
+        // Load configuration from knot.toml (if it exists)
+        let config = Config::load()?;
+        let r_helper_path = config.r_helper_path();
+
+        if let Some(ref path) = r_helper_path {
+            info!("Using R helper from knot.toml: {}", path.display());
+        }
+
         let cache_dir = get_cache_dir();
-        let r_executor = RExecutor::new(cache_dir).context("Failed to initialize R executor")?;
+        let r_executor = RExecutor::new(cache_dir, r_helper_path)
+            .context("Failed to initialize R executor")?;
 
         Ok(Self {
             r_executor: Some(r_executor),

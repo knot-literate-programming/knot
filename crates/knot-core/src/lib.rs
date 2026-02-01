@@ -4,13 +4,14 @@ pub mod compiler;
 pub mod backend;
 pub mod cache;
 pub mod graphics;
+pub mod config;
 
 pub use parser::{Chunk, ChunkOptions, Document, InlineExpr};
 pub use compiler::Compiler;
 pub use graphics::{GraphicsDefaults, GraphicsConfig, ResolvedGraphicsOptions, resolve_graphics_options};
+pub use config::Config;
 
 use std::path::PathBuf;
-use anyhow::Result;
 
 /// Returns the path to the knot cache directory.
 /// By default, this is `.knot_cache` in the current working directory.

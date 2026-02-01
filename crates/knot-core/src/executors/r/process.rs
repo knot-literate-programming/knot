@@ -8,6 +8,7 @@
 
 use anyhow::{Context, Result};
 use std::io::{BufRead, BufReader, Write};
+use std::path::PathBuf;
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
 use std::thread;
 
@@ -32,7 +33,7 @@ impl RProcess {
     }
 
     /// Initialize and spawn the R process
-    pub fn initialize(&mut self) -> Result<()> {
+    pub fn initialize(&mut self, r_helper_path: Option<PathBuf>) -> Result<()> {
         let mut child = Command::new("R")
             .arg("--vanilla")
             .arg("--quiet")
@@ -53,16 +54,21 @@ impl RProcess {
         self.stderr = child.stderr.take().map(BufReader::new);
         self.child = Some(child);
 
-        // Load the knot R package if available
-        self.load_knot_package()?;
+        // Load the knot R package or source the helper file
+        self.load_knot_helpers(r_helper_path)?;
 
         Ok(())
     }
 
-    /// Attempts to load the knot R package.
-    /// This is called during initialization. If the package is not installed,
-    /// it logs a warning but does not fail - users can still use knot without it.
-    fn load_knot_package(&mut self) -> Result<()> {
+    /// Load knot R helpers (either from local file or installed package)
+    ///
+    /// Priority:
+    /// 1. If r_helper_path is provided and exists → source("path/to/file.R")
+    /// 2. Otherwise → library(knot.r.package) (fallback to installed package)
+    ///
+    /// This is called during initialization. If loading fails, it logs a warning
+    /// but does not fail - users can still use knot without rich output features.
+    fn load_knot_helpers(&mut self, r_helper_path: Option<PathBuf>) -> Result<()> {
         let stdin = self
             .stdin
             .as_mut()
@@ -76,8 +82,25 @@ impl RProcess {
             .as_mut()
             .context("R process stderr is not available")?;
 
-        // Try to load the package
-        writeln!(stdin, "library(knot.r.package)")?;
+        // Determine loading strategy
+        let load_command = if let Some(ref path) = r_helper_path {
+            if path.exists() {
+                // Source the local R helper file
+                let path_str = path.to_string_lossy();
+                log::info!("Loading R helpers from: {}", path_str);
+                format!("source(\"{}\")", path_str)
+            } else {
+                log::warn!("R helper file not found: {}. Falling back to library(knot.r.package)", path.display());
+                "library(knot.r.package)".to_string()
+            }
+        } else {
+            // No path specified, try to load the installed package
+            log::info!("No R helper path specified. Trying library(knot.r.package)");
+            "library(knot.r.package)".to_string()
+        };
+
+        // Execute the load command
+        writeln!(stdin, "{}", load_command)?;
         writeln!(stdin, "cat('{}\\n', file=stdout())", BOUNDARY)?;
         writeln!(stdin, "cat('{}\\n', file=stderr())", BOUNDARY)?;
         stdin.flush()?;
@@ -124,13 +147,17 @@ impl RProcess {
             )
         });
 
-        // If there's an error, it likely means the package is not installed
+        // If there's an error, it likely means the package/file is not available
         // We don't fail here - just log a warning
         if !stderr_output.trim().is_empty() {
-            log::warn!("Could not load knot.r.package: {}", stderr_output.trim());
+            log::warn!("Could not load R helpers: {}", stderr_output.trim());
             log::warn!("Rich output features (dataframes, plots) will not be available.");
         } else {
-            log::info!("✓ Loaded knot.r.package");
+            if r_helper_path.is_some() {
+                log::info!("✓ Loaded R helpers from local file");
+            } else {
+                log::info!("✓ Loaded knot.r.package");
+            }
         }
 
         Ok(())
