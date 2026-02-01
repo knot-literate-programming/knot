@@ -278,11 +278,11 @@ name = "my-project"
 version = "0.1.0"
 authors = ["Name <email>"]
 
-[r]
-helper_path = "custom/path/to/knot-r-package"  # Override default R package location
-
-[typst]
-helper_path = "custom/path/to/knot-typst-package"  # Override default Typst package
+[helpers]
+# Optional: Override vendored helpers with custom paths
+# By default, knot uses lib/knot.R and lib/knot.typ
+typst = "custom/path/to/knot.typ"  # Override Typst helper
+r = "custom/path/to/knot.R"        # Override R helper
 
 [graphics]
 default_width = 7.0    # Default plot width (inches)
@@ -290,6 +290,34 @@ default_height = 5.0   # Default plot height (inches)
 default_dpi = 300      # Default plot resolution
 default_format = "svg" # Default plot format (svg|png)
 ```
+
+### Helper Package Vendoring
+
+**Philosophy**: Knot vendors (copies) helper packages into each project for reproducibility.
+
+When you run `knot init my-project --project`, Knot creates:
+```
+my-project/
+├── knot.toml
+├── main.knot
+└── lib/
+    ├── knot.typ    # Vendored Typst helper
+    └── knot.R      # Vendored R helper
+```
+
+**Why vendoring?**
+1. **Guaranteed compatibility**: Helpers always match your knot CLI version
+2. **Reproducibility**: Project is self-contained, works years later
+3. **No external dependencies**: No need to install packages from CRAN/Typst Universe
+4. **Offline support**: Compile without internet connection
+5. **No version conflicts**: Each project has its own helpers
+
+**Override if needed**: Use `[helpers]` section in `knot.toml` to point to:
+- Global installation (reduce duplication for development)
+- Custom modified helpers (advanced use cases)
+- Shared helpers across multiple projects
+
+**Default behavior**: If `[helpers]` is not specified, knot uses `lib/knot.typ` and `lib/knot.R`.
 
 ### Project Root Detection
 
@@ -416,16 +444,26 @@ RUST_LOG=debug knot compile document.knot
 
 **Structured Project** (`knot init my-project --project`):
 - Creates project directory with `knot.toml`
+- **Vendors helper packages** for reproducibility
 - Sets up recommended structure:
   ```
   my-project/
-  ├── knot.toml
-  ├── main.knot
-  ├── chapters/
-  ├── data/
-  └── .gitignore
+  ├── knot.toml         # Project configuration
+  ├── main.knot         # Main document
+  ├── lib/              # Vendored helpers (auto-copied)
+  │   ├── knot.typ      # Typst helper functions
+  │   └── knot.R        # R helper functions
+  ├── chapters/         # Additional documents (optional)
+  ├── data/             # Data files (optional)
+  └── .gitignore        # Recommended Git ignore patterns
   ```
 - Configures defaults and package metadata
+
+**What gets vendored**:
+- `lib/knot.typ`: Typst helper (matching CLI version)
+- `lib/knot.R`: R helper (matching CLI version)
+
+This ensures your project will compile identically even if you upgrade knot CLI later.
 
 **Philosophy**: Use simple mode for one-off analyses. Upgrade to project mode when you need:
 - Multiple related documents
