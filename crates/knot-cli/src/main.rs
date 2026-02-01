@@ -149,33 +149,14 @@ fn compile(file: &PathBuf) -> Result<()> {
 
     let typ_output_path = file.with_extension("typ");
 
-    fs::write(&typ_output_path, typst_source).context(format!(
+    // Fix file paths before writing
+    let fixed_source = fix_paths_in_typst(&typst_source, &typ_output_path)?;
+
+    fs::write(&typ_output_path, fixed_source).context(format!(
         "Failed to write intermediate Typst file to {:?}",
         typ_output_path
     ))?;
     info!("✓ Generated intermediate Typst file: {:?}", typ_output_path);
-
-    // Format with typstyle
-    info!("🎨 Formatting with typstyle...");
-    let typstyle_status = std::process::Command::new("typstyle")
-        .arg("-i") // Format in-place
-        .arg(&typ_output_path)
-        .status() // We don't need the output, just the status
-        .context("Failed to execute typstyle. Is it installed and in your PATH?")?;
-
-    if !typstyle_status.success() {
-        anyhow::bail!("typstyle failed to format the generated .typ file.");
-    }
-
-    // Post-process the formatted Typst source to fix file paths
-    let formatted_source = fs::read_to_string(&typ_output_path)?;
-    let fixed_source = fix_paths_in_typst(&formatted_source, &typ_output_path)?;
-    if formatted_source != fixed_source {
-        info!("✓ Fixed file paths in Typst document");
-        fs::write(&typ_output_path, fixed_source)?;
-    } else {
-        info!("⚠️ No file paths needed fixing (or regex didn't match)");
-    }
 
     // Final step: compile with Typst
     info!("📦 Compiling PDF with Typst...");
