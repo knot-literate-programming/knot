@@ -2,6 +2,7 @@ use crate::executors::r::RExecutor;
 use crate::executors::LanguageExecutor;
 use crate::parser::{Chunk, Document, InlineExpr};
 use crate::config::Config;
+use std::path::Path;
 
 pub mod chunk_processor;
 pub mod inline_processor;
@@ -27,10 +28,20 @@ pub struct Compiler {
 }
 
 impl Compiler {
-    pub fn new() -> Result<Self> {
-        // Load configuration from knot.toml (if it exists)
-        let config = Config::load()?;
-        let r_helper_path = config.r_helper_path();
+    /// Create a new compiler, searching for knot.toml starting from the given file path
+    ///
+    /// # Arguments
+    /// * `knot_file_path` - Path to the .knot file being compiled (used to find project root)
+    pub fn new(knot_file_path: &Path) -> Result<Self> {
+        // Find project root by searching for knot.toml in parent directories
+        let start_dir = knot_file_path
+            .parent()
+            .unwrap_or(Path::new("."))
+            .canonicalize()
+            .unwrap_or_else(|_| knot_file_path.parent().unwrap_or(Path::new(".")).to_path_buf());
+
+        let (config, project_root) = Config::find_and_load(&start_dir)?;
+        let r_helper_path = config.r_helper_path(&project_root);
 
         if let Some(ref path) = r_helper_path {
             info!("Using R helper from knot.toml: {}", path.display());

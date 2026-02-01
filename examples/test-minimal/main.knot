@@ -1,0 +1,64 @@
+// Import Knot helpers for R code execution
+#import "lib/knot.typ": *
+
+// ============================================
+// Optional: Import a Typst template
+// ============================================
+//
+// Examples:
+// #import "@preview/charged-ieee": ieee
+// #import "@preview/drafting": *
+//
+// #show: ieee.with(
+//   title: [My Document],
+//   authors: [Your Name]
+// )
+
+// ============================================
+// Document content
+// ============================================
+
+/* KNOT-INJECT-CHAPTERS */
+
+= My Document
+
+Here is some text with an inline R expression: `{r} 1 + 1`.
+
+```{r}
+#| eval: true
+#| echo: true
+#| output: true
+
+# Load libraries
+library(ggplot2)
+
+# Create some data
+x <- 1:10
+y <- x^2
+
+# Display summary
+summary(x)
+```
+
+The mean of `x` is `{r} mean(x)`.
+
+```{r}
+#| eval: true
+#| echo: false
+#| output: true
+
+# Create a simple plot
+df <- data.frame(x = x, y = y)
+gg <- ggplot(df, aes(x = x, y = y)) +
+  geom_point(size = 3, color = "steelblue") +
+  geom_line(color = "steelblue", alpha = 0.5) +
+  theme_minimal() +
+  labs(
+    title = "Simple Quadratic Function",
+    x = "x",
+    y = "y = x²"
+  )
+
+# Render the plot (requires knot.r.package)
+typst(gg, width = 6, height = 4)
+```

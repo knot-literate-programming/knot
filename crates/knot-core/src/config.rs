@@ -27,6 +27,38 @@ pub struct HelpersConfig {
 }
 
 impl Config {
+    /// Find and load configuration by searching for knot.toml in parent directories
+    ///
+    /// Starts from `start_dir` and walks up the directory tree until it finds knot.toml.
+    /// This mimics Cargo's behavior for finding Cargo.toml.
+    ///
+    /// Returns:
+    /// - Ok((config, project_root)) if knot.toml is found
+    /// - Ok((default_config, start_dir)) if no knot.toml is found
+    pub fn find_and_load(start_dir: &Path) -> Result<(Self, PathBuf)> {
+        let mut current_dir = start_dir.to_path_buf();
+
+        loop {
+            let config_path = current_dir.join("knot.toml");
+
+            if config_path.exists() {
+                log::info!("Found knot.toml at: {}", config_path.display());
+                let config = Self::load_from_path(&config_path)?;
+                return Ok((config, current_dir));
+            }
+
+            // Move to parent directory
+            match current_dir.parent() {
+                Some(parent) => current_dir = parent.to_path_buf(),
+                None => {
+                    // Reached filesystem root without finding knot.toml
+                    log::info!("No knot.toml found, using default configuration");
+                    return Ok((Self::default(), start_dir.to_path_buf()));
+                }
+            }
+        }
+    }
+
     /// Load configuration from knot.toml in the current directory
     pub fn load() -> Result<Self> {
         Self::load_from_path("knot.toml")
@@ -50,14 +82,14 @@ impl Config {
         Ok(config)
     }
 
-    /// Get the R helper path, resolving it relative to the config file location
-    pub fn r_helper_path(&self) -> Option<PathBuf> {
-        self.helpers.r.as_ref().map(PathBuf::from)
+    /// Get the R helper path, resolving it relative to the project root
+    pub fn r_helper_path(&self, project_root: &Path) -> Option<PathBuf> {
+        self.helpers.r.as_ref().map(|r| project_root.join(r))
     }
 
-    /// Get the Typst helper path, resolving it relative to the config file location
-    pub fn typst_helper_path(&self) -> Option<PathBuf> {
-        self.helpers.typst.as_ref().map(PathBuf::from)
+    /// Get the Typst helper path, resolving it relative to the project root
+    pub fn typst_helper_path(&self, project_root: &Path) -> Option<PathBuf> {
+        self.helpers.typst.as_ref().map(|t| project_root.join(t))
     }
 }
 

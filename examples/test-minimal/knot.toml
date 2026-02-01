@@ -1,0 +1,15 @@
+# Knot Project Configuration
+
+[document]
+main = "main.knot"
+
+[helpers]
+# Typst helper functions (for rendering R output)
+typst = "lib/knot.typ"
+
+# R helper functions (typst() generic for DataFrames, plots, etc.)
+r = "lib/knot.R"
+
+# Future: Use published packages instead of local copies
+# typst = "@preview/knot"
+# r = "@cran/knot"

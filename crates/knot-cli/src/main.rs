@@ -56,15 +56,17 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-/// Copies data files (CSVs) to a local directory next to the .typ file and updates paths
+/// Copies generated files (CSVs, plots) to a local directory and updates paths
+///
+/// Converts absolute cache paths to relative paths in _knot_r_files/
 fn fix_paths_in_typst(source: &str, typ_file: &PathBuf) -> Result<String> {
     use regex::Regex;
     use std::path::Path;
 
-    // Create _knot_files directory next to the .typ file
+    // Create _knot_r_files directory next to the .typ file
     let typ_dir = typ_file.parent()
         .context("Failed to get parent directory of .typ file")?;
-    let local_files_dir = typ_dir.join("_knot_files");
+    let local_files_dir = typ_dir.join("_knot_r_files");
     fs::create_dir_all(&local_files_dir)?;
 
     // Pattern to match absolute paths to .knot_cache
@@ -87,7 +89,7 @@ fn fix_paths_in_typst(source: &str, typ_file: &PathBuf) -> Result<String> {
         }
 
         // Return relative path
-        format!("\"_knot_files/{}\"", filename)
+        format!("\"_knot_r_files/{}\"", filename)
     });
 
     Ok(result.to_string())
@@ -135,7 +137,13 @@ fn init(project_name: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-// Phase 1, SEMAINE 2 & 3
+/// Compile a .knot file to .typ (without generating PDF)
+///
+/// This command:
+/// - Parses the .knot file
+/// - Executes R chunks and caches results
+/// - Generates a hidden .typ file (dotfile convention)
+/// - Does NOT generate PDF (use 'knot build' or 'typst compile' for that)
 fn compile(file: &PathBuf) -> Result<()> {
     info!("📄 Compiling {:?}...", file);
     let source =
@@ -144,44 +152,25 @@ fn compile(file: &PathBuf) -> Result<()> {
     let doc = Document::parse(source).context("Failed to parse document")?;
     info!("✓ Parsed {} chunk(s)", doc.chunks.len());
 
-    let mut compiler = Compiler::new()?;
+    let mut compiler = Compiler::new(file)?;
     let typst_source = compiler.compile(&doc)?;
 
-    let typ_output_path = file.with_extension("typ");
+    // Generate hidden .typ file (dotfile convention)
+    let typ_output_path = {
+        let parent = file.parent().unwrap_or(std::path::Path::new("."));
+        let stem = file.file_stem().unwrap_or(std::ffi::OsStr::new("main"));
+        parent.join(format!(".{}.typ", stem.to_string_lossy()))
+    };
 
     // Fix file paths before writing
     let fixed_source = fix_paths_in_typst(&typst_source, &typ_output_path)?;
 
     fs::write(&typ_output_path, fixed_source).context(format!(
-        "Failed to write intermediate Typst file to {:?}",
+        "Failed to write Typst file to {:?}",
         typ_output_path
     ))?;
-    info!("✓ Generated intermediate Typst file: {:?}", typ_output_path);
-
-    // Final step: compile with Typst
-    info!("📦 Compiling PDF with Typst...");
-    let pdf_output_path = file.with_extension("pdf");
-
-    let output = std::process::Command::new("typst")
-        .arg("compile")
-        .arg("--root")
-        .arg(".")
-        .arg(&typ_output_path)
-        .arg(&pdf_output_path)
-        .output()
-        .context("Failed to execute typst command. Is Typst installed and in your PATH?")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        anyhow::bail!(
-            "Typst compilation failed:\n--- Stdout ---\n{}\n--- Stderr ---\n{}",
-            stdout,
-            stderr
-        );
-    }
-
-    info!("✓ Successfully compiled PDF: {:?}", pdf_output_path);
+    info!("✓ Generated Typst file: {:?}", typ_output_path);
+    info!("💡 Tip: Use 'typst watch {:?}' to preview changes", typ_output_path);
 
     Ok(())
 }
