@@ -54,10 +54,10 @@ impl Cache {
     pub fn get_inline_expr_hash(
         &self,
         code: &str,
-        verb: &Option<String>,
+        options: &crate::parser::InlineOptions,
         previous_hash: &str,
     ) -> String {
-        hashing::get_inline_expr_hash(code, verb, previous_hash)
+        hashing::get_inline_expr_hash(code, options, previous_hash)
     }
 
     /// Check if inline result is cached

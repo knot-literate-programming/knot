@@ -68,7 +68,6 @@ mod tests {
     use super::*;
     use crate::parser::{ChunkOptions, Position, Range};
     use tempfile::TempDir;
-    use std::path::PathBuf;
 
     fn create_test_chunk(
         language: &str,

@@ -39,11 +39,13 @@ pub fn get_chunk_hash(
 ///
 /// Hash includes:
 /// - Code content
-/// - Verb (run, display, etc.)
+/// - Options (echo, eval, digits)
 /// - Previous inline expression hash (for sequential invalidation)
-pub fn get_inline_expr_hash(code: &str, verb: &Option<String>, previous_hash: &str) -> String {
-    let verb_str = verb.as_deref().unwrap_or("none");
-    let inline_content = format!("{}|{}|{}", code, verb_str, previous_hash);
+pub fn get_inline_expr_hash(code: &str, options: &crate::parser::InlineOptions, previous_hash: &str) -> String {
+    // Include options in hash to invalidate cache when options change
+    let options_str = format!("echo={},eval={},digits={:?}",
+        options.echo, options.eval, options.digits);
+    let inline_content = format!("{}|{}|{}", code, options_str, previous_hash);
 
     let mut hasher = Sha256::new();
     hasher.update(inline_content.as_bytes());

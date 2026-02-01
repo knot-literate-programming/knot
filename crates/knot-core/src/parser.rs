@@ -62,14 +62,32 @@ pub struct Chunk {
     pub end_byte: usize,
 }
 
-/// Inline expression (e.g., `{{r}} nrow(df)`) 
+/// Options for inline expressions
+#[derive(Debug, Clone, PartialEq)]
+pub struct InlineOptions {
+    pub echo: bool,   // Show the inline code (default: false)
+    pub eval: bool,   // Evaluate the code (default: true)
+    pub digits: Option<u32>, // Number of digits for numeric formatting
+}
+
+impl Default for InlineOptions {
+    fn default() -> Self {
+        Self {
+            echo: false,  // Don't show code by default for inline
+            eval: true,   // Always evaluate by default
+            digits: None, // Use default formatting
+        }
+    }
+}
+
+/// Inline expression (e.g., `{r} nrow(df)` or `{r echo=false} x`)
 #[derive(Debug, Clone)]
 pub struct InlineExpr {
     pub language: String,  // "r", "python", etc.
     pub code: String,      // The expression to evaluate
     pub start: usize,      // Byte offset in source
     pub end: usize,        // Byte offset in source (exclusive)
-    pub verb: Option<String>,
+    pub options: InlineOptions,
 }
 
 pub struct Document {
@@ -274,30 +292,67 @@ fn parse_inline_expr<'a>(original_source: &'a str) -> impl FnMut(&mut &'a str) -
         let start_input = *input;
         let _ = "`".parse_next(input)?;
         let _ = "{".parse_next(input)?;
-        
+
         let lang = take_while(1.., |c: char| c.is_alphanumeric() || c == '_' ).parse_next(input)?;
-        // TODO: Parse options here (consume until })
-        let _ = take_until(0.., "}").parse_next(input)?; // ignore options/verbs for now
+
+        // Parse options: everything between lang and }
+        let options_str = take_until(0.., "}").parse_next(input)?;
         let _ = "}".parse_next(input)?;
-        
+
         // Optional space
         let _ = opt(" ").parse_next(input)?;
-        
+
         // Code: take until closing backtick
         let code = take_until(0.., "`").parse_next(input)?;
         let _ = "`".parse_next(input)?;
-        
+
         let start = Offset::offset_from(&start_input, &original_source);
-        let end = Offset::offset_from(&*input, &original_source); 
+        let end = Offset::offset_from(&*input, &original_source);
+
+        // Parse inline options from the captured string
+        let options = parse_inline_options(options_str.trim());
 
         Ok(InlineExpr {
             language: lang.to_string(),
             code: code.to_string(),
             start,
             end,
-            verb: None, // Verbs are now part of options or separate syntax
+            options,
         })
     }
+}
+
+/// Parse inline options from a string like "echo=false digits=3"
+fn parse_inline_options(options_str: &str) -> InlineOptions {
+    let mut options = InlineOptions::default();
+
+    if options_str.is_empty() {
+        return options;
+    }
+
+    // Split by whitespace to get individual key=value pairs
+    for part in options_str.split_whitespace() {
+        if let Some((key, value)) = part.split_once('=') {
+            match key.trim() {
+                "echo" => {
+                    options.echo = value.trim() == "true";
+                }
+                "eval" => {
+                    options.eval = value.trim() == "true";
+                }
+                "digits" => {
+                    if let Ok(n) = value.trim().parse::<u32>() {
+                        options.digits = Some(n);
+                    }
+                }
+                _ => {
+                    // Ignore unknown options for forward compatibility
+                }
+            }
+        }
+    }
+
+    options
 }
 
 fn is_inside_chunk(pos: usize, chunks: &[Chunk]) -> bool {
@@ -537,5 +592,113 @@ More text below."###;
         let doc = Document::parse(content.to_string()).unwrap();
         assert_eq!(doc.inline_exprs.len(), 1);
         assert_eq!(doc.inline_exprs[0].code, "list[1]");
+    }
+
+    #[test]
+    fn test_parse_inline_default_options() {
+        let content = "Text `{r} mean(1:10)` end";
+        let doc = Document::parse(content.to_string()).unwrap();
+        assert_eq!(doc.inline_exprs.len(), 1);
+        let inline = &doc.inline_exprs[0];
+        assert_eq!(inline.code, "mean(1:10)");
+        assert_eq!(inline.options.echo, false); // default
+        assert_eq!(inline.options.eval, true);  // default
+        assert_eq!(inline.options.digits, None); // default
+    }
+
+    #[test]
+    fn test_parse_inline_single_option() {
+        let content = "Value: `{r echo=true} x` here";
+        let doc = Document::parse(content.to_string()).unwrap();
+        assert_eq!(doc.inline_exprs.len(), 1);
+        let inline = &doc.inline_exprs[0];
+        assert_eq!(inline.code, "x");
+        assert_eq!(inline.options.echo, true);
+        assert_eq!(inline.options.eval, true);  // default
+        assert_eq!(inline.options.digits, None); // default
+    }
+
+    #[test]
+    fn test_parse_inline_multiple_options() {
+        let content = "`{r echo=true eval=false digits=3} pi` is pi";
+        let doc = Document::parse(content.to_string()).unwrap();
+        assert_eq!(doc.inline_exprs.len(), 1);
+        let inline = &doc.inline_exprs[0];
+        assert_eq!(inline.code, "pi");
+        assert_eq!(inline.options.echo, true);
+        assert_eq!(inline.options.eval, false);
+        assert_eq!(inline.options.digits, Some(3));
+    }
+
+    #[test]
+    fn test_parse_inline_options_with_spaces() {
+        // Options can have spaces around them
+        let content = "`{r  echo=false   eval=true  } sqrt(2)` is root 2";
+        let doc = Document::parse(content.to_string()).unwrap();
+        assert_eq!(doc.inline_exprs.len(), 1);
+        let inline = &doc.inline_exprs[0];
+        assert_eq!(inline.code, "sqrt(2)");
+        assert_eq!(inline.options.echo, false);
+        assert_eq!(inline.options.eval, true);
+    }
+
+    #[test]
+    fn test_parse_inline_unknown_options_ignored() {
+        // Unknown options should be silently ignored
+        let content = "`{r unknown=value echo=true} x` end";
+        let doc = Document::parse(content.to_string()).unwrap();
+        assert_eq!(doc.inline_exprs.len(), 1);
+        let inline = &doc.inline_exprs[0];
+        assert_eq!(inline.options.echo, true);
+        assert_eq!(inline.options.eval, true);  // default
+    }
+
+    #[test]
+    fn test_parse_inline_invalid_digits() {
+        // Invalid digit value should be ignored
+        let content = "`{r digits=abc} pi` value";
+        let doc = Document::parse(content.to_string()).unwrap();
+        assert_eq!(doc.inline_exprs.len(), 1);
+        let inline = &doc.inline_exprs[0];
+        assert_eq!(inline.options.digits, None); // Invalid value ignored
+    }
+
+    #[test]
+    fn test_parse_inline_eval_false() {
+        let content = "Result: `{r eval=false} dangerous_code()` skipped";
+        let doc = Document::parse(content.to_string()).unwrap();
+        assert_eq!(doc.inline_exprs.len(), 1);
+        let inline = &doc.inline_exprs[0];
+        assert_eq!(inline.code, "dangerous_code()");
+        assert_eq!(inline.options.eval, false);
+    }
+
+    #[test]
+    fn test_parse_inline_digits_formatting() {
+        let content = "Pi is `{r digits=5} pi` approximately";
+        let doc = Document::parse(content.to_string()).unwrap();
+        assert_eq!(doc.inline_exprs.len(), 1);
+        let inline = &doc.inline_exprs[0];
+        assert_eq!(inline.options.digits, Some(5));
+    }
+
+    #[test]
+    fn test_parse_multiple_inline_with_different_options() {
+        let content = "First `{r} x` then `{r digits=2} y` and `{r eval=false} z` end";
+        let doc = Document::parse(content.to_string()).unwrap();
+        assert_eq!(doc.inline_exprs.len(), 3);
+
+        // First inline: defaults
+        assert_eq!(doc.inline_exprs[0].code, "x");
+        assert_eq!(doc.inline_exprs[0].options.eval, true);
+        assert_eq!(doc.inline_exprs[0].options.digits, None);
+
+        // Second inline: digits=2
+        assert_eq!(doc.inline_exprs[1].code, "y");
+        assert_eq!(doc.inline_exprs[1].options.digits, Some(2));
+
+        // Third inline: eval=false
+        assert_eq!(doc.inline_exprs[2].code, "z");
+        assert_eq!(doc.inline_exprs[2].options.eval, false);
     }
 }
