@@ -2,6 +2,9 @@ use anyhow::Result;
 use std::path::PathBuf;
 
 pub mod r;
+pub mod side_channel;
+
+pub use side_channel::{OutputMetadata, SideChannel};
 
 // From section 3.3 of the reference document
 
