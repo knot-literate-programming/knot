@@ -3,6 +3,10 @@ name = "knot-cli"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "knot"
+path = "src/main.rs"
+
 [dependencies]
 knot-core = { path = "../knot-core" }
 clap = { workspace = true }
