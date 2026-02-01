@@ -17,7 +17,7 @@ fn setup_executor() -> (TempDir, RExecutor) {
     let cache_dir = temp_dir.path().join(".knot_cache");
     fs::create_dir_all(&cache_dir).unwrap();
 
-    let mut executor = RExecutor::new(cache_dir).expect("Failed to create R executor");
+    let mut executor = RExecutor::new(cache_dir, None).expect("Failed to create R executor");
     executor.initialize().expect("Failed to initialize R");
 
     (temp_dir, executor)
