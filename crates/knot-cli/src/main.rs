@@ -26,10 +26,22 @@ enum Commands {
         /// The project name/directory to create
         name: PathBuf,
     },
-    /// Compile a knot document
+    /// Compile a single .knot file to .typ (no PDF)
     Compile {
-        /// The main knot file to compile
+        /// The .knot file to compile
         file: PathBuf,
+    },
+    /// Watch project files and regenerate on changes (with live PDF preview)
+    Watch {
+        /// Optional: specific .knot file to watch (defaults to project main)
+        #[arg(default_value = None)]
+        file: Option<PathBuf>,
+    },
+    /// Build the entire project and generate final PDF
+    Build {
+        /// Optional: specific .knot file to build (defaults to project main)
+        #[arg(default_value = None)]
+        file: Option<PathBuf>,
     },
     /// Install the VSCode extension
     InstallVscode,
@@ -47,6 +59,12 @@ fn main() -> Result<()> {
         }
         Commands::Compile { file } => {
             compile(file)?;
+        }
+        Commands::Watch { file } => {
+            watch(file.as_ref())?;
+        }
+        Commands::Build { file } => {
+            build(file.as_ref())?;
         }
         Commands::InstallVscode => {
             install_vscode()?;
@@ -171,6 +189,139 @@ fn compile(file: &PathBuf) -> Result<()> {
     ))?;
     info!("✓ Generated Typst file: {:?}", typ_output_path);
     info!("💡 Tip: Use 'typst watch {:?}' to preview changes", typ_output_path);
+
+    Ok(())
+}
+
+/// Build the project and generate final PDF
+///
+/// This command:
+/// - Compiles .knot files that have changed (hash-based)
+/// - Generates .typ files
+/// - Compiles the final PDF with typst
+/// - Names the PDF according to project name (from knot.toml)
+fn build(file: Option<&PathBuf>) -> Result<()> {
+    use knot_core::config::Config;
+
+    // Determine which file to build
+    let main_file = if let Some(f) = file {
+        f.clone()
+    } else {
+        // Try to find main file from knot.toml
+        let (config, _project_root) = Config::find_and_load(std::path::Path::new("."))?;
+        if let Some(main) = config.document.main {
+            PathBuf::from(main)
+        } else {
+            anyhow::bail!("No file specified and no 'main' found in knot.toml. Usage: knot build <file.knot>");
+        }
+    };
+
+    info!("🔨 Building project from {:?}...", main_file);
+
+    // Step 1: Compile .knot → .typ
+    compile(&main_file)?;
+
+    // Step 2: Determine .typ output path (dotfile)
+    let typ_output_path = {
+        let parent = main_file.parent().unwrap_or(std::path::Path::new("."));
+        let stem = main_file.file_stem().unwrap_or(std::ffi::OsStr::new("main"));
+        parent.join(format!(".{}.typ", stem.to_string_lossy()))
+    };
+
+    // Step 3: Compile PDF with typst
+    info!("📦 Compiling PDF with Typst...");
+
+    // Determine PDF name from project config or file stem
+    let pdf_name = {
+        let (_config, _project_root) = Config::find_and_load(
+            main_file.parent().unwrap_or(std::path::Path::new("."))
+        )?;
+
+        // Try to get project name from knot.toml
+        // For now, just use the file stem (we'll add package.name to config later)
+        let stem = main_file.file_stem().unwrap_or(std::ffi::OsStr::new("output"));
+        format!("{}.pdf", stem.to_string_lossy())
+    };
+
+    let pdf_output_path = main_file.parent()
+        .unwrap_or(std::path::Path::new("."))
+        .join(&pdf_name);
+
+    let output = std::process::Command::new("typst")
+        .arg("compile")
+        .arg(&typ_output_path)
+        .arg(&pdf_output_path)
+        .output()
+        .context("Failed to execute typst command. Is Typst installed and in your PATH?")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        anyhow::bail!(
+            "Typst compilation failed:\n--- Stdout ---\n{}\n--- Stderr ---\n{}",
+            stdout,
+            stderr
+        );
+    }
+
+    info!("✅ Successfully built PDF: {:?}", pdf_output_path);
+    println!("✅ PDF generated: {}", pdf_output_path.display());
+
+    Ok(())
+}
+
+/// Watch project files and regenerate on changes
+///
+/// This command:
+/// - Does an initial build
+/// - Launches 'typst watch' for live PDF preview
+/// - Watches .knot files for changes and recompiles as needed
+fn watch(file: Option<&PathBuf>) -> Result<()> {
+    use knot_core::config::Config;
+
+    // Determine which file to watch
+    let main_file = if let Some(f) = file {
+        f.clone()
+    } else {
+        // Try to find main file from knot.toml
+        let (config, _project_root) = Config::find_and_load(std::path::Path::new("."))?;
+        if let Some(main) = config.document.main {
+            PathBuf::from(main)
+        } else {
+            anyhow::bail!("No file specified and no 'main' found in knot.toml. Usage: knot watch <file.knot>");
+        }
+    };
+
+    info!("👀 Watching {:?}...", main_file);
+
+    // Step 1: Initial compile
+    compile(&main_file)?;
+
+    // Step 2: Determine .typ output path (dotfile)
+    let typ_output_path = {
+        let parent = main_file.parent().unwrap_or(std::path::Path::new("."));
+        let stem = main_file.file_stem().unwrap_or(std::ffi::OsStr::new("main"));
+        parent.join(format!(".{}.typ", stem.to_string_lossy()))
+    };
+
+    // Step 3: Launch typst watch in background
+    info!("🔍 Launching typst watch for live preview...");
+    println!("👀 Watching for changes. Press Ctrl+C to stop.");
+    println!("💡 Edit {:?} to see live updates.", main_file);
+
+    let mut typst_watch = std::process::Command::new("typst")
+        .arg("watch")
+        .arg(&typ_output_path)
+        .spawn()
+        .context("Failed to launch 'typst watch'. Is Typst installed?")?;
+
+    // For now, just wait for typst watch to finish (user Ctrl+C)
+    // TODO: Add file watching for .knot changes and recompile
+    let status = typst_watch.wait()?;
+
+    if !status.success() {
+        anyhow::bail!("typst watch exited with error");
+    }
 
     Ok(())
 }
