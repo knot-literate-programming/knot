@@ -596,6 +596,16 @@ Output is optimized for Typst. No attempt to support multiple backends.
 - **Phase 7**: Advanced LSP features
 - **v1.0**: Stable API, comprehensive documentation
 
+### Robustness: Side Channel Execution
+
+Currently, Knot parses standard output (stdout) for magic strings like `__KNOT_PLOT__`. This is fragile as user code might accidentally print these strings.
+
+**Proposed Improvement:** Use a "Side Channel" for metadata.
+1. Knot creates a temporary JSON file path and passes it to R via env var `KNOT_META_FILE`.
+2. The `typst()` R function writes structured metadata (plots, tables) to this JSON file instead of stdout.
+3. User output (stdout) remains purely for logs/text.
+4. Knot reads the JSON file after execution to retrieve artifacts.
+
 ---
 
 ## Resources
