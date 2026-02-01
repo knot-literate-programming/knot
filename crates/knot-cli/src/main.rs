@@ -233,10 +233,13 @@ fn build() -> Result<()> {
         project_root.join(format!(".{}.typ", stem.to_string_lossy()))
     };
 
-    // Step 5: Determine PDF output path
+    // Step 5: Determine PDF output path (named after project directory)
     let pdf_output_path = {
-        let stem = main_file.file_stem().unwrap_or(std::ffi::OsStr::new("output"));
-        project_root.join(format!("{}.pdf", stem.to_string_lossy()))
+        let project_name = project_root
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("output");
+        project_root.join(format!("{}.pdf", project_name))
     };
 
     // Step 6: Compile PDF with typst (with --root for imports)
