@@ -17,30 +17,30 @@ pub fn process_inline_expr(
     );
 
     if cache.has_cached_inline_result(&inline_hash) {
-        info!("  ✓ #r[{}] [cached]", inline_expr.code);
+        info!("  ✓ `{{r}} {}` [cached]", inline_expr.code);
         let cached_result = cache.get_cached_inline_result(&inline_hash)?;
         return Ok((cached_result, inline_hash));
     }
 
     let result_str = if inline_expr.verb.as_deref() == Some("run") {
-        info!("  ⚙️ #r:run[{}] [executing for side effect]", inline_expr.code);
+        info!("  ⚙️ `{{r run}} {}` [executing for side effect]", inline_expr.code);
         r_executor
             .as_mut()
             .context("R executor not initialized")?
             .execute_side_effect_only(&inline_expr.code)
             .context(format!(
-                "Failed to execute inline expression: #r:run[{}]",
+                "Failed to execute inline expression: `{{r run}} {}`",
                 inline_expr.code
             ))?;
         String::new() // No output for 'run' verb
     } else {
-        info!("  ⚙️ #r[{}] [executing]", inline_expr.code);
+        info!("  ⚙️ `{{r}} {}` [executing]", inline_expr.code);
         let result = r_executor
             .as_mut()
             .context("R executor not initialized")?
             .execute_inline(&inline_expr.code)
             .context(format!(
-                "Failed to execute inline expression: #r[{}]",
+                "Failed to execute inline expression: `{{r}} {}`",
                 inline_expr.code
             ))?;
         
