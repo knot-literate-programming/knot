@@ -14,7 +14,7 @@ This document describes the current state of the Knot project: architecture, imp
 ### Core Concept
 
 ```knot
-# My Analysis
+= My Analysis
 
 ```{r data-load}
 #| eval: true
@@ -27,6 +27,37 @@ The mean is `{r} mean(data$x)`.
 ```
 
 Knot parses `.knot` files, executes code chunks, caches results, and generates `.typ` output with embedded tables, plots, and inline values.
+
+### Project Philosophy
+
+Knot supports two usage modes:
+
+1. **Simple Documents**: Standalone `.knot` files compiled directly
+   - No configuration required
+   - Defaults for all options
+   - Cache stored in `.knot_cache/` relative to document
+   - Ideal for quick analyses, single-file reports
+
+2. **Structured Projects**: Multi-document projects with `knot.toml`
+   - Project root detection (searches parent directories, like Cargo/Git)
+   - Centralized configuration and defaults
+   - Shared cache across all project documents
+   - Organized structure for complex reports, books, courses
+
+**Example Project Structure**:
+```
+my-analysis/
+├── knot.toml              # Project config
+├── main.knot              # Main document
+├── chapters/
+│   ├── intro.knot
+│   └── results.knot
+├── data/
+│   └── dataset.csv
+└── .knot_cache/           # Shared cache
+```
+
+**Philosophy**: Start simple, grow into structure. Knot doesn't force project setup until you need it.
 
 ---
 
@@ -226,7 +257,20 @@ Currently returns raw text result. Future: apply `digits` formatting.
 
 ## Configuration
 
-### knot.toml
+### Project vs. Simple Mode
+
+**Simple Mode** (no `knot.toml`):
+- Compile single documents directly: `knot compile doc.knot`
+- All defaults used
+- Cache in `.knot_cache/` relative to document
+
+**Project Mode** (with `knot.toml`):
+- Centralized configuration for all project documents
+- Automatic project root detection (searches parent directories)
+- Shared cache across documents
+- Custom defaults for graphics, R packages, etc.
+
+### knot.toml Structure
 
 ```toml
 [package]
@@ -235,23 +279,46 @@ version = "0.1.0"
 authors = ["Name <email>"]
 
 [r]
-helper_path = "custom/path/to/knot-r-package"
+helper_path = "custom/path/to/knot-r-package"  # Override default R package location
 
 [typst]
-helper_path = "custom/path/to/knot-typst-package"
+helper_path = "custom/path/to/knot-typst-package"  # Override default Typst package
 
 [graphics]
-default_width = 7.0    # inches
-default_height = 5.0
-default_dpi = 300
-default_format = "svg"
+default_width = 7.0    # Default plot width (inches)
+default_height = 5.0   # Default plot height (inches)
+default_dpi = 300      # Default plot resolution
+default_format = "svg" # Default plot format (svg|png)
 ```
 
-### Graphics Resolution Priority
+### Project Root Detection
 
-1. **Chunk options** (`#| fig-width: 10`)
-2. **Config file** (`[graphics]` section)
-3. **Hardcoded defaults** (`GraphicsDefaults::default()`)
+The CLI searches parent directories for `knot.toml` (similar to Cargo/Git):
+
+```bash
+my-course/
+├── knot.toml          # Project root
+└── chapters/
+    └── chapter1.knot
+
+$ cd my-course/chapters/
+$ knot compile chapter1.knot
+# ✓ Finds knot.toml in ../
+# ✓ Uses project configuration
+# ✓ Cache shared at ../knot_cache/
+```
+
+This allows organizing complex projects with multiple documents while maintaining centralized settings.
+
+### Option Resolution Priority
+
+For any configurable option (e.g., graphics settings), the priority is:
+
+1. **Chunk options** (`#| fig-width: 10`) — highest priority
+2. **Config file** (`[graphics]` section in `knot.toml`)
+3. **Hardcoded defaults** (`GraphicsDefaults::default()`) — lowest priority
+
+This ensures flexibility: chunk-level control overrides project defaults, which override system defaults.
 
 ---
 
@@ -306,6 +373,65 @@ cargo test -- --include-ignored
 # Specific module
 cargo test --package knot-core --lib parser
 ```
+
+---
+
+## CLI Commands
+
+### Basic Usage
+
+```bash
+# Compile a document
+knot compile document.knot
+
+# Initialize a simple document
+knot init article.knot
+
+# Initialize a structured project
+knot init my-course --project
+
+# Clear cache
+knot clean
+```
+
+### Compile Options
+
+```bash
+# Force recompilation (ignore cache)
+knot compile document.knot --no-cache
+
+# Specify output file
+knot compile document.knot --output custom-name.typ
+
+# Verbose logging
+RUST_LOG=debug knot compile document.knot
+```
+
+### Project Initialization
+
+**Simple Document** (`knot init article.knot`):
+- Creates standalone `.knot` file from template
+- No project structure
+- Quick start for single-file reports
+
+**Structured Project** (`knot init my-project --project`):
+- Creates project directory with `knot.toml`
+- Sets up recommended structure:
+  ```
+  my-project/
+  ├── knot.toml
+  ├── main.knot
+  ├── chapters/
+  ├── data/
+  └── .gitignore
+  ```
+- Configures defaults and package metadata
+
+**Philosophy**: Use simple mode for one-off analyses. Upgrade to project mode when you need:
+- Multiple related documents
+- Custom default settings
+- Shared cache across files
+- Version control and collaboration
 
 ---
 
