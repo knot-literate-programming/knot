@@ -2,19 +2,23 @@
 #import "lib/knot.typ": *
 
 // ============================================
-// Compose your document here
+// Optional: Import a Typst template
 // ============================================
 //
-// This is a minimal Knot template.
-// You can use ANY Typst template or package you want.
-//
 // Examples:
-// - #import "@preview/charged-ieee": ieee
-// - #import "@preview/drafting": *
-// - Your own custom template
+// #import "@preview/charged-ieee": ieee
+// #import "@preview/drafting": *
 //
-// Knot only provides the R↔Typst bridge,
-// not document structure.
+// #show: ieee.with(
+//   title: [My Document],
+//   authors: [Your Name]
+// )
+
+// ============================================
+// Document content
+// ============================================
+
+/* KNOT-INJECT-CHAPTERS */
 
 = My Document
 
