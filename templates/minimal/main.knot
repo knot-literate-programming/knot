@@ -1,0 +1,60 @@
+// Import Knot helpers for R code execution
+#import "lib/knot.typ": *
+
+// ============================================
+// Compose your document here
+// ============================================
+//
+// This is a minimal Knot template.
+// You can use ANY Typst template or package you want.
+//
+// Examples:
+// - #import "@preview/charged-ieee": ieee
+// - #import "@preview/drafting": *
+// - Your own custom template
+//
+// Knot only provides the R↔Typst bridge,
+// not document structure.
+
+= My Document
+
+Here is some text with an inline R expression: `{r} 1 + 1`.
+
+```{r}
+#| eval: true
+#| echo: true
+#| output: true
+
+# Load libraries
+library(ggplot2)
+
+# Create some data
+x <- 1:10
+y <- x^2
+
+# Display summary
+summary(x)
+```
+
+The mean of x is `{r} mean(x)`.
+
+```{r}
+#| eval: true
+#| echo: false
+#| output: true
+
+# Create a simple plot
+df <- data.frame(x = x, y = y)
+gg <- ggplot(df, aes(x = x, y = y)) +
+  geom_point(size = 3, color = "steelblue") +
+  geom_line(color = "steelblue", alpha = 0.5) +
+  theme_minimal() +
+  labs(
+    title = "Simple Quadratic Function",
+    x = "x",
+    y = "y = x²"
+  )
+
+# Render the plot (requires knot.r.package)
+typst(gg, width = 6, height = 4)
+```

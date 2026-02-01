@@ -27,17 +27,22 @@ Knot is a literate programming tool that brings executable code to [Typst](https
 - SHA256 chained caching system with automatic invalidation
 - File dependency tracking (`#| depends:`)
 - Cross-referencing chunks with `@chunk-name`
-- LSP-ready parser with position tracking
+- LSP-ready parser with position tracking (winnow-based)
 - **R package (`knot.r.package`) for rich output**
   - DataFrames → Typst tables via `typst(df)`
   - ggplot2 plots → SVG/PNG images via `typst(gg)`
 - **Graphics support with explicit control**
   - Configurable dimensions, resolution, and formats
   - Full cache integration for plots
+- **Inline R expressions** (`` `{r} expr` ``)
+  - Backtick syntax for embedded code evaluation
+  - Parser implemented with proper position tracking
+- **Project initialization** (`knot init`)
+  - Creates complete project structure with helpers
 
-🎯 **Next Steps:**
+🚧 **In Progress:**
+- Phase 6: Inline expression options, watch mode
 - Phase 5: Typst package publication (@preview/knot)
-- Phase 6: Inline R expressions, watch mode
 
 ## Quick Start
 
@@ -76,14 +81,25 @@ install.packages(c("ggplot2", "digest"))
 
 ### Usage
 
-**Create a new Knot document:**
+**Create a new Knot project:**
 ```bash
-knot init my-document.knot
+knot init my-project
+cd my-project
+```
+
+This creates a minimal project structure:
+```
+my-project/
+├── knot.toml           # Project configuration
+├── main.knot           # Main document
+└── lib/
+    ├── knot.typ        # Typst helpers
+    └── knot.R          # R helpers (typst() function)
 ```
 
 **Compile to PDF:**
 ```bash
-knot compile my-document.knot
+knot compile main.knot
 ```
 
 **On subsequent runs, cached chunks are reused:**
@@ -139,6 +155,25 @@ data <- read_csv("data/raw.csv") %>% clean_data()
 ```
 
 If `data/raw.csv` or `scripts/utils.R` changes, the chunk is automatically re-executed.
+
+### Inline R Expressions
+
+Embed R code directly in your text using backtick syntax:
+
+```typst
+= Analysis Report
+
+We analyzed `{r} nrow(data)` samples with mean value of `{r} mean(data$value)`.
+
+The maximum value is `{r} max(data$value)`.
+```
+
+**Syntax:**
+- `` `{r} expr` `` — Evaluate R expression and insert result
+- `` `{r, digits=2} expr` `` — With formatting options (planned)
+- `` `r code` `` — Plain monospace code (handled by Typst, not Knot)
+
+**Note:** The curly braces `{r}` are **required** to distinguish Knot expressions from regular Typst inline code.
 
 ### Rich Output with `typst()`
 
@@ -246,7 +281,7 @@ knot clean --keep-metadata  # Keep metadata for inspection
 - [x] **Phase 3:** SHA256 chained caching with dependency tracking
 - [x] **Phase 4:** Graphics support (ggplot2 with explicit control)
 - [ ] **Phase 5:** Typst package publication (@preview/knot)
-- [ ] **Phase 6:** Inline R expressions (`#r[expr]`), watch mode, global config
+- [ ] **Phase 6:** Inline R expressions (`` `{r} expr` ``), watch mode, global config
 - [ ] **Phase 7:** LilyPond support for music notation
 - [ ] **Phase 8:** Comprehensive tests and stabilization
 - [ ] **Phase 9:** Community building and v1.0 release

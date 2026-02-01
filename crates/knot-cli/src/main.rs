@@ -4,9 +4,12 @@ use knot_core::{Compiler, Document};
 use log::info;
 use std::fs;
 use std::path::PathBuf;
+use include_dir::{include_dir, Dir};
 
-// Embed the default template directly in the binary
-const DEFAULT_TEMPLATE: &str = include_str!("../../../templates/default.knot");
+// Embed the minimal template and helper packages
+static MINIMAL_TEMPLATE: Dir = include_dir!("$CARGO_MANIFEST_DIR/../../templates/minimal");
+static TYPST_HELPER: &str = include_str!("../../../knot-typst-package/lib.typ");
+static R_HELPER: &str = include_str!("../../../knot-r-package/R/typst.R");
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -18,10 +21,10 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Initialize a new knot document
+    /// Initialize a new knot project
     Init {
-        /// The file to create
-        file: PathBuf,
+        /// The project name/directory to create
+        name: PathBuf,
     },
     /// Compile a knot document
     Compile {
@@ -37,8 +40,8 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match &cli.command {
-        Commands::Init { file } => {
-            init(file)?;
+        Commands::Init { name } => {
+            init(name)?;
         }
         Commands::Compile { file } => {
             compile(file)?;
@@ -85,12 +88,45 @@ fn fix_paths_in_typst(source: &str, typ_file: &PathBuf) -> Result<String> {
     Ok(result.to_string())
 }
 
-// Phase 1, SEMAINE 1, Jour 5
-fn init(file: &PathBuf) -> Result<()> {
-    // Use the embedded template instead of reading from file
-    fs::write(file, DEFAULT_TEMPLATE)
-        .context(format!("Could not write template to file: {:?}", file))?;
-    println!("📄 Created new knot document: {:?}", file);
+/// Initialize a new knot project with the minimal template
+fn init(project_name: &PathBuf) -> Result<()> {
+    // Create project directory
+    if project_name.exists() {
+        anyhow::bail!("Directory {:?} already exists. Choose a different name.", project_name);
+    }
+
+    fs::create_dir_all(&project_name)
+        .context(format!("Failed to create project directory: {:?}", project_name))?;
+
+    println!("📁 Creating knot project: {:?}", project_name);
+
+    // Extract minimal template files (knot.toml, main.knot)
+    MINIMAL_TEMPLATE.extract(&project_name)
+        .context("Failed to extract minimal template")?;
+    println!("  ✓ Copied template files");
+
+    // Create lib/ directory
+    let lib_dir = project_name.join("lib");
+    fs::create_dir_all(&lib_dir)
+        .context("Failed to create lib/ directory")?;
+
+    // Copy Typst helper
+    let typst_helper_path = lib_dir.join("knot.typ");
+    fs::write(&typst_helper_path, TYPST_HELPER)
+        .context("Failed to write lib/knot.typ")?;
+    println!("  ✓ Copied lib/knot.typ");
+
+    // Copy R helper
+    let r_helper_path = lib_dir.join("knot.R");
+    fs::write(&r_helper_path, R_HELPER)
+        .context("Failed to write lib/knot.R")?;
+    println!("  ✓ Copied lib/knot.R");
+
+    println!("\n✅ Project created successfully!");
+    println!("\nNext steps:");
+    println!("  cd {:?}", project_name);
+    println!("  knot compile main.knot");
+
     Ok(())
 }
 
