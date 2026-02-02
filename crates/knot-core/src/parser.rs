@@ -104,10 +104,10 @@ impl ChunkOptions {
             caption: self.caption.clone(),
             depends: self.depends.clone(),
 
-            fig_width: self.fig_width,
-            fig_height: self.fig_height,
-            dpi: self.dpi,
-            fig_format: self.fig_format.clone(),
+            fig_width: self.fig_width.unwrap_or(crate::defaults::Defaults::FIG_WIDTH),
+            fig_height: self.fig_height.unwrap_or(crate::defaults::Defaults::FIG_HEIGHT),
+            dpi: self.dpi.unwrap_or(crate::defaults::Defaults::DPI),
+            fig_format: self.fig_format.clone().unwrap_or_else(|| crate::defaults::Defaults::FIG_FORMAT.to_string()),
             fig_alt: self.fig_alt.clone(),
         }
     }
@@ -127,10 +127,10 @@ pub struct ResolvedChunkOptions {
     pub caption: Option<String>,
     pub depends: Vec<PathBuf>,
 
-    pub fig_width: Option<f64>,
-    pub fig_height: Option<f64>,
-    pub dpi: Option<u32>,
-    pub fig_format: Option<String>,
+    pub fig_width: f64,
+    pub fig_height: f64,
+    pub dpi: u32,
+    pub fig_format: String,
     pub fig_alt: Option<String>,
 }
 

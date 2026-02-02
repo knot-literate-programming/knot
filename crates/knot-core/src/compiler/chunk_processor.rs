@@ -1,4 +1,4 @@
-use crate::executors::LanguageExecutor;
+use crate::executors::{GraphicsOptions, LanguageExecutor};
 use crate::cache::{Cache, hash_dependencies};
 use crate::executors::r::RExecutor;
 use crate::executors::ExecutionResult;
@@ -41,11 +41,20 @@ pub fn process_chunk(
         cache.get_cached_result(&chunk_hash)?
     } else {
         info!("  ⚙️ {} [executing]", chunk_name);
+
+        // Prepare graphics options for executor
+        let graphics_opts = GraphicsOptions {
+            width: resolved_options.fig_width,
+            height: resolved_options.fig_height,
+            dpi: resolved_options.dpi,
+            format: resolved_options.fig_format.clone(),
+        };
+
         let result = match chunk.language.as_str() {
             "r" => r_executor
                 .as_mut()
                 .context("R executor not initialized")?
-                .execute(&chunk.code)?,
+                .execute(&chunk.code, &graphics_opts)?,
             _ => ExecutionResult::Text(format!(
                 "Language '{}' not supported yet.",
                 chunk.language

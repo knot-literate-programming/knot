@@ -12,7 +12,7 @@ mod execution;
 mod file_manager;
 mod formatters;
 
-use super::{ExecutionResult, LanguageExecutor};
+use super::{ExecutionResult, GraphicsOptions, LanguageExecutor};
 use anyhow::Result;
 use std::path::PathBuf;
 
@@ -60,8 +60,8 @@ impl LanguageExecutor for RExecutor {
         self.process.initialize(self.r_helper_path.clone())
     }
 
-    fn execute(&mut self, code: &str) -> Result<ExecutionResult> {
-        execution::execute(&mut self.process, &self.cache_dir, code)
+    fn execute(&mut self, code: &str, graphics: &GraphicsOptions) -> Result<ExecutionResult> {
+        execution::execute(&mut self.process, &self.cache_dir, code, graphics)
     }
 }
 
@@ -95,12 +95,21 @@ mod tests {
         (temp_dir, executor)
     }
 
+    fn default_graphics() -> super::GraphicsOptions {
+        super::GraphicsOptions {
+            width: 7.0,
+            height: 5.0,
+            dpi: 300,
+            format: "svg".to_string(),
+        }
+    }
+
     #[test]
     #[ignore] // Requires R installation
     fn test_execute_simple_expression() {
         let (_temp_dir, mut executor) = setup_executor();
 
-        let result = executor.execute("1 + 1").unwrap();
+        let result = executor.execute("1 + 1", &default_graphics()).unwrap();
 
         match result {
             ExecutionResult::Text(output) => {
@@ -116,10 +125,10 @@ mod tests {
         let (_temp_dir, mut executor) = setup_executor();
 
         // Assign variable
-        executor.execute("x <- 42").unwrap();
+        executor.execute("x <- 42", &default_graphics()).unwrap();
 
         // Use variable
-        let result = executor.execute("x").unwrap();
+        let result = executor.execute("x", &default_graphics()).unwrap();
 
         match result {
             ExecutionResult::Text(output) => {
@@ -135,10 +144,10 @@ mod tests {
         let (_temp_dir, mut executor) = setup_executor();
 
         // First chunk
-        executor.execute("x <- 10").unwrap();
+        executor.execute("x <- 10", &default_graphics()).unwrap();
 
         // Second chunk uses variable from first
-        let result = executor.execute("y <- x * 2; y").unwrap();
+        let result = executor.execute("y <- x * 2; y", &default_graphics()).unwrap();
 
         match result {
             ExecutionResult::Text(output) => {
@@ -158,7 +167,7 @@ df <- data.frame(a = 1:3, b = 4:6)
 typst(df)
 "#;
 
-        let result = executor.execute(code).unwrap();
+        let result = executor.execute(code, &default_graphics()).unwrap();
 
         match result {
             ExecutionResult::DataFrame(path) => {
@@ -206,7 +215,7 @@ typst(df)
         let (_temp_dir, mut executor) = setup_executor();
 
         // Set up variable in chunk
-        executor.execute("x <- 100").unwrap();
+        executor.execute("x <- 100", &default_graphics()).unwrap();
 
         // Use in inline
         let result = executor.execute_inline("x * 2").unwrap();
@@ -247,7 +256,7 @@ typst(df)
         let (_temp_dir, mut executor) = setup_executor();
 
         // Invalid R code
-        let result = executor.execute("this_function_does_not_exist()");
+        let result = executor.execute("this_function_does_not_exist()", &default_graphics());
 
         assert!(result.is_err());
         let error_msg = result.unwrap_err().to_string();
@@ -266,7 +275,7 @@ z <- x + y
 z
 "#;
 
-        let result = executor.execute(code).unwrap();
+        let result = executor.execute(code, &default_graphics()).unwrap();
 
         match result {
             ExecutionResult::Text(output) => {
@@ -287,7 +296,7 @@ x <- 5  # Assign 5 to x
 x * 2   # Multiply by 2
 "#;
 
-        let result = executor.execute(code).unwrap();
+        let result = executor.execute(code, &default_graphics()).unwrap();
 
         match result {
             ExecutionResult::Text(output) => {

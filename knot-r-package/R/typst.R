@@ -92,14 +92,35 @@ typst.data.frame <- function(x, row.names = FALSE, ...) {
 #' Saves a ggplot2 plot to a file and communicates via side-channel.
 #' If not in knot environment, prints the plot normally.
 #'
+#' Dimensions are read from chunk options via environment variables set by knot:
+#' - KNOT_FIG_WIDTH: figure width in inches
+#' - KNOT_FIG_HEIGHT: figure height in inches
+#' - KNOT_FIG_DPI: resolution in DPI
+#' - KNOT_FIG_FORMAT: output format (svg, png, pdf)
+#'
+#' These can be overridden by explicitly passing arguments.
+#'
 #' @param x A ggplot2 object
-#' @param width Plot width in inches (default: 7)
-#' @param height Plot height in inches (default: 5)
-#' @param dpi Resolution in dots per inch (default: 300)
-#' @param format Output format: "svg", "png", or "pdf" (default: "svg")
+#' @param width Plot width in inches (default: from KNOT_FIG_WIDTH or 7)
+#' @param height Plot height in inches (default: from KNOT_FIG_HEIGHT or 5)
+#' @param dpi Resolution in dots per inch (default: from KNOT_FIG_DPI or 300)
+#' @param format Output format: "svg", "png", or "pdf" (default: from KNOT_FIG_FORMAT or "svg")
 #' @param ... Additional arguments passed to ggsave
 #' @export
-typst.ggplot <- function(x, width = 7, height = 5, dpi = 300, format = "svg", ...) {
+typst.ggplot <- function(x, width = NULL, height = NULL, dpi = NULL, format = NULL, ...) {
+  # Read defaults from environment variables (set by knot from chunk options)
+  if (is.null(width)) {
+    width <- as.numeric(Sys.getenv("KNOT_FIG_WIDTH", "7"))
+  }
+  if (is.null(height)) {
+    height <- as.numeric(Sys.getenv("KNOT_FIG_HEIGHT", "5"))
+  }
+  if (is.null(dpi)) {
+    dpi <- as.integer(Sys.getenv("KNOT_FIG_DPI", "300"))
+  }
+  if (is.null(format)) {
+    format <- Sys.getenv("KNOT_FIG_FORMAT", "svg")
+  }
   if (!requireNamespace("ggplot2", quietly = TRUE)) {
     stop("ggplot2 package required for typst.ggplot(). Please install it.")
   }

@@ -17,7 +17,16 @@ pub enum ExecutionResult {
     DataFrameAndPlot { dataframe: PathBuf, plot: PathBuf },
 }
 
+/// Graphics options for code execution
+#[derive(Debug, Clone)]
+pub struct GraphicsOptions {
+    pub width: f64,
+    pub height: f64,
+    pub dpi: u32,
+    pub format: String,
+}
+
 pub trait LanguageExecutor {
     fn initialize(&mut self) -> Result<()>;
-    fn execute(&mut self, code: &str) -> Result<ExecutionResult>;
+    fn execute(&mut self, code: &str, graphics: &GraphicsOptions) -> Result<ExecutionResult>;
 }

@@ -8,17 +8,27 @@
 // If no metadata is provided, stdout text is used as fallback.
 
 use super::{formatters, process::RProcess, RExecutor, BOUNDARY};
-use crate::executors::{ExecutionResult, LanguageExecutor, OutputMetadata, SideChannel};
+use crate::executors::{ExecutionResult, GraphicsOptions, LanguageExecutor, OutputMetadata, SideChannel};
 use anyhow::{Context, Result};
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::thread;
 
 /// Executes a code chunk in the persistent R process
-pub fn execute(process: &mut RProcess, _cache_dir: &Path, code: &str) -> Result<ExecutionResult> {
+pub fn execute(process: &mut RProcess, _cache_dir: &Path, code: &str, graphics: &GraphicsOptions) -> Result<ExecutionResult> {
     // Create side-channel for this chunk
     let channel = SideChannel::new()?;
     channel.setup_env()?;
+
+    // Set graphics options as environment variables for R
+    // SAFETY: We're setting these variables before executing R code in the same thread.
+    // The R process will read these variables, and we don't modify them concurrently.
+    unsafe {
+        std::env::set_var("KNOT_FIG_WIDTH", graphics.width.to_string());
+        std::env::set_var("KNOT_FIG_HEIGHT", graphics.height.to_string());
+        std::env::set_var("KNOT_FIG_DPI", graphics.dpi.to_string());
+        std::env::set_var("KNOT_FIG_FORMAT", &graphics.format);
+    }
 
     let stdin = process
         .stdin
@@ -110,8 +120,16 @@ pub fn execute(process: &mut RProcess, _cache_dir: &Path, code: &str) -> Result<
 
 /// Execute an inline R expression and return formatted result
 pub fn execute_inline(executor: &mut RExecutor, code: &str) -> Result<String> {
+    // For inline expressions, use default graphics options (not used anyway)
+    let graphics = GraphicsOptions {
+        width: crate::defaults::Defaults::FIG_WIDTH,
+        height: crate::defaults::Defaults::FIG_HEIGHT,
+        dpi: crate::defaults::Defaults::DPI,
+        format: crate::defaults::Defaults::FIG_FORMAT.to_string(),
+    };
+
     // Execute the code and get output
-    let result = executor.execute(code)?;
+    let result = executor.execute(code, &graphics)?;
 
     // Extract text output
     let output = match result {
