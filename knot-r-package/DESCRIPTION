@@ -7,4 +7,5 @@ License: MIT + file LICENSE
 Encoding: UTF-8
 Suggests:
     ggplot2,
-    digest
+    digest,
+    jsonlite
