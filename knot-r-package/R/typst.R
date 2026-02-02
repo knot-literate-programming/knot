@@ -3,17 +3,13 @@
 #' Write metadata to side-channel (KNOT_METADATA_FILE)
 #'
 #' Appends metadata to the side-channel file if KNOT_METADATA_FILE is set.
-#' Falls back to stdout markers for backward compatibility.
 #'
 #' @param metadata A list representing metadata entry
-#' @param marker Optional stdout marker for fallback
-#' @param content Optional stdout content for fallback
-.write_metadata <- function(metadata, marker = NULL, content = NULL) {
+#' @return TRUE if metadata was written, FALSE otherwise
+.write_metadata <- function(metadata) {
   metadata_file <- Sys.getenv("KNOT_METADATA_FILE", unset = NA)
 
   if (!is.na(metadata_file) && nzchar(metadata_file)) {
-    # Side-channel mode: write JSON to metadata file
-
     # Read existing metadata if file exists
     existing_metadata <- list()
     if (file.exists(metadata_file)) {
@@ -35,11 +31,11 @@
     # Write back as JSON array
     json_output <- jsonlite::toJSON(updated_metadata, auto_unbox = TRUE, pretty = FALSE)
     writeLines(json_output, metadata_file)
-  } else if (!is.null(marker) && !is.null(content)) {
-    # Fallback mode: write to stdout with markers
-    cat(marker, "\n", sep = "")
-    cat(content, "\n", sep = "")
+
+    return(TRUE)
   }
+
+  return(FALSE)
 }
 
 #' Convert R objects to Typst representations
@@ -61,8 +57,8 @@ typst.default <- function(x, ...) {
 
 #' Convert data.frame to Typst table
 #'
-#' Serializes a data frame to CSV format and communicates via side-channel
-#' or stdout markers (fallback).
+#' Serializes a data frame to CSV format and communicates via side-channel.
+#' If not in knot environment, prints the data frame normally.
 #'
 #' @param x A data.frame
 #' @param row.names Logical: include row names in CSV?
@@ -80,22 +76,21 @@ typst.data.frame <- function(x, row.names = FALSE, ...) {
   # Normalize path for cross-platform compatibility
   filepath_normalized <- normalizePath(filepath)
 
-  # Write metadata via side-channel or fallback
+  # Write metadata via side-channel
   metadata <- list(type = "dataframe", path = filepath_normalized)
 
-  # For fallback, capture CSV content
-  csv_lines <- utils::capture.output(utils::write.csv(x, stdout(), row.names = row.names, ...))
-  csv_content <- paste(csv_lines, collapse = "\n")
-
-  .write_metadata(metadata, "__KNOT_SERIALIZED_CSV__", csv_content)
+  if (!.write_metadata(metadata)) {
+    # Not in knot environment, print normally
+    print(x)
+  }
 
   invisible(x)
 }
 
 #' Convert ggplot2 plot to Typst image
 #'
-#' Saves a ggplot2 plot to a file and communicates via side-channel
-#' or stdout markers (fallback).
+#' Saves a ggplot2 plot to a file and communicates via side-channel.
+#' If not in knot environment, prints the plot normally.
 #'
 #' @param x A ggplot2 object
 #' @param width Plot width in inches (default: 7)
@@ -128,11 +123,13 @@ typst.ggplot <- function(x, width = 7, height = 5, dpi = 300, format = "svg", ..
   # Normalize path for cross-platform compatibility
   filepath_normalized <- normalizePath(filepath)
 
-  # Write metadata via side-channel or fallback
+  # Write metadata via side-channel
   metadata <- list(type = "plot", path = filepath_normalized, format = format)
-  fallback_content <- filepath_normalized
 
-  .write_metadata(metadata, "__KNOT_SERIALIZED_PLOT__", fallback_content)
+  if (!.write_metadata(metadata)) {
+    # Not in knot environment, print normally
+    print(x)
+  }
 
   invisible(x)
 }

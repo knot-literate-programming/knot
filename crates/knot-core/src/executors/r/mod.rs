@@ -3,14 +3,12 @@
 // This module orchestrates R code execution with caching support.
 // The implementation is split across multiple submodules for clarity:
 // - process: R process lifecycle management
-// - execution: Code execution logic (chunks, inline, side-effects)
-// - output_parser: Parsing R output markers (CSV, Plot)
+// - execution: Code execution logic (chunks, inline, side-channel communication)
 // - file_manager: Cache file operations (save CSV, copy plots)
 // - formatters: Inline expression output formatting
 
 mod process;
 mod execution;
-mod output_parser;
 mod file_manager;
 mod formatters;
 

@@ -4,10 +4,10 @@
 // 1. Full chunk execution (with rich output support)
 // 2. Inline expression execution (formatted for inline display)
 //
-// Uses side-channel (via KNOT_METADATA_FILE) for robust communication,
-// with fallback to stdout parsing for backward compatibility.
+// Uses side-channel (via KNOT_METADATA_FILE) for robust communication.
+// If no metadata is provided, stdout text is used as fallback.
 
-use super::{formatters, output_parser, process::RProcess, RExecutor, BOUNDARY};
+use super::{formatters, process::RProcess, RExecutor, BOUNDARY};
 use crate::executors::{ExecutionResult, LanguageExecutor, OutputMetadata, SideChannel};
 use anyhow::{Context, Result};
 use std::io::{BufRead, Write};
@@ -103,16 +103,9 @@ pub fn execute(process: &mut RProcess, cache_dir: &Path, code: &str) -> Result<E
         }
     }
 
-    // Read metadata from side-channel
+    // Read metadata from side-channel and convert to ExecutionResult
     let metadata = channel.read_metadata()?;
-
-    // Priority: side-channel metadata > stdout parsing (fallback)
-    if !metadata.is_empty() {
-        return metadata_to_execution_result(metadata, &stdout_output);
-    }
-
-    // Fallback to old stdout parsing for backward compatibility
-    output_parser::parse_output(&stdout_output, cache_dir)
+    metadata_to_execution_result(metadata, &stdout_output)
 }
 
 /// Execute an inline R expression and return formatted result
@@ -139,7 +132,7 @@ pub fn execute_inline(executor: &mut RExecutor, code: &str) -> Result<String> {
 
 /// Convert side-channel metadata to ExecutionResult
 ///
-/// Priority: side-channel metadata > stdout parsing (fallback)
+/// If metadata is empty, uses stdout text as content.
 fn metadata_to_execution_result(
     metadata: Vec<OutputMetadata>,
     stdout_text: &str,
