@@ -211,11 +211,11 @@ mod tests {
         let cache = Cache::new(tmp_dir.path().to_path_buf()).unwrap();
 
         let opts1 = ChunkOptions {
-            eval: true,
+            eval: Some(true),
             ..Default::default()
         };
         let opts2 = ChunkOptions {
-            eval: false,
+            eval: Some(false),
             ..Default::default()
         };
 

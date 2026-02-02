@@ -15,27 +15,28 @@ pub fn process_chunk(
     previous_hash: &str,
     config_defaults: &ChunkDefaults,
 ) -> Result<(String, String)> {
-    // Apply config defaults to chunk options
-    let mut options = chunk.options.clone();
-    options.apply_config_defaults(config_defaults);
+    // Apply config defaults to chunk options and resolve to concrete values
+    let mut chunk_options = chunk.options.clone();
+    chunk_options.apply_config_defaults(config_defaults);
+    let resolved_options = chunk_options.resolve(); // Convert Option<bool> to bool
     let chunk_name = chunk
         .name
         .as_deref()
         .map(String::from)
         .unwrap_or_else(|| format!("chunk-{}", chunk.start_byte));
 
-    let deps_hash = hash_dependencies(&options.depends)?;
+    let deps_hash = hash_dependencies(&chunk_options.depends)?;
 
     let chunk_hash = cache.get_chunk_hash(
         &chunk.code,
-        &options,
+        &chunk_options,
         previous_hash,
         &deps_hash,
     );
 
-    let execution_result = if !options.eval {
+    let execution_result = if !resolved_options.eval {
         ExecutionResult::Text(String::new())
-    } else if options.cache && cache.has_cached_result(&chunk_hash) {
+    } else if resolved_options.cache && cache.has_cached_result(&chunk_hash) {
         info!("  ✓ {} [cached]", chunk_name);
         cache.get_cached_result(&chunk_hash)?
     } else {
@@ -50,21 +51,21 @@ pub fn process_chunk(
                 chunk.language
             )),
         };
-        if options.cache {
+        if resolved_options.cache {
             cache.save_result(
                 chunk.start_byte, // Use start_byte as unique ID for now
                 chunk.name.clone(),
                 chunk_hash.clone(),
                 &result,
-                options.depends.clone(),
+                chunk_options.depends.clone(),
             )?;
         }
         result
     };
 
     let backend = TypstBackend::new();
-    let chunk_output_final = backend.format_chunk(chunk, &execution_result);
-    
+    let chunk_output_final = backend.format_chunk(chunk, &resolved_options, &execution_result);
+
     Ok((chunk_output_final, chunk_hash))
 }
 
@@ -91,10 +92,10 @@ mod tests {
             code: code.to_string(),
             name,
             options: ChunkOptions {
-                eval,
-                echo: true,
-                output: true,
-                cache,
+                eval: Some(eval),
+                echo: Some(true),
+                output: Some(true),
+                cache: Some(cache),
                 caption: None,
                 depends: vec![],
                 label: None,
@@ -231,7 +232,7 @@ mod tests {
     #[test]
     fn test_process_chunk_caching_disabled() {
         let mut chunk = create_test_chunk("r", "x <- 1", None, true, false);
-        chunk.options.cache = false;
+        chunk.options.cache = Some(false);
 
         let (_temp_dir, mut cache) = setup_test_cache();
         let mut executor = setup_test_r_executor();

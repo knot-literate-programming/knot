@@ -7,7 +7,7 @@ pub mod graphics;
 pub mod config;
 pub mod defaults;
 
-pub use parser::{Chunk, ChunkOptions, Document, InlineExpr};
+pub use parser::{Chunk, ChunkOptions, ResolvedChunkOptions, Document, InlineExpr};
 pub use compiler::Compiler;
 pub use graphics::{GraphicsDefaults, ResolvedGraphicsOptions, resolve_graphics_options};
 pub use config::{Config, ChunkDefaults};

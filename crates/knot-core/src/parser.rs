@@ -34,10 +34,12 @@ pub struct Range {
 
 #[derive(Debug, Default, Clone, Serialize)]
 pub struct ChunkOptions {
-    pub eval: bool,
-    pub echo: bool,
-    pub output: bool,
-    pub cache: bool,
+    // Boolean options: None means "use defaults"
+    pub eval: Option<bool>,
+    pub echo: Option<bool>,
+    pub output: Option<bool>,
+    pub cache: Option<bool>,
+
     pub label: Option<String>,
     pub caption: Option<String>,
     pub depends: Vec<PathBuf>,
@@ -53,16 +55,26 @@ pub struct ChunkOptions {
 impl ChunkOptions {
     /// Apply default values from knot.toml configuration
     ///
-    /// Only applies defaults for fields that are still at their hardcoded default values.
+    /// Only applies defaults for fields that are None (not specified in chunk).
     /// Chunk-specific options always take priority over config defaults.
     ///
     /// Priority: chunk options > knot.toml defaults > hardcoded defaults
     pub fn apply_config_defaults(&mut self, defaults: &crate::config::ChunkDefaults) {
-        // For bool fields, only override if they match the hardcoded default
-        // (we can't distinguish between "explicitly set to default" vs "not set")
-        // This is a limitation, but acceptable since most fields will be set explicitly in chunks
+        // Boolean options: apply config defaults if not set in chunk
+        if self.eval.is_none() {
+            self.eval = defaults.eval;
+        }
+        if self.echo.is_none() {
+            self.echo = defaults.echo;
+        }
+        if self.output.is_none() {
+            self.output = defaults.output;
+        }
+        if self.cache.is_none() {
+            self.cache = defaults.cache;
+        }
 
-        // Graphics options are Option<T>, so we can properly detect "not set"
+        // Graphics options: apply config defaults if not set in chunk
         if self.fig_width.is_none() {
             self.fig_width = defaults.fig_width;
         }
@@ -76,6 +88,50 @@ impl ChunkOptions {
             self.fig_format = defaults.fig_format.clone();
         }
     }
+
+    /// Resolve all options to concrete values
+    ///
+    /// Applies hardcoded defaults for any options still None after config defaults.
+    /// This is the final step that converts Option<bool> to bool.
+    pub fn resolve(&self) -> ResolvedChunkOptions {
+        ResolvedChunkOptions {
+            eval: self.eval.unwrap_or(crate::defaults::Defaults::CHUNK_EVAL),
+            echo: self.echo.unwrap_or(crate::defaults::Defaults::CHUNK_ECHO),
+            output: self.output.unwrap_or(crate::defaults::Defaults::CHUNK_OUTPUT),
+            cache: self.cache.unwrap_or(crate::defaults::Defaults::CHUNK_CACHE),
+
+            label: self.label.clone(),
+            caption: self.caption.clone(),
+            depends: self.depends.clone(),
+
+            fig_width: self.fig_width,
+            fig_height: self.fig_height,
+            dpi: self.dpi,
+            fig_format: self.fig_format.clone(),
+            fig_alt: self.fig_alt.clone(),
+        }
+    }
+}
+
+/// ChunkOptions with all values resolved to concrete types
+///
+/// This is what the compiler uses after applying chunk > config > hardcoded defaults.
+#[derive(Debug, Clone)]
+pub struct ResolvedChunkOptions {
+    pub eval: bool,
+    pub echo: bool,
+    pub output: bool,
+    pub cache: bool,
+
+    pub label: Option<String>,
+    pub caption: Option<String>,
+    pub depends: Vec<PathBuf>,
+
+    pub fig_width: Option<f64>,
+    pub fig_height: Option<f64>,
+    pub dpi: Option<u32>,
+    pub fig_format: Option<String>,
+    pub fig_alt: Option<String>,
 }
 
 #[derive(Debug)]
@@ -416,13 +472,7 @@ fn is_inside_chunk(pos: usize, chunks: &[Chunk]) -> bool {
 
 // La logique de parsing des options est basée sur la section 8.2
 pub fn parse_options(options_block: &str) -> Result<ChunkOptions> {
-    let mut options = ChunkOptions {
-        eval: crate::defaults::Defaults::CHUNK_EVAL,
-        echo: crate::defaults::Defaults::CHUNK_ECHO,
-        output: crate::defaults::Defaults::CHUNK_OUTPUT,
-        cache: crate::defaults::Defaults::CHUNK_CACHE,
-        ..Default::default()
-    };
+    let mut options = ChunkOptions::default();
 
     for line in options_block.lines() {
         let line = line.trim();
@@ -437,10 +487,10 @@ pub fn parse_options(options_block: &str) -> Result<ChunkOptions> {
             let value = value.trim();
 
             match key {
-                "eval" => options.eval = parse_bool(value)?,
-                "echo" => options.echo = parse_bool(value)?,
-                "output" => options.output = parse_bool(value)?,
-                "cache" => options.cache = parse_bool(value)?,
+                "eval" => options.eval = Some(parse_bool(value)?),
+                "echo" => options.echo = Some(parse_bool(value)?),
+                "output" => options.output = Some(parse_bool(value)?),
+                "cache" => options.cache = Some(parse_bool(value)?),
                 "label" => options.label = Some(value.to_string()),
                 "caption" => options.caption = Some(value.to_string()),
                 "depends" => {
@@ -504,9 +554,9 @@ mod tests {
         let chunk = &doc.chunks[0];
         assert_eq!(chunk.language, "r");
         assert_eq!(chunk.code.trim(), "1 + 1");
-        assert_eq!(chunk.options.eval, true);
-        assert_eq!(chunk.options.echo, false);
-        assert_eq!(chunk.options.output, true); // default
+        assert_eq!(chunk.options.eval, Some(true));
+        assert_eq!(chunk.options.echo, Some(false));
+        assert_eq!(chunk.options.output, None); // not specified, will use default
     }
 
     #[test]
@@ -521,7 +571,7 @@ rnorm(10)
         assert_eq!(doc.chunks.len(), 1);
         let chunk = &doc.chunks[0];
         assert_eq!(chunk.name, Some("my-chunk".to_string()));
-        assert_eq!(chunk.options.cache, false);
+        assert_eq!(chunk.options.cache, Some(false));
         assert_eq!(chunk.options.depends.len(), 2);
         assert_eq!(chunk.options.depends[0], PathBuf::from("data.csv"));
         assert_eq!(chunk.options.depends[1], PathBuf::from("scripts/helper.R"));
@@ -618,8 +668,8 @@ More text below."###;
         let chunk = &doc.chunks[0];
         assert_eq!(chunk.language, "r");
         assert!(chunk.code.contains("1 + 1"));
-        assert_eq!(chunk.options.eval, true);
-        assert_eq!(chunk.options.echo, false);
+        assert_eq!(chunk.options.eval, Some(true));
+        assert_eq!(chunk.options.echo, Some(false));
     }
 
     #[test]

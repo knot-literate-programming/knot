@@ -38,9 +38,21 @@ pub async fn handle_hover(state: &ServerState, params: HoverParams) -> Result<Op
                 let name = chunk.name.as_deref().unwrap_or("unnamed");
                 let mut content = format!("### Knot Chunk: `{}`\n\n", name);
                 content.push_str(&format!("- **Language**: `{}`\n", chunk.language));
-                content.push_str(&format!("- **Eval**: `{}`\n", chunk.options.eval));
-                content.push_str(&format!("- **Echo**: `{}`\n", chunk.options.echo));
-                content.push_str(&format!("- **Cache**: `{}`\n", chunk.options.cache));
+
+                // Format Option<bool> values - show "default" if not set
+                let eval_display = chunk.options.eval
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "default".to_string());
+                let echo_display = chunk.options.echo
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "default".to_string());
+                let cache_display = chunk.options.cache
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "default".to_string());
+
+                content.push_str(&format!("- **Eval**: `{}`\n", eval_display));
+                content.push_str(&format!("- **Echo**: `{}`\n", echo_display));
+                content.push_str(&format!("- **Cache**: `{}`\n", cache_display));
 
                 return Ok(Some(Hover {
                     contents: HoverContents::Markup(MarkupContent {

@@ -47,16 +47,16 @@ pub fn get_document_symbols(text: &str) -> Option<Vec<DocumentSymbol>> {
 
         // Create detail string with chunk options
         let mut details = vec![format!("Language: {}", chunk.language)];
-        if !chunk.options.eval {
+        if matches!(chunk.options.eval, Some(false)) {
             details.push("eval: false".to_string());
         }
-        if !chunk.options.echo {
+        if matches!(chunk.options.echo, Some(false)) {
             details.push("echo: false".to_string());
         }
-        if !chunk.options.output {
+        if matches!(chunk.options.output, Some(false)) {
             details.push("output: false".to_string());
         }
-        if !chunk.options.cache {
+        if matches!(chunk.options.cache, Some(false)) {
             details.push("cache: false".to_string());
         }
         let detail = if details.len() > 1 {
