@@ -9,7 +9,7 @@ pub mod config;
 pub use parser::{Chunk, ChunkOptions, Document, InlineExpr};
 pub use compiler::Compiler;
 pub use graphics::{GraphicsDefaults, ResolvedGraphicsOptions, resolve_graphics_options};
-pub use config::Config;
+pub use config::{Config, ChunkDefaults};
 
 use std::path::PathBuf;
 

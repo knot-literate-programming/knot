@@ -13,6 +13,29 @@ pub struct Config {
     pub document: DocumentConfig,
     #[serde(default)]
     pub helpers: HelpersConfig,
+    #[serde(default)]
+    pub defaults: ChunkDefaults,
+}
+
+/// Default values for chunk options, configurable in knot.toml
+///
+/// All fields are optional to allow partial configuration.
+/// Priority: chunk options > knot.toml defaults > hardcoded defaults
+#[derive(Debug, Default, Deserialize)]
+pub struct ChunkDefaults {
+    pub eval: Option<bool>,
+    pub echo: Option<bool>,
+    pub output: Option<bool>,
+    pub cache: Option<bool>,
+
+    // Graphics options
+    #[serde(rename = "fig-width")]
+    pub fig_width: Option<f64>,
+    #[serde(rename = "fig-height")]
+    pub fig_height: Option<f64>,
+    pub dpi: Option<u32>,
+    #[serde(rename = "fig-format")]
+    pub fig_format: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -98,6 +121,7 @@ impl Default for Config {
         Self {
             document: DocumentConfig::default(),
             helpers: HelpersConfig::default(),
+            defaults: ChunkDefaults::default(),
         }
     }
 }
@@ -245,5 +269,46 @@ main = "main.knot"
         assert_eq!(config.document.main, Some("main.knot".to_string()));
         assert!(config.helpers.typst.is_none());
         assert!(config.helpers.r.is_none());
+    }
+
+    #[test]
+    fn test_defaults_section() {
+        let toml = r#"
+[document]
+main = "main.knot"
+
+[defaults]
+echo = false
+eval = true
+cache = true
+fig-width = 8.0
+fig-height = 6.0
+dpi = 600
+fig-format = "png"
+"#;
+
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.defaults.echo, Some(false));
+        assert_eq!(config.defaults.eval, Some(true));
+        assert_eq!(config.defaults.cache, Some(true));
+        assert_eq!(config.defaults.fig_width, Some(8.0));
+        assert_eq!(config.defaults.fig_height, Some(6.0));
+        assert_eq!(config.defaults.dpi, Some(600));
+        assert_eq!(config.defaults.fig_format, Some("png".to_string()));
+    }
+
+    #[test]
+    fn test_defaults_partial() {
+        let toml = r#"
+[defaults]
+echo = false
+fig-width = 10.0
+"#;
+
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.defaults.echo, Some(false));
+        assert_eq!(config.defaults.fig_width, Some(10.0));
+        assert!(config.defaults.eval.is_none());
+        assert!(config.defaults.cache.is_none());
     }
 }

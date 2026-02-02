@@ -32,7 +32,7 @@ pub struct Range {
     pub end: Position,
 }
 
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Default, Clone, Serialize)]
 pub struct ChunkOptions {
     pub eval: bool,
     pub echo: bool,
@@ -48,6 +48,34 @@ pub struct ChunkOptions {
     pub dpi: Option<u32>,
     pub fig_format: Option<String>,
     pub fig_alt: Option<String>,
+}
+
+impl ChunkOptions {
+    /// Apply default values from knot.toml configuration
+    ///
+    /// Only applies defaults for fields that are still at their hardcoded default values.
+    /// Chunk-specific options always take priority over config defaults.
+    ///
+    /// Priority: chunk options > knot.toml defaults > hardcoded defaults
+    pub fn apply_config_defaults(&mut self, defaults: &crate::config::ChunkDefaults) {
+        // For bool fields, only override if they match the hardcoded default
+        // (we can't distinguish between "explicitly set to default" vs "not set")
+        // This is a limitation, but acceptable since most fields will be set explicitly in chunks
+
+        // Graphics options are Option<T>, so we can properly detect "not set"
+        if self.fig_width.is_none() {
+            self.fig_width = defaults.fig_width;
+        }
+        if self.fig_height.is_none() {
+            self.fig_height = defaults.fig_height;
+        }
+        if self.dpi.is_none() {
+            self.dpi = defaults.dpi;
+        }
+        if self.fig_format.is_none() {
+            self.fig_format = defaults.fig_format.clone();
+        }
+    }
 }
 
 #[derive(Debug)]

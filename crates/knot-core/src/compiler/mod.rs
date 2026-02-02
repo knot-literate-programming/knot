@@ -22,6 +22,7 @@ use log::info;
 
 pub struct Compiler {
     r_executor: Option<RExecutor>,
+    config: Config,
     // In the future, we'll have more executors
     // lilypond_executor: Option<LilypondExecutor>,
     // python_executor: Option<PythonExecutor>,
@@ -53,6 +54,7 @@ impl Compiler {
 
         Ok(Self {
             r_executor: Some(r_executor),
+            config,
         })
     }
 
@@ -97,7 +99,7 @@ impl Compiler {
 
             let (result_str, node_hash) = match node {
                 ExecutableNode::Chunk(chunk) => {
-                    chunk_processor::process_chunk(chunk, &mut self.r_executor, &mut cache, &previous_hash)?
+                    chunk_processor::process_chunk(chunk, &mut self.r_executor, &mut cache, &previous_hash, &self.config.defaults)?
                 }
                 ExecutableNode::InlineExpr(inline_expr) => {
                     inline_processor::process_inline_expr(inline_expr, &mut self.r_executor, &mut cache, &previous_hash)?
