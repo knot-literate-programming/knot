@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::thread;
 
 /// Executes a code chunk in the persistent R process
-pub fn execute(process: &mut RProcess, cache_dir: &Path, code: &str) -> Result<ExecutionResult> {
+pub fn execute(process: &mut RProcess, _cache_dir: &Path, code: &str) -> Result<ExecutionResult> {
     // Create side-channel for this chunk
     let channel = SideChannel::new()?;
     channel.setup_env()?;
