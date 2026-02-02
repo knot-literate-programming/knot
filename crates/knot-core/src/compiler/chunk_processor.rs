@@ -2,7 +2,7 @@ use crate::executors::LanguageExecutor;
 use crate::cache::{Cache, hash_dependencies};
 use crate::executors::r::RExecutor;
 use crate::executors::ExecutionResult;
-use crate::parser::{Chunk, ChunkOptions};
+use crate::parser::Chunk;
 use crate::config::ChunkDefaults;
 use crate::backend::{Backend, TypstBackend};
 use anyhow::{Context, Result};

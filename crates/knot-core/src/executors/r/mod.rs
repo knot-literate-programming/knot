@@ -18,7 +18,7 @@ use std::path::PathBuf;
 
 pub use process::RProcess;
 
-const BOUNDARY: &str = "---KNOT_CHUNK_BOUNDARY---";
+const BOUNDARY: &str = crate::defaults::Defaults::BOUNDARY_MARKER;
 
 pub struct RExecutor {
     process: RProcess,

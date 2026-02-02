@@ -12,10 +12,10 @@ pub struct GraphicsDefaults {
 impl Default for GraphicsDefaults {
     fn default() -> Self {
         Self {
-            fig_width: 7.0,    // inches
-            fig_height: 5.0,   // inches
-            dpi: 300,
-            format: "svg".to_string(),
+            fig_width: crate::defaults::Defaults::FIG_WIDTH,
+            fig_height: crate::defaults::Defaults::FIG_HEIGHT,
+            dpi: crate::defaults::Defaults::DPI,
+            format: crate::defaults::Defaults::FIG_FORMAT.to_string(),
         }
     }
 }

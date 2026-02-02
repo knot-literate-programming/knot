@@ -102,9 +102,9 @@ pub struct InlineOptions {
 impl Default for InlineOptions {
     fn default() -> Self {
         Self {
-            echo: false,  // Don't show code by default for inline
-            eval: true,   // Always evaluate by default
-            output: true, // Show result by default
+            echo: crate::defaults::Defaults::INLINE_ECHO,
+            eval: crate::defaults::Defaults::INLINE_EVAL,
+            output: crate::defaults::Defaults::INLINE_OUTPUT,
             digits: None, // Use default formatting
         }
     }
@@ -417,10 +417,10 @@ fn is_inside_chunk(pos: usize, chunks: &[Chunk]) -> bool {
 // La logique de parsing des options est basée sur la section 8.2
 pub fn parse_options(options_block: &str) -> Result<ChunkOptions> {
     let mut options = ChunkOptions {
-        eval: true,
-        echo: true,
-        output: true,
-        cache: true,
+        eval: crate::defaults::Defaults::CHUNK_EVAL,
+        echo: crate::defaults::Defaults::CHUNK_ECHO,
+        output: crate::defaults::Defaults::CHUNK_OUTPUT,
+        cache: crate::defaults::Defaults::CHUNK_CACHE,
         ..Default::default()
     };
 

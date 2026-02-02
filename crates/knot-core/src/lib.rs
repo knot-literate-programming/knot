@@ -5,11 +5,13 @@ pub mod backend;
 pub mod cache;
 pub mod graphics;
 pub mod config;
+pub mod defaults;
 
 pub use parser::{Chunk, ChunkOptions, Document, InlineExpr};
 pub use compiler::Compiler;
 pub use graphics::{GraphicsDefaults, ResolvedGraphicsOptions, resolve_graphics_options};
 pub use config::{Config, ChunkDefaults};
+pub use defaults::Defaults;
 
 use std::path::PathBuf;
 
@@ -18,6 +20,6 @@ use std::path::PathBuf;
 ///
 /// This centralizes the cache directory configuration to avoid inconsistencies.
 pub fn get_cache_dir() -> PathBuf {
-    PathBuf::from(".knot_cache")
+    PathBuf::from(Defaults::CACHE_DIR_NAME)
 }
 

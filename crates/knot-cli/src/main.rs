@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use knot_core::{Compiler, Document};
+use knot_core::{Compiler, Document, Defaults};
 use log::info;
 use std::fs;
 use std::path::PathBuf;
@@ -76,7 +76,7 @@ fn fix_paths_in_typst(source: &str, typ_file: &PathBuf) -> Result<String> {
     // Create _knot_r_files directory next to the .typ file
     let typ_dir = typ_file.parent()
         .context("Failed to get parent directory of .typ file")?;
-    let local_files_dir = typ_dir.join("_knot_r_files");
+    let local_files_dir = typ_dir.join(Defaults::R_FILES_DIR);
     fs::create_dir_all(&local_files_dir)?;
 
     // Pattern to match absolute paths to .knot_cache
@@ -99,7 +99,7 @@ fn fix_paths_in_typst(source: &str, typ_file: &PathBuf) -> Result<String> {
         }
 
         // Return relative path
-        format!("\"_knot_r_files/{}\"", filename)
+        format!("\"{}/{}\"", Defaults::R_FILES_DIR, filename)
     });
 
     Ok(result.to_string())
