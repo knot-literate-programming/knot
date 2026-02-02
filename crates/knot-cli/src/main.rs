@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use knot_core::{Compiler, Document, Defaults};
+use knot_cli::{build_project, compile_file};
 use log::info;
 use std::fs;
 use std::path::PathBuf;
@@ -50,13 +50,13 @@ fn main() -> Result<()> {
             init(name)?;
         }
         Commands::Compile { file } => {
-            compile(file)?;
+            compile_file(file, None)?;
         }
         Commands::Watch => {
             watch()?;
         }
         Commands::Build => {
-            build()?;
+            build_project()?;
         }
         Commands::InstallVscode => {
             install_vscode()?;
@@ -64,45 +64,6 @@ fn main() -> Result<()> {
     }
 
     Ok(())
-}
-
-/// Copies generated files (CSVs, plots) to a local directory and updates paths
-///
-/// Converts absolute cache paths to relative paths in _knot_r_files/
-fn fix_paths_in_typst(source: &str, typ_file: &PathBuf) -> Result<String> {
-    use regex::Regex;
-    use std::path::Path;
-
-    // Create _knot_r_files directory next to the .typ file
-    let typ_dir = typ_file.parent()
-        .context("Failed to get parent directory of .typ file")?;
-    let local_files_dir = typ_dir.join(Defaults::R_FILES_DIR);
-    fs::create_dir_all(&local_files_dir)?;
-
-    // Pattern to match absolute paths to .knot_cache
-    let path_regex = Regex::new(r#""(/[^"]+\.knot_cache/[^"]+)""#)?;
-
-    let result = path_regex.replace_all(source, |caps: &regex::Captures| {
-        let abs_path_str = &caps[1];
-        let abs_path = Path::new(abs_path_str);
-
-        // Get filename
-        let filename = abs_path.file_name().unwrap().to_string_lossy();
-        let dest_path = local_files_dir.join(filename.as_ref());
-
-        // Copy file
-        if abs_path.exists() {
-            if let Err(e) = fs::copy(abs_path, &dest_path) {
-                log::warn!("Failed to copy {}: {}", abs_path.display(), e);
-                return format!("\"{}\"", abs_path_str);
-            }
-        }
-
-        // Return relative path
-        format!("\"{}/{}\"", Defaults::R_FILES_DIR, filename)
-    });
-
-    Ok(result.to_string())
 }
 
 /// Initialize a new knot project with the minimal template
@@ -147,129 +108,6 @@ fn init(project_name: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-/// Compile a .knot file to .typ (without generating PDF)
-///
-/// This command:
-/// - Parses the .knot file
-/// - Executes R chunks and caches results
-/// - Generates a hidden .typ file (dotfile convention)
-/// - Does NOT generate PDF (use 'knot build' or 'typst compile' for that)
-fn compile(file: &PathBuf) -> Result<()> {
-    info!("📄 Compiling {:?}...", file);
-    let source =
-        fs::read_to_string(file).context(format!("Failed to read file: {:?}", file))?;
-
-    let doc = Document::parse(source).context("Failed to parse document")?;
-    info!("✓ Parsed {} chunk(s)", doc.chunks.len());
-
-    let mut compiler = Compiler::new(file)?;
-    let typst_source = compiler.compile(&doc)?;
-
-    // Generate hidden .typ file (dotfile convention)
-    let typ_output_path = {
-        let parent = file.parent().unwrap_or(std::path::Path::new("."));
-        let stem = file.file_stem().unwrap_or(std::ffi::OsStr::new("main"));
-        parent.join(format!(".{}.typ", stem.to_string_lossy()))
-    };
-
-    // Fix file paths before writing
-    let fixed_source = fix_paths_in_typst(&typst_source, &typ_output_path)?;
-
-    fs::write(&typ_output_path, fixed_source).context(format!(
-        "Failed to write Typst file to {:?}",
-        typ_output_path
-    ))?;
-    info!("✓ Generated Typst file: {:?}", typ_output_path);
-    info!("💡 Tip: Use 'typst watch {:?}' to preview changes", typ_output_path);
-
-    Ok(())
-}
-
-/// Build the project and generate final PDF
-///
-/// This command:
-/// - Finds project root (knot.toml)
-/// - Reads main file from knot.toml
-/// - Compiles .knot → .typ
-/// - Compiles final PDF with typst (using --root for imports)
-/// - Names PDF according to main file
-fn build() -> Result<()> {
-    use knot_core::config::Config;
-
-    info!("🔨 Building project...");
-
-    // Step 1: Find project root by searching for knot.toml
-    let current_dir = std::env::current_dir()
-        .context("Failed to get current directory")?;
-    let (config, project_root) = Config::find_and_load(&current_dir)?;
-
-    // Step 2: Get main file from knot.toml
-    let main_file_name = config.document.main
-        .ok_or_else(|| anyhow::anyhow!(
-            "No 'main' file specified in knot.toml.\n\
-             Add: [document]\n     main = \"main.knot\""
-        ))?;
-
-    let main_file = project_root.join(&main_file_name);
-
-    if !main_file.exists() {
-        anyhow::bail!(
-            "Main file not found: {:?}\n\
-             Specified in knot.toml as: {}",
-            main_file,
-            main_file_name
-        );
-    }
-
-    info!("📄 Main file: {}", main_file.display());
-    info!("📁 Project root: {}", project_root.display());
-
-    // Step 3: Compile .knot → .typ
-    compile(&main_file)?;
-
-    // Step 4: Determine .typ output path (dotfile)
-    let typ_output_path = {
-        let stem = main_file.file_stem().unwrap_or(std::ffi::OsStr::new("main"));
-        project_root.join(format!(".{}.typ", stem.to_string_lossy()))
-    };
-
-    // Step 5: Determine PDF output path (named after project directory)
-    let pdf_output_path = {
-        let project_name = project_root
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("output");
-        project_root.join(format!("{}.pdf", project_name))
-    };
-
-    // Step 6: Compile PDF with typst (with --root for imports)
-    info!("📦 Compiling PDF with Typst...");
-
-    let output = std::process::Command::new("typst")
-        .arg("compile")
-        .arg("--root")
-        .arg(&project_root)
-        .arg(&typ_output_path)
-        .arg(&pdf_output_path)
-        .output()
-        .context("Failed to execute typst command. Is Typst installed and in your PATH?")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        anyhow::bail!(
-            "Typst compilation failed:\n--- Stdout ---\n{}\n--- Stderr ---\n{}",
-            stdout,
-            stderr
-        );
-    }
-
-    info!("✅ Successfully built PDF: {:?}", pdf_output_path);
-    println!("✅ PDF generated: {}", pdf_output_path.display());
-
-    Ok(())
-}
-
 /// Watch project and regenerate on changes
 ///
 /// This command:
@@ -309,7 +147,7 @@ fn watch() -> Result<()> {
     info!("📁 Project root: {}", project_root.display());
 
     // Step 3: Initial compile
-    compile(&main_file)?;
+    compile_file(&main_file, None)?;
 
     // Step 4: Determine .typ output path (dotfile)
     let typ_output_path = {

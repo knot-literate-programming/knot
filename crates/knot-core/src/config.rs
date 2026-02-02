@@ -41,6 +41,7 @@ pub struct ChunkDefaults {
 #[derive(Debug, Default, Deserialize)]
 pub struct DocumentConfig {
     pub main: Option<String>,
+    pub includes: Option<Vec<String>>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -143,9 +144,24 @@ r = "lib/knot.R"
 
         let config: Config = toml::from_str(toml).unwrap();
         assert_eq!(config.document.main, Some("main.knot".to_string()));
+        assert!(config.document.includes.is_none());
         assert_eq!(config.helpers.typst, Some("lib/knot.typ".to_string()));
         assert_eq!(config.helpers.r, Some("lib/knot.R".to_string()));
     }
+
+    #[test]
+    fn test_parse_config_with_includes() {
+        let toml = r#"
+[document]
+main = "main.knot"
+includes = ["chap1.knot", "chap2.knot"]
+"#;
+
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.document.main, Some("main.knot".to_string()));
+        assert_eq!(config.document.includes, Some(vec!["chap1.knot".to_string(), "chap2.knot".to_string()]));
+    }
+
 
     #[test]
     fn test_parse_empty_config() {
