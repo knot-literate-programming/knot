@@ -4,9 +4,6 @@
   "scopeName": "source.knot",
   "patterns": [
     {
-      "include": "#yaml-frontmatter"
-    },
-    {
       "include": "#r-code-chunk"
     },
     {
@@ -17,26 +14,6 @@
     }
   ],
   "repository": {
-    "yaml-frontmatter": {
-      "name": "meta.embedded.block.yaml",
-      "begin": "\\A(---)",
-      "end": "^(---|\\.\\.\\.)",
-      "beginCaptures": {
-        "1": {
-          "name": "punctuation.definition.yaml.begin"
-        }
-      },
-      "endCaptures": {
-        "1": {
-          "name": "punctuation.definition.yaml.end"
-        }
-      },
-      "patterns": [
-        {
-          "include": "source.yaml"
-        }
-      ]
-    },
     "r-code-chunk": {
       "name": "meta.embedded.block.r",
       "begin": "^(```)(\\{)(r)(?:\\s+([^}]+))?(\\})",
