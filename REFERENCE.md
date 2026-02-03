@@ -224,9 +224,13 @@ Builds the entire project defined in `knot.toml`.
 4. Generates PDF via Typst.
 
 ### `knot watch`
-Watches for changes.
-- Currently launches `typst watch` on the generated files.
-- **Note**: Automatic re-execution of R code on change is partially implemented (requires manual trigger for now).
+Watches for changes and rebuilds automatically.
+- Monitors `main.knot`, all `includes`, and `knot.toml`
+- On file change: automatically runs `knot build` (recompiles R code)
+- Runs `typst watch` in parallel for live PDF preview
+- **Workflow**: Edit → Save → Auto-rebuild → PDF updates instantly
+- Includes debouncing (100ms) to avoid multiple rebuilds
+- Continues watching even if build fails (fix errors and save again)
 
 ### `knot clean`
 Clears the `.knot_cache` directory.
@@ -247,12 +251,13 @@ Clears the `.knot_cache` directory.
 - [x] DataFrame → CSV → Typst table
 - [x] Plot generation (via R package)
 - [x] Typst backend formatting
-- [x] CLI (build, compile, init, clean)
+- [x] CLI (build, compile, init, clean, **watch**)
+- [x] **Watch Mode**: Monitors .knot files, auto-rebuilds on change, parallel typst watch
 - [x] LSP server (diagnostics, hover, completion)
 
 ### Partially Implemented 🚧
 
-- [ ] **Watch Mode**: Currently delegates to `typst watch`. Needs to watch `.knot` files and trigger `knot build` automatically.
+- [ ] None currently
 
 ### Not Yet Implemented ❌
 

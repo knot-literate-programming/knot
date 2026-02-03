@@ -62,3 +62,4 @@ gg <- ggplot(df, aes(x = x, y = y)) +
 # Render the plot (requires knot.r.package)
 typst(gg, width = 6, height = 4)
 ```
+Un peu de *texte*.

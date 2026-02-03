@@ -112,15 +112,18 @@ fn init(project_name: &PathBuf) -> Result<()> {
 ///
 /// This command:
 /// - Finds project root (knot.toml)
-/// - Does initial compile
-/// - Launches 'typst watch' for live PDF preview (with --root)
-/// - TODO: Watch .knot files for changes and recompile
+/// - Does initial build (compiles all includes + main)
+/// - Watches .knot files for changes and rebuilds automatically
+/// - Launches 'typst watch' in parallel for live PDF preview
 fn watch() -> Result<()> {
     use knot_core::config::Config;
+    use notify::{Config as NotifyConfig, RecommendedWatcher, RecursiveMode, Watcher};
+    use std::sync::mpsc::channel;
+    use std::time::Duration;
 
     info!("👀 Starting watch mode...");
 
-    // Step 1: Find project root by searching for knot.toml
+    // Step 1: Find project root and load config
     let current_dir = std::env::current_dir()
         .context("Failed to get current directory")?;
     let (config, project_root) = Config::find_and_load(&current_dir)?;
@@ -146,21 +149,53 @@ fn watch() -> Result<()> {
     info!("📄 Main file: {}", main_file.display());
     info!("📁 Project root: {}", project_root.display());
 
-    // Step 3: Initial compile
-    compile_file(&main_file, None)?;
+    // Step 3: Collect all files to watch
+    let mut watched_files = vec![main_file.clone()];
 
-    // Step 4: Determine .typ output path (dotfile)
+    // Add knot.toml
+    let knot_toml = project_root.join("knot.toml");
+    if knot_toml.exists() {
+        watched_files.push(knot_toml);
+    }
+
+    // Add all included files
+    if let Some(includes) = &config.document.includes {
+        for include_name in includes {
+            let include_path = project_root.join(include_name);
+            if include_path.exists() {
+                watched_files.push(include_path);
+            }
+        }
+    }
+
+    info!("👁️  Watching {} file(s)", watched_files.len());
+    for file in &watched_files {
+        info!("   - {}", file.display());
+    }
+
+    // Step 4: Initial build
+    println!("🔨 Initial build...");
+    let original_dir = std::env::current_dir()?;
+    std::env::set_current_dir(&project_root)?;
+
+    if let Err(e) = build_project() {
+        eprintln!("❌ Initial build failed: {}", e);
+        eprintln!("⚠️  Continuing in watch mode...");
+    } else {
+        println!("✅ Initial build succeeded");
+    }
+
+    std::env::set_current_dir(original_dir)?;
+
+    // Step 5: Determine .typ output path for typst watch
     let typ_output_path = {
         let stem = main_file.file_stem().unwrap_or(std::ffi::OsStr::new("main"));
         project_root.join(format!(".{}.typ", stem.to_string_lossy()))
     };
 
-    // Step 5: Launch typst watch with --root for imports
-    info!("🔍 Launching typst watch for live preview...");
-    println!("👀 Watching for changes. Press Ctrl+C to stop.");
-    println!("💡 Edit {} to see live updates.", main_file.display());
-
-    let mut typst_watch = std::process::Command::new("typst")
+    // Step 6: Launch typst watch in background
+    info!("🔍 Launching typst watch for live PDF preview...");
+    let _typst_watch = std::process::Command::new("typst")
         .arg("watch")
         .arg("--root")
         .arg(&project_root)
@@ -168,12 +203,97 @@ fn watch() -> Result<()> {
         .spawn()
         .context("Failed to launch 'typst watch'. Is Typst installed?")?;
 
-    // Wait for typst watch to finish (user Ctrl+C)
-    // TODO: Add file watching for .knot changes and recompile
-    let status = typst_watch.wait()?;
+    // Step 7: Setup file watcher
+    let (tx, rx) = channel();
 
-    if !status.success() {
-        anyhow::bail!("typst watch exited with error");
+    let mut watcher = RecommendedWatcher::new(
+        tx,
+        NotifyConfig::default().with_poll_interval(Duration::from_millis(200))
+    ).context("Failed to create file watcher")?;
+
+    // Watch the project root directory (simpler and more robust)
+    // We'll filter events in the loop to only act on watched files
+    watcher.watch(&project_root, RecursiveMode::Recursive)
+        .with_context(|| format!("Failed to watch project directory: {:?}", project_root))?;
+
+    log::info!("🔍 Watching directory: {}", project_root.display());
+
+    println!("\n👀 Watching for changes. Press Ctrl+C to stop.");
+    println!("💡 Edit any .knot file to trigger rebuild.\n");
+
+    // Step 8: Event loop
+    let mut last_rebuild = std::time::Instant::now();
+    let debounce_duration = Duration::from_millis(300);
+
+    loop {
+        match rx.recv() {
+            Ok(Ok(event)) => {
+                use notify::EventKind;
+
+                // Debug: log all events
+                log::debug!("📡 Event: {:?} on {:?}", event.kind, event.paths);
+
+                // Accept modify, create, and remove events
+                // (editors like VSCode use temp files: create + remove instead of modify)
+                let is_relevant = matches!(
+                    event.kind,
+                    EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_)
+                );
+
+                if !is_relevant {
+                    continue;
+                }
+
+                // Check if any watched file is affected
+                let affects_watched_file = event.paths.iter().any(|p| {
+                    watched_files.iter().any(|watched| {
+                        p.file_name() == watched.file_name()
+                    })
+                });
+
+                if !affects_watched_file {
+                    log::debug!("   → Ignoring (not a watched file)");
+                    continue;
+                }
+
+                // Debouncing: ignore events too close together
+                let now = std::time::Instant::now();
+                if now.duration_since(last_rebuild) < debounce_duration {
+                    log::debug!("   → Debounced");
+                    continue;
+                }
+                last_rebuild = now;
+
+                // Find which file changed
+                if let Some(path) = event.paths.first() {
+                    let changed_file = path.file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("unknown");
+
+                    println!("\n📝 Change detected in: {}", changed_file);
+                    println!("🔨 Rebuilding...");
+
+                    // Rebuild the project
+                    let original_dir = std::env::current_dir()?;
+                    std::env::set_current_dir(&project_root)?;
+
+                    match build_project() {
+                        Ok(_) => println!("✅ Build succeeded\n"),
+                        Err(e) => {
+                            eprintln!("❌ Build failed: {}\n", e);
+                            eprintln!("⚠️  Fix errors and save again to retry.\n");
+                        }
+                    }
+
+                    std::env::set_current_dir(original_dir)?;
+                }
+            }
+            Ok(Err(e)) => eprintln!("⚠️  Watch error: {}", e),
+            Err(e) => {
+                eprintln!("❌ Channel error: {}", e);
+                break;
+            }
+        }
     }
 
     Ok(())
