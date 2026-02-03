@@ -86,6 +86,11 @@ impl SideChannel {
         Ok(metadata)
     }
 
+    /// Get the path to the metadata file
+    pub fn path(&self) -> &PathBuf {
+        &self.metadata_file
+    }
+
     /// Clean up temporary metadata file
     pub fn cleanup(&self) {
         let _ = std::fs::remove_file(&self.metadata_file);

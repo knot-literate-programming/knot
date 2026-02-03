@@ -108,25 +108,26 @@ impl Compiler {
 
             // After execution/cache: Ensure snapshot exists
             let snapshot_path = cache.get_snapshot_path(&node_hash);
+            let snapshot_exists = cache.has_snapshot(&node_hash);
 
-            if !cache.has_snapshot(&node_hash) {
-                // Node was executed (not from cache), save the snapshot
-                if let Some(ref mut r_exec) = self.r_executor {
+            if let Some(ref mut r_exec) = self.r_executor {
+                if !snapshot_exists {
+                    // Node was executed (not from cache), save the snapshot.
+                    // The R process is already in the correct state for the next chunk, so no reload needed.
                     r_exec.save_session(&snapshot_path)
                         .context(format!("Failed to save session snapshot for hash {}", &node_hash[..8]))?;
                     log::debug!("💾 Saved snapshot for node {}", &node_hash[..8]);
-                }
-            } else {
-                log::debug!("📦 Using existing snapshot for node {}", &node_hash[..8]);
-            }
-
-            // Load the snapshot to ensure correct environment for next node
-            if let Some(ref mut r_exec) = self.r_executor {
-                if cache.has_snapshot(&node_hash) {
+                } else {
+                    // Node was cached (skipped execution).
+                    // The R process state is stale (it's at the state of the previous chunk).
+                    // We must load this chunk's snapshot to update the state for the next chunk.
+                    log::debug!("📦 Using existing snapshot for node {}", &node_hash[..8]);
                     r_exec.load_session(&snapshot_path)
                         .context(format!("Failed to load session snapshot for hash {}", &node_hash[..8]))?;
                     log::debug!("📂 Loaded snapshot for node {}", &node_hash[..8]);
                 }
+            } else if snapshot_exists {
+                log::debug!("📦 Using existing snapshot for node {} (no R executor)", &node_hash[..8]);
             }
 
             typst_output.push_str(&result_str);

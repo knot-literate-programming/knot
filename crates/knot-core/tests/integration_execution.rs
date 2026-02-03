@@ -12,10 +12,19 @@
 // Note: These tests are ignored by default.
 // Run with: cargo test --test integration_execution -- --ignored
 
-use knot_core::executors::{r::RExecutor, LanguageExecutor, ExecutionResult};
+use knot_core::executors::{r::RExecutor, LanguageExecutor, ExecutionResult, GraphicsOptions};
 use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
+
+fn default_graphics() -> GraphicsOptions {
+    GraphicsOptions {
+        width: 6.0,
+        height: 4.0,
+        dpi: 300,
+        format: "svg".to_string(),
+    }
+}
 
 fn setup_executor() -> (TempDir, RExecutor) {
     let temp_dir = TempDir::new().unwrap();
@@ -41,9 +50,10 @@ fn setup_executor() -> (TempDir, RExecutor) {
 #[ignore] // Requires R
 fn test_simple_r_execution() {
     let (_temp, mut executor) = setup_executor();
+    let graphics = default_graphics();
 
     let code = "x <- 1 + 1\nprint(x)";
-    let result = executor.execute(code).expect("Failed to execute R code");
+    let result = executor.execute(code, &graphics).expect("Failed to execute R code");
 
     match result {
         ExecutionResult::Text(output) => {
@@ -57,9 +67,10 @@ fn test_simple_r_execution() {
 #[ignore] // Requires R
 fn test_r_error_handling() {
     let (_temp, mut executor) = setup_executor();
+    let graphics = default_graphics();
 
     let code = "stop('This is an error')";
-    let result = executor.execute(code);
+    let result = executor.execute(code, &graphics);
 
     assert!(result.is_err(), "Should return error for R error");
     let err_msg = result.unwrap_err().to_string();
@@ -76,8 +87,9 @@ fn test_dataframe_serialization() {
 df <- data.frame(x = 1:3, y = 4:6)
 typst(df)
 "#;
+    let graphics = default_graphics();
 
-    let result = executor.execute(code).expect("Failed to execute");
+    let result = executor.execute(code, &graphics).expect("Failed to execute");
 
     match result {
         ExecutionResult::DataFrame(path) => {
@@ -103,8 +115,9 @@ gg <- ggplot(iris, aes(x = Sepal.Length, y = Sepal.Width)) +
   geom_point()
 typst(gg)
 "#;
+    let graphics = default_graphics();
 
-    let result = executor.execute(code).expect("Failed to execute");
+    let result = executor.execute(code, &graphics).expect("Failed to execute");
 
     match result {
         ExecutionResult::Plot(path) => {
@@ -132,8 +145,9 @@ typst(df)
 gg <- ggplot(iris, aes(x = Sepal.Length, y = Sepal.Width)) + geom_point()
 typst(gg)
 "#;
+    let graphics = default_graphics();
 
-    let result = executor.execute(code).expect("Failed to execute");
+    let result = executor.execute(code, &graphics).expect("Failed to execute");
 
     match result {
         ExecutionResult::DataFrameAndPlot { dataframe, plot } => {
@@ -152,12 +166,13 @@ typst(gg)
 #[ignore] // Requires R
 fn test_r_session_persistence() {
     let (_temp, mut executor) = setup_executor();
+    let graphics = default_graphics();
 
     // Set a variable in first execution
-    executor.execute("x <- 42").expect("Failed to set variable");
+    executor.execute("x <- 42", &graphics).expect("Failed to set variable");
 
     // Use the variable in second execution
-    let result = executor.execute("print(x)").expect("Failed to use variable");
+    let result = executor.execute("print(x)", &graphics).expect("Failed to use variable");
 
     match result {
         ExecutionResult::Text(output) => {
@@ -174,8 +189,9 @@ fn test_r_warning_not_error() {
 
     // This produces a warning, not an error
     let code = "x <- c(1,2,3); y <- c(1,2); x + y"; // vector length mismatch warning
+    let graphics = default_graphics();
 
-    let result = executor.execute(code);
+    let result = executor.execute(code, &graphics);
 
     // Should succeed (warnings are logged, not errors)
     assert!(result.is_ok(), "Warnings should not cause execution failure");

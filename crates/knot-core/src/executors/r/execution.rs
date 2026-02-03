@@ -20,16 +20,6 @@ pub fn execute(process: &mut RProcess, _cache_dir: &Path, code: &str, graphics: 
     let channel = SideChannel::new()?;
     channel.setup_env()?;
 
-    // Set graphics options as environment variables for R
-    // SAFETY: We're setting these variables before executing R code in the same thread.
-    // The R process will read these variables, and we don't modify them concurrently.
-    unsafe {
-        std::env::set_var("KNOT_FIG_WIDTH", graphics.width.to_string());
-        std::env::set_var("KNOT_FIG_HEIGHT", graphics.height.to_string());
-        std::env::set_var("KNOT_FIG_DPI", graphics.dpi.to_string());
-        std::env::set_var("KNOT_FIG_FORMAT", &graphics.format);
-    }
-
     let stdin = process
         .stdin
         .as_mut()
@@ -42,6 +32,15 @@ pub fn execute(process: &mut RProcess, _cache_dir: &Path, code: &str, graphics: 
         .stderr
         .as_mut()
         .context("R process stderr is not available")?;
+
+    // Set environment variables in the R process
+    // We must use Sys.setenv() because the child process environment is independent
+    let meta_file = channel.path().to_string_lossy().replace('\\', "\\\\");
+    writeln!(stdin, "Sys.setenv(KNOT_METADATA_FILE = '{}')", meta_file)?;
+    writeln!(stdin, "Sys.setenv(KNOT_FIG_WIDTH = '{}')", graphics.width)?;
+    writeln!(stdin, "Sys.setenv(KNOT_FIG_HEIGHT = '{}')", graphics.height)?;
+    writeln!(stdin, "Sys.setenv(KNOT_FIG_DPI = '{}')", graphics.dpi)?;
+    writeln!(stdin, "Sys.setenv(KNOT_FIG_FORMAT = '{}')", graphics.format)?;
 
     // Write the code, followed by boundary markers
     writeln!(stdin, "{}", code)?;

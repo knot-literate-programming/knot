@@ -45,9 +45,9 @@ Done!
     // Verify we parsed the chunk
     assert_eq!(doc.chunks.len(), 1);
     assert_eq!(doc.chunks[0].name, Some("test".to_string()));
-    assert!(doc.chunks[0].options.eval);
-    assert!(doc.chunks[0].options.echo);
-    assert!(doc.chunks[0].options.output);
+    assert_eq!(doc.chunks[0].options.eval, Some(true));
+    assert_eq!(doc.chunks[0].options.echo, Some(true));
+    assert_eq!(doc.chunks[0].options.output, Some(true));
 
     // Verify code content
     assert!(doc.chunks[0].code.contains("x <- 1 + 1"));
