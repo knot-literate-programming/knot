@@ -7,3 +7,5 @@ _knot_files/
 # Rust
 /target/
 Cargo.lock
+.RData
+.Rhistory
