@@ -61,6 +61,11 @@ pub fn get_cached_result(cache_dir: &Path, hash: &str, metadata: &CacheMetadata)
         .find(|e| e.hash == hash)
         .ok_or_else(|| anyhow!("Cache entry with hash {} not found", hash))?;
 
+    // Handle chunks with no output files (e.g., assignments without print)
+    if entry.files.is_empty() {
+        return Ok(ExecutionResult::Text(String::new()));
+    }
+
     // Verify all files exist
     for file in &entry.files {
         let path = cache_dir.join(file);

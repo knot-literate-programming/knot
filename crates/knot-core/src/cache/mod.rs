@@ -125,11 +125,8 @@ impl Cache {
             dependencies.clone(),
         )?;
 
-        // Don't cache empty results
-        if files_to_cache.is_empty() {
-            return Ok(());
-        }
-
+        // Cache all chunks, even those without output files
+        // The cache entry records that the chunk was executed successfully
         let new_entry = storage::create_chunk_entry(
             chunk_index,
             chunk_name,
