@@ -88,15 +88,15 @@ impl RProcess {
                 // Source the local R helper file
                 let path_str = path.to_string_lossy();
                 log::info!("Loading R helpers from: {}", path_str);
-                format!("source(\"{}\")", path_str)
+                format!("try(source(\"{}\"), silent = TRUE)", path_str)
             } else {
                 log::warn!("R helper file not found: {}. Falling back to library(knot.r.package)", path.display());
-                "library(knot.r.package)".to_string()
+                "try(library(knot.r.package), silent = TRUE)".to_string()
             }
         } else {
             // No path specified, try to load the installed package
             log::info!("No R helper path specified. Trying library(knot.r.package)");
-            "library(knot.r.package)".to_string()
+            "try(library(knot.r.package), silent = TRUE)".to_string()
         };
 
         // Execute the load command

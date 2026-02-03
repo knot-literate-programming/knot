@@ -106,6 +106,29 @@ impl Compiler {
                 }
             };
 
+            // After execution/cache: Ensure snapshot exists
+            let snapshot_path = cache.get_snapshot_path(&node_hash);
+
+            if !cache.has_snapshot(&node_hash) {
+                // Node was executed (not from cache), save the snapshot
+                if let Some(ref mut r_exec) = self.r_executor {
+                    r_exec.save_session(&snapshot_path)
+                        .context(format!("Failed to save session snapshot for hash {}", &node_hash[..8]))?;
+                    log::debug!("💾 Saved snapshot for node {}", &node_hash[..8]);
+                }
+            } else {
+                log::debug!("📦 Using existing snapshot for node {}", &node_hash[..8]);
+            }
+
+            // Load the snapshot to ensure correct environment for next node
+            if let Some(ref mut r_exec) = self.r_executor {
+                if cache.has_snapshot(&node_hash) {
+                    r_exec.load_session(&snapshot_path)
+                        .context(format!("Failed to load session snapshot for hash {}", &node_hash[..8]))?;
+                    log::debug!("📂 Loaded snapshot for node {}", &node_hash[..8]);
+                }
+            }
+
             typst_output.push_str(&result_str);
             previous_hash = node_hash;
             last_pos = node_end;

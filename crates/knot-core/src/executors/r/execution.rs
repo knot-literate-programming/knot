@@ -199,3 +199,147 @@ fn metadata_to_execution_result(
     }
 }
 
+/// Save the current R session to a snapshot file
+///
+/// Executes `save.image(file)` in the R process to save all objects
+/// in the global environment to a .RData file.
+pub fn save_session(process: &mut RProcess, snapshot_file: &Path) -> Result<()> {
+    let stdin = process
+        .stdin
+        .as_mut()
+        .context("R process stdin is not available")?;
+    let stdout = process
+        .stdout
+        .as_mut()
+        .context("R process stdout is not available")?;
+    let stderr = process
+        .stderr
+        .as_mut()
+        .context("R process stderr is not available")?;
+
+    // Convert path to string, escaping backslashes for Windows
+    let path_str = snapshot_file
+        .to_str()
+        .context("Invalid path for snapshot file")?
+        .replace('\\', "\\\\");
+
+    // Execute save.image()
+    writeln!(stdin, "save.image(file = \"{}\")", path_str)?;
+    writeln!(stdin, "cat('{}\\n', file=stdout())", BOUNDARY)?;
+    writeln!(stdin, "cat('{}\\n', file=stderr())", BOUNDARY)?;
+    stdin.flush()?;
+
+    // Wait for completion by reading until boundary markers
+    let (_stdout_output, stderr_output) = thread::scope(|s| {
+        let stdout_handle = s.spawn(move || {
+            let mut output = String::new();
+            let mut line_buffer = String::new();
+            loop {
+                line_buffer.clear();
+                let bytes_read = stdout.read_line(&mut line_buffer).unwrap_or(0);
+                if bytes_read == 0 || line_buffer.trim_end() == BOUNDARY {
+                    break;
+                }
+                output.push_str(&line_buffer);
+            }
+            output
+        });
+
+        let stderr_handle = s.spawn(move || {
+            let mut output = String::new();
+            let mut line_buffer = String::new();
+            loop {
+                line_buffer.clear();
+                let bytes_read = stderr.read_line(&mut line_buffer).unwrap_or(0);
+                if bytes_read == 0 || line_buffer.trim_end() == BOUNDARY {
+                    break;
+                }
+                output.push_str(&line_buffer);
+            }
+            output
+        });
+
+        (stdout_handle.join().unwrap(), stderr_handle.join().unwrap())
+    });
+
+    // Check for errors
+    if !stderr_output.trim().is_empty() {
+        anyhow::bail!("Failed to save R session: {}", stderr_output.trim());
+    }
+
+    log::debug!("💾 Saved R session to: {}", snapshot_file.display());
+    Ok(())
+}
+
+/// Load an R session from a snapshot file
+///
+/// Executes `load(file, envir = .GlobalEnv)` in the R process to restore
+/// all objects from a previously saved .RData file.
+pub fn load_session(process: &mut RProcess, snapshot_file: &Path) -> Result<()> {
+    let stdin = process
+        .stdin
+        .as_mut()
+        .context("R process stdin is not available")?;
+    let stdout = process
+        .stdout
+        .as_mut()
+        .context("R process stdout is not available")?;
+    let stderr = process
+        .stderr
+        .as_mut()
+        .context("R process stderr is not available")?;
+
+    // Convert path to string, escaping backslashes for Windows
+    let path_str = snapshot_file
+        .to_str()
+        .context("Invalid path for snapshot file")?
+        .replace('\\', "\\\\");
+
+    // Execute load() with envir = .GlobalEnv to load into global environment
+    writeln!(stdin, "load(file = \"{}\", envir = .GlobalEnv)", path_str)?;
+    writeln!(stdin, "cat('{}\\n', file=stdout())", BOUNDARY)?;
+    writeln!(stdin, "cat('{}\\n', file=stderr())", BOUNDARY)?;
+    stdin.flush()?;
+
+    // Wait for completion by reading until boundary markers
+    let (_stdout_output, stderr_output) = thread::scope(|s| {
+        let stdout_handle = s.spawn(move || {
+            let mut output = String::new();
+            let mut line_buffer = String::new();
+            loop {
+                line_buffer.clear();
+                let bytes_read = stdout.read_line(&mut line_buffer).unwrap_or(0);
+                if bytes_read == 0 || line_buffer.trim_end() == BOUNDARY {
+                    break;
+                }
+                output.push_str(&line_buffer);
+            }
+            output
+        });
+
+        let stderr_handle = s.spawn(move || {
+            let mut output = String::new();
+            let mut line_buffer = String::new();
+            loop {
+                line_buffer.clear();
+                let bytes_read = stderr.read_line(&mut line_buffer).unwrap_or(0);
+                if bytes_read == 0 || line_buffer.trim_end() == BOUNDARY {
+                    break;
+                }
+                output.push_str(&line_buffer);
+            }
+            output
+        });
+
+        (stdout_handle.join().unwrap(), stderr_handle.join().unwrap())
+    });
+
+    // Check for errors
+    if !stderr_output.trim().is_empty() {
+        anyhow::bail!("Failed to load R session: {}", stderr_output.trim());
+    }
+
+    log::debug!("📂 Loaded R session from: {}", snapshot_file.display());
+    Ok(())
+}
+

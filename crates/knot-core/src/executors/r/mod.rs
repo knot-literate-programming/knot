@@ -53,6 +53,28 @@ impl RExecutor {
         execution::execute_inline(self, code)
     }
 
+    /// Save the current R session (environment) to a snapshot file
+    ///
+    /// Uses R's `save.image()` to save all objects in the global environment.
+    /// The snapshot can be restored later with `load_session()`.
+    ///
+    /// # Arguments
+    /// * `snapshot_file` - Path where the .RData snapshot will be saved
+    pub fn save_session(&mut self, snapshot_file: &PathBuf) -> Result<()> {
+        execution::save_session(&mut self.process, snapshot_file)
+    }
+
+    /// Load an R session (environment) from a snapshot file
+    ///
+    /// Uses R's `load()` to restore all objects from a previously saved snapshot.
+    /// This restores the exact state of the R environment at the time of `save_session()`.
+    ///
+    /// # Arguments
+    /// * `snapshot_file` - Path to the .RData snapshot to load
+    pub fn load_session(&mut self, snapshot_file: &PathBuf) -> Result<()> {
+        execution::load_session(&mut self.process, snapshot_file)
+    }
+
 }
 
 impl LanguageExecutor for RExecutor {

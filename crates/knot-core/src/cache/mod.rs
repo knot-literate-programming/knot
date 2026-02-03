@@ -147,6 +147,31 @@ impl Cache {
         storage::save_metadata(&self.cache_dir, &self.metadata)?;
         Ok(())
     }
+
+    /// Get the path where a snapshot file should be stored for a given hash
+    ///
+    /// Returns the path to the .RData snapshot file in the cache directory.
+    /// The snapshot file may or may not exist yet.
+    ///
+    /// # Arguments
+    /// * `node_hash` - The hash of the chunk or inline expression
+    ///
+    /// # Returns
+    /// Path to the snapshot file: `.knot_cache/snapshot_{hash}.RData`
+    pub fn get_snapshot_path(&self, node_hash: &str) -> PathBuf {
+        self.cache_dir.join(format!("snapshot_{}.RData", node_hash))
+    }
+
+    /// Check if a snapshot exists for a given hash
+    ///
+    /// # Arguments
+    /// * `node_hash` - The hash of the chunk or inline expression
+    ///
+    /// # Returns
+    /// `true` if the snapshot file exists on disk, `false` otherwise
+    pub fn has_snapshot(&self, node_hash: &str) -> bool {
+        self.get_snapshot_path(node_hash).exists()
+    }
 }
 
 #[cfg(test)]
@@ -223,5 +248,53 @@ mod tests {
         let hash2 = cache.get_chunk_hash("x <- 1", &opts2, "", "");
 
         assert_ne!(hash1, hash2);
+    }
+
+    #[test]
+    fn test_snapshot_path_generation() {
+        let tmp_dir = tempdir().unwrap();
+        let cache = Cache::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        let hash = "abc123def456";
+        let snapshot_path = cache.get_snapshot_path(hash);
+
+        // Check path format
+        assert_eq!(
+            snapshot_path.file_name().unwrap().to_str().unwrap(),
+            "snapshot_abc123def456.RData"
+        );
+
+        // Check parent directory
+        assert_eq!(snapshot_path.parent().unwrap(), tmp_dir.path());
+
+        // Initially, snapshot should not exist
+        assert!(!cache.has_snapshot(hash));
+
+        // Create the snapshot file
+        std::fs::write(&snapshot_path, "dummy snapshot data").unwrap();
+
+        // Now it should exist
+        assert!(cache.has_snapshot(hash));
+    }
+
+    #[test]
+    fn test_snapshot_different_hashes() {
+        let tmp_dir = tempdir().unwrap();
+        let cache = Cache::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        let hash1 = "hash1";
+        let hash2 = "hash2";
+
+        let path1 = cache.get_snapshot_path(hash1);
+        let path2 = cache.get_snapshot_path(hash2);
+
+        // Different hashes should give different paths
+        assert_ne!(path1, path2);
+
+        // Create only first snapshot
+        std::fs::write(&path1, "snapshot 1").unwrap();
+
+        assert!(cache.has_snapshot(hash1));
+        assert!(!cache.has_snapshot(hash2));
     }
 }
