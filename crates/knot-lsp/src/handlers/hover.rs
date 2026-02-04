@@ -71,8 +71,14 @@ pub async fn handle_hover(state: &ServerState, params: HoverParams) -> Result<Op
                     }),
                 }));
             }
-            // Otherwise (we're hovering over R code content), return None
-            // to allow VSCode to delegate to R language server if installed
+            
+            // We are hovering over R code content -> Intelligent R Hover
+            if let Some(token) = get_r_token_at_pos(&text, pos) {
+                if !token.is_empty() {
+                    return Ok(get_r_help(state, uri, &token).await);
+                }
+            }
+            
             return Ok(None);
         }
     } else {
@@ -114,6 +120,79 @@ pub async fn handle_hover(state: &ServerState, params: HoverParams) -> Result<Op
         }
     }
     Ok(None)
+}
+
+fn get_r_token_at_pos(text: &str, pos: Position) -> Option<String> {
+    let lines: Vec<&str> = text.lines().collect();
+    let line_idx = pos.line as usize;
+    if line_idx >= lines.len() {
+        return None;
+    }
+    
+    let line = lines[line_idx];
+    let col = pos.character as usize;
+    if col > line.len() {
+        return None;
+    }
+    
+    // Find the word boundaries around the cursor
+    // We want to capture [a-zA-Z0-9_.$:]+
+    
+    let chars: Vec<char> = line.chars().collect();
+    let mut start = col;
+    let mut end = col;
+    
+    // Scan backwards
+    while start > 0 {
+        let c = chars[start - 1];
+        if c.is_alphanumeric() || c == '_' || c == '.' || c == '$' || c == ':' {
+            start -= 1;
+        } else {
+            break;
+        }
+    }
+    
+    // Scan forwards
+    while end < chars.len() {
+        let c = chars[end];
+        if c.is_alphanumeric() || c == '_' || c == '.' || c == '$' || c == ':' {
+            end += 1;
+        } else {
+            break;
+        }
+    }
+    
+    if start == end {
+        return None;
+    }
+    
+    Some(line[start..end].to_string())
+}
+
+async fn get_r_help(state: &ServerState, uri: &Url, token: &str) -> Option<Hover> {
+    let mut executors = state.r_executors.write().await;
+    if let Some(executor) = executors.get_mut(uri) {
+        // Construct R code for help
+        let code = format!(
+            r#"try(cat(paste(utils::capture.output(tools::Rd2txt(utils::help("{}"))), collapse="\n")), silent=TRUE)"#, 
+            token.replace('"', "\\\"")
+        );
+        
+        if let Ok(output) = executor.query(&code) {
+            if !output.trim().is_empty() {
+                // Wrap in Markdown code block or just text
+                // Rd2txt produces mostly plain text with some formatting
+                return Some(Hover {
+                    contents: HoverContents::Markup(MarkupContent {
+                        kind: MarkupKind::Markdown,
+                        value: format!("```text\n{}\n```", output.trim()),
+                    }),
+                    range: None,
+                });
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -186,23 +265,6 @@ More text.
         } else {
             panic!("Expected Markup hover contents");
         }
-    }
-
-    #[tokio::test]
-    async fn test_hover_in_chunk_code() {
-        let text = r#"```{r}
-x <- 1:10
-mean(x)
-```"#;
-
-        let (state, uri) = create_test_state("file:///test.knot", text).await;
-
-        // Hover inside R code (line 1: x <- 1:10)
-        let params = create_hover_params(&uri, 1, 5);
-        let result = handle_hover(&state, params).await.unwrap();
-
-        // Should return None to allow R LSP to handle
-        assert!(result.is_none());
     }
 
     #[tokio::test]

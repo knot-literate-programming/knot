@@ -74,6 +74,13 @@ impl RExecutor {
         execution::load_session(&mut self.process, snapshot_file)
     }
 
+    /// Execute a lightweight R query and return raw stdout
+    ///
+    /// Useful for LSP features (completion, hover) where side-channel overhead is unnecessary.
+    pub fn query(&mut self, code: &str) -> Result<String> {
+        execution::query(&mut self.process, code)
+    }
+
 }
 
 impl LanguageExecutor for RExecutor {

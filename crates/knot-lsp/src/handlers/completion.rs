@@ -50,6 +50,13 @@ pub async fn handle_completion(state: &ServerState, params: CompletionParams) ->
                 }).collect();
 
                 return Ok(Some(CompletionResponse::Array(items)));
+            } else {
+                // We are in R code body -> Intelligent R Completion
+                if let Some(token) = get_r_token_at_pos(&text, pos) {
+                    if !token.is_empty() {
+                        return Ok(get_r_completion(state, uri, &token).await);
+                    }
+                }
             }
         }
     } else {
@@ -141,6 +148,68 @@ fn map_completion_item(item: &mut CompletionItem, mapper: &PositionMapper) {
     }
 }
 
+fn get_r_token_at_pos(text: &str, pos: Position) -> Option<String> {
+    let lines: Vec<&str> = text.lines().collect();
+    let line_idx = pos.line as usize;
+    if line_idx >= lines.len() {
+        return None;
+    }
+    
+    let line = lines[line_idx];
+    let col = pos.character as usize;
+    if col > line.len() {
+        return None;
+    }
+    
+    // Scan backwards from col to find token start
+    let prefix = &line[..col];
+    let chars: Vec<char> = prefix.chars().collect();
+    let mut start = chars.len();
+    
+    while start > 0 {
+        let c = chars[start - 1];
+        // R identifiers can contain alphanumeric, _, ., and we also want to handle $, : for future
+        if c.is_alphanumeric() || c == '_' || c == '.' || c == '$' || c == ':' {
+            start -= 1;
+        } else {
+            break;
+        }
+    }
+    
+    if start == chars.len() {
+        return None;
+    }
+    
+    Some(prefix.chars().skip(start).collect())
+}
+
+async fn get_r_completion(state: &ServerState, uri: &Url, token: &str) -> Option<CompletionResponse> {
+    // Acquire write lock to get mutable access to executor
+    let mut executors = state.r_executors.write().await;
+    if let Some(executor) = executors.get_mut(uri) {
+        // Construct R code for completion
+        // Use utils::apropos for basic completion of global objects
+        // TODO: Handle $ and :: for specific member completion
+        let code = format!(
+            r#"try(cat(paste(utils::apropos("^{}"), collapse="\n")), silent=TRUE)"#, 
+            token.replace('"', "\\\"")
+        );
+        
+        if let Ok(output) = executor.query(&code) {
+            let items = output.lines()
+                .filter(|l| !l.trim().is_empty())
+                .map(|name| CompletionItem {
+                    label: name.trim().to_string(),
+                    kind: Some(CompletionItemKind::FUNCTION), // Default to function for now
+                    ..Default::default()
+                })
+                .collect();
+            return Some(CompletionResponse::Array(items));
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -218,23 +287,6 @@ x <- 1
         } else {
             panic!("Expected CompletionResponse::Array");
         }
-    }
-
-    #[tokio::test]
-    async fn test_completion_in_chunk_code() {
-        let text = r#"```{r}
-x <- 1:10
-mean(x)
-```"#;
-
-        let (state, uri) = create_test_state("file:///test.knot", text).await;
-
-        // Cursor on R code (line 1)
-        let params = create_completion_params(&uri, 1, 5);
-        let result = handle_completion(&state, params).await.unwrap();
-
-        // Should return None to allow R LSP to handle
-        assert!(result.is_none());
     }
 
     #[tokio::test]

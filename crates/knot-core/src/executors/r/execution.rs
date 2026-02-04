@@ -220,3 +220,29 @@ pub fn load_session(process: &mut RProcess, snapshot_file: &Path) -> Result<()> 
     Ok(())
 }
 
+/// Execute lightweight R code and return raw stdout
+///
+/// Unlike execute(), this does not use the side-channel and returns the raw output string.
+/// Useful for LSP queries (completion, help).
+pub fn query(process: &mut RProcess, code: &str) -> Result<String> {
+    let stdin = process
+        .stdin
+        .as_mut()
+        .context("R process stdin is not available")?;
+
+    // Write the code, followed by boundary markers
+    writeln!(stdin, "{}", code)?;
+    writeln!(stdin, "cat('{}\\n', file=stdout())", BOUNDARY)?;
+    writeln!(stdin, "cat('{}\\n', file=stderr())", BOUNDARY)?;
+    stdin.flush()?;
+
+    let (stdout_output, stderr_output) = process.read_until_boundary()?;
+
+    if !stderr_output.trim().is_empty() {
+        // Log warning but don't fail, return what we have
+        log::warn!("R query stderr: {}", stderr_output.trim());
+    }
+
+    Ok(stdout_output)
+}
+

@@ -29,6 +29,8 @@ use position_mapper::PositionMapper;
 use proxy::TinymistProxy;
 use state::ServerState;
 use transform::transform_to_typst;
+use knot_core::executors::r::RExecutor;
+use knot_core::executors::LanguageExecutor;
 
 struct KnotLanguageServer {
     client: Client,
@@ -187,6 +189,32 @@ impl LanguageServer for KnotLanguageServer {
         // Store document text
         self.state.documents.write().await.insert(uri.clone(), text.clone());
 
+        // Initialize R Executor for this document
+        {
+            let mut executors = self.state.r_executors.write().await;
+            if !executors.contains_key(&uri) {
+                // Create a temp dir for this LSP session
+                let temp_dir = std::env::temp_dir().join(format!("knot_lsp_{}", uuid::Uuid::new_v4()));
+                
+                // Initialize R executor (using installed package for now)
+                match RExecutor::new(temp_dir, None) {
+                    Ok(mut exec) => {
+                        // Initialize in a blocking way (spawn is fast enough)
+                        // We can't easily await inside this lock block if initialize was async, but it's synchronous
+                        if let Err(e) = exec.initialize() {
+                             self.client.log_message(MessageType::ERROR, format!("Failed to init R executor: {}", e)).await;
+                        } else {
+                             executors.insert(uri.clone(), exec);
+                             self.client.log_message(MessageType::INFO, "Initialized R session for document").await;
+                        }
+                    }
+                    Err(e) => {
+                        self.client.log_message(MessageType::ERROR, format!("Failed to create R executor: {}", e)).await;
+                    }
+                }
+            }
+        }
+
         // Trigger diagnostics on file open
         self.on_change(uri, text).await;
     }
@@ -201,6 +229,17 @@ impl LanguageServer for KnotLanguageServer {
             self.state.documents.write().await.insert(uri.clone(), text.clone());
 
             self.on_change(uri, text).await;
+        }
+    }
+
+    async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        let uri = params.text_document.uri;
+        self.state.documents.write().await.remove(&uri);
+        self.state.mappers.write().await.remove(&uri);
+        
+        // Remove and drop R executor (terminates process)
+        if let Some(_exec) = self.state.r_executors.write().await.remove(&uri) {
+            self.client.log_message(MessageType::INFO, "Closed R session for document").await;
         }
     }
 
