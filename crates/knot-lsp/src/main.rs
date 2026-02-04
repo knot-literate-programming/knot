@@ -10,12 +10,16 @@
 mod diagnostics;
 mod formatter;
 mod handlers;
+mod path_resolver;
 mod position_mapper;
 mod proxy;
 mod state;
 mod symbols;
 mod transform;
 
+use std::path::PathBuf;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
@@ -24,16 +28,35 @@ use formatter::AirFormatter;
 use position_mapper::PositionMapper;
 use proxy::TinymistProxy;
 use state::ServerState;
-use transform::transform_to_placeholder;
+use transform::transform_to_typst;
 
 struct KnotLanguageServer {
     client: Client,
     state: ServerState,
+    root_uri: Arc<RwLock<Option<Url>>>,
 }
 
 #[tower_lsp::async_trait]
 impl LanguageServer for KnotLanguageServer {
-    async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
+    async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        if let Some(uri) = params.root_uri {
+            *self.root_uri.write().await = Some(uri);
+        } else if let Some(folders) = params.workspace_folders {
+            if let Some(first) = folders.first() {
+                *self.root_uri.write().await = Some(first.uri.clone());
+            }
+        }
+
+        // Handle initialization options
+        if let Some(options) = params.initialization_options {
+            if let Some(air_path) = options.get("airPath").and_then(|v| v.as_str()) {
+                *self.state.air_path_override.write().await = Some(PathBuf::from(air_path));
+            }
+            if let Some(tinymist_path) = options.get("tinymistPath").and_then(|v| v.as_str()) {
+                *self.state.tinymist_path_override.write().await = Some(PathBuf::from(tinymist_path));
+            }
+        }
+
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
                 name: "knot-lsp".to_string(),
@@ -62,10 +85,6 @@ impl LanguageServer for KnotLanguageServer {
                     ..Default::default()
                 }),
                 document_formatting_provider: Some(OneOf::Left(true)),
-                document_on_type_formatting_provider: Some(DocumentOnTypeFormattingOptions {
-                    first_trigger_character: "\n".to_string(),
-                    more_trigger_character: None,
-                }),
                 ..Default::default()
             },
         })
@@ -76,8 +95,23 @@ impl LanguageServer for KnotLanguageServer {
             .log_message(MessageType::INFO, "Knot LSP server initialized")
             .await;
 
+        let root_uri = self.root_uri.read().await.clone();
+        let tinymist_override = self.state.tinymist_path_override.read().await.clone();
+        let air_override = self.state.air_path_override.read().await.clone();
+
+        // Initialize Air formatter if not already done (with possible override)
+        match AirFormatter::new(air_override) {
+            Ok(f) => {
+                self.client.log_message(MessageType::INFO, format!("Air formatter initialized at: {:?}", f.path())).await;
+                *self.state.formatter.write().await = Some(f);
+            }
+            Err(e) => {
+                self.client.log_message(MessageType::WARNING, format!("Air formatter not available: {}", e)).await;
+            }
+        }
+
         // Try to spawn tinymist subprocess
-        match TinymistProxy::spawn().await {
+        match TinymistProxy::spawn(root_uri, tinymist_override).await {
             Ok((proxy, mut notification_rx)) => {
                 self.client
                     .log_message(MessageType::INFO, "Tinymist proxy spawned successfully")
@@ -219,9 +253,9 @@ impl LanguageServer for KnotLanguageServer {
 
     async fn on_type_formatting(
         &self,
-        params: DocumentOnTypeFormattingParams,
+        _params: DocumentOnTypeFormattingParams,
     ) -> Result<Option<Vec<TextEdit>>> {
-        handlers::formatting::handle_on_type_formatting(&self.state, params).await
+        Ok(None)
     }
 }
 
@@ -242,7 +276,7 @@ impl KnotLanguageServer {
             .await;
 
         // 4. Transform .knot to .typ placeholder for tinymist
-        let typ_content = transform_to_placeholder(&text);
+        let typ_content = transform_to_typst(&text);
         
         // 5. Create and store PositionMapper
         let mapper = PositionMapper::new(&text, &typ_content);
@@ -256,7 +290,11 @@ impl KnotLanguageServer {
         let mut tinymist_guard = self.state.tinymist.write().await;
         if let Some(proxy) = tinymist_guard.as_mut() {
             let mut opened_map = self.state.opened_in_tinymist.write().await;
+            let mut versions_map = self.state.document_versions.write().await;
+            
             let is_opened = *opened_map.get(&uri).unwrap_or(&false);
+            let version = *versions_map.get(&uri).unwrap_or(&0) + 1;
+            versions_map.insert(uri.clone(), version);
 
             let method = if is_opened {
                 "textDocument/didChange"
@@ -268,7 +306,7 @@ impl KnotLanguageServer {
                 serde_json::json!({
                     "textDocument": {
                         "uri": uri,
-                        "version": 1,
+                        "version": version,
                     },
                     "contentChanges": [
                         { "text": content }
@@ -279,7 +317,7 @@ impl KnotLanguageServer {
                     "textDocument": {
                         "uri": uri,
                         "languageId": "typst",
-                        "version": 1,
+                        "version": version,
                         "text": content
                     }
                 })
@@ -296,26 +334,25 @@ impl KnotLanguageServer {
 }
 
 #[tokio::main]
+
 async fn main() {
+
     let stdin = tokio::io::stdin();
+
     let stdout = tokio::io::stdout();
 
-    // Try to initialize Air formatter
-    let formatter = match AirFormatter::new() {
-        Ok(f) => {
-            eprintln!("Air formatter initialized at: {:?}", f.path());
-            Some(f)
-        }
-        Err(e) => {
-            eprintln!("Air formatter not available: {}", e);
-            eprintln!("R code formatting will be disabled");
-            None
-        }
-    };
+
 
     let (service, socket) = LspService::new(|client| KnotLanguageServer {
+
         client,
-        state: ServerState::new(formatter),
+
+        state: ServerState::new(),
+
+        root_uri: Arc::new(RwLock::new(None)),
+
     });
+
     Server::new(stdin, stdout, socket).serve(service).await;
+
 }

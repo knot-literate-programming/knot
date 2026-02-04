@@ -10,12 +10,11 @@
 use super::{formatters, process::RProcess, RExecutor, BOUNDARY};
 use crate::executors::{ExecutionResult, GraphicsOptions, LanguageExecutor, OutputMetadata, SideChannel};
 use anyhow::{Context, Result};
-use std::io::{BufRead, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::thread;
 
 /// Executes a code chunk in the persistent R process
-pub fn execute(process: &mut RProcess, _cache_dir: &Path, code: &str, graphics: &GraphicsOptions) -> Result<ExecutionResult> {
+pub fn execute(process: &mut RProcess, cache_dir: &Path, code: &str, graphics: &GraphicsOptions) -> Result<ExecutionResult> {
     // Create side-channel for this chunk
     let channel = SideChannel::new()?;
     channel.setup_env()?;
@@ -24,23 +23,17 @@ pub fn execute(process: &mut RProcess, _cache_dir: &Path, code: &str, graphics: 
         .stdin
         .as_mut()
         .context("R process stdin is not available")?;
-    let stdout = process
-        .stdout
-        .as_mut()
-        .context("R process stdout is not available")?;
-    let stderr = process
-        .stderr
-        .as_mut()
-        .context("R process stderr is not available")?;
 
     // Set environment variables in the R process
     // We must use Sys.setenv() because the child process environment is independent
     let meta_file = channel.path().to_string_lossy().replace('\\', "\\\\");
+    let cache_dir_str = cache_dir.to_string_lossy().replace('\\', "\\\\");
     writeln!(stdin, "Sys.setenv(KNOT_METADATA_FILE = '{}')", meta_file)?;
     writeln!(stdin, "Sys.setenv(KNOT_FIG_WIDTH = '{}')", graphics.width)?;
     writeln!(stdin, "Sys.setenv(KNOT_FIG_HEIGHT = '{}')", graphics.height)?;
     writeln!(stdin, "Sys.setenv(KNOT_FIG_DPI = '{}')", graphics.dpi)?;
     writeln!(stdin, "Sys.setenv(KNOT_FIG_FORMAT = '{}')", graphics.format)?;
+    writeln!(stdin, "Sys.setenv(KNOT_CACHE_DIR = '{}')", cache_dir_str)?;
 
     // Write the code, followed by boundary markers
     writeln!(stdin, "{}", code)?;
@@ -48,46 +41,7 @@ pub fn execute(process: &mut RProcess, _cache_dir: &Path, code: &str, graphics: 
     writeln!(stdin, "cat('{}\\n', file=stderr())", BOUNDARY)?;
     stdin.flush()?;
 
-    let (stdout_output, stderr_output) = thread::scope(|s| {
-        let stdout_handle = s.spawn(move || {
-            let mut output = String::new();
-            let mut line_buffer = String::new();
-            loop {
-                line_buffer.clear();
-                let bytes_read = stdout.read_line(&mut line_buffer).unwrap_or(0);
-                if bytes_read == 0 {
-                    break;
-                }
-                if line_buffer.trim_end() == BOUNDARY {
-                    break;
-                }
-                output.push_str(&line_buffer);
-            }
-            output
-        });
-
-        let stderr_handle = s.spawn(move || {
-            let mut output = String::new();
-            let mut line_buffer = String::new();
-            loop {
-                line_buffer.clear();
-                let bytes_read = stderr.read_line(&mut line_buffer).unwrap_or(0);
-                if bytes_read == 0 {
-                    break;
-                }
-                if line_buffer.trim_end() == BOUNDARY {
-                    break;
-                }
-                output.push_str(&line_buffer);
-            }
-            output
-        });
-
-        (
-            stdout_handle.join().unwrap(),
-            stderr_handle.join().unwrap(),
-        )
-    });
+    let (stdout_output, stderr_output) = process.read_until_boundary()?;
 
     // Check if stderr contains actual errors (not just warnings/messages)
     if !stderr_output.trim().is_empty() {
@@ -207,14 +161,6 @@ pub fn save_session(process: &mut RProcess, snapshot_file: &Path) -> Result<()> 
         .stdin
         .as_mut()
         .context("R process stdin is not available")?;
-    let stdout = process
-        .stdout
-        .as_mut()
-        .context("R process stdout is not available")?;
-    let stderr = process
-        .stderr
-        .as_mut()
-        .context("R process stderr is not available")?;
 
     // Convert path to string, escaping backslashes for Windows
     let path_str = snapshot_file
@@ -229,37 +175,7 @@ pub fn save_session(process: &mut RProcess, snapshot_file: &Path) -> Result<()> 
     stdin.flush()?;
 
     // Wait for completion by reading until boundary markers
-    let (_stdout_output, stderr_output) = thread::scope(|s| {
-        let stdout_handle = s.spawn(move || {
-            let mut output = String::new();
-            let mut line_buffer = String::new();
-            loop {
-                line_buffer.clear();
-                let bytes_read = stdout.read_line(&mut line_buffer).unwrap_or(0);
-                if bytes_read == 0 || line_buffer.trim_end() == BOUNDARY {
-                    break;
-                }
-                output.push_str(&line_buffer);
-            }
-            output
-        });
-
-        let stderr_handle = s.spawn(move || {
-            let mut output = String::new();
-            let mut line_buffer = String::new();
-            loop {
-                line_buffer.clear();
-                let bytes_read = stderr.read_line(&mut line_buffer).unwrap_or(0);
-                if bytes_read == 0 || line_buffer.trim_end() == BOUNDARY {
-                    break;
-                }
-                output.push_str(&line_buffer);
-            }
-            output
-        });
-
-        (stdout_handle.join().unwrap(), stderr_handle.join().unwrap())
-    });
+    let (_stdout_output, stderr_output) = process.read_until_boundary()?;
 
     // Check for errors
     if !stderr_output.trim().is_empty() {
@@ -279,14 +195,6 @@ pub fn load_session(process: &mut RProcess, snapshot_file: &Path) -> Result<()> 
         .stdin
         .as_mut()
         .context("R process stdin is not available")?;
-    let stdout = process
-        .stdout
-        .as_mut()
-        .context("R process stdout is not available")?;
-    let stderr = process
-        .stderr
-        .as_mut()
-        .context("R process stderr is not available")?;
 
     // Convert path to string, escaping backslashes for Windows
     let path_str = snapshot_file
@@ -301,37 +209,7 @@ pub fn load_session(process: &mut RProcess, snapshot_file: &Path) -> Result<()> 
     stdin.flush()?;
 
     // Wait for completion by reading until boundary markers
-    let (_stdout_output, stderr_output) = thread::scope(|s| {
-        let stdout_handle = s.spawn(move || {
-            let mut output = String::new();
-            let mut line_buffer = String::new();
-            loop {
-                line_buffer.clear();
-                let bytes_read = stdout.read_line(&mut line_buffer).unwrap_or(0);
-                if bytes_read == 0 || line_buffer.trim_end() == BOUNDARY {
-                    break;
-                }
-                output.push_str(&line_buffer);
-            }
-            output
-        });
-
-        let stderr_handle = s.spawn(move || {
-            let mut output = String::new();
-            let mut line_buffer = String::new();
-            loop {
-                line_buffer.clear();
-                let bytes_read = stderr.read_line(&mut line_buffer).unwrap_or(0);
-                if bytes_read == 0 || line_buffer.trim_end() == BOUNDARY {
-                    break;
-                }
-                output.push_str(&line_buffer);
-            }
-            output
-        });
-
-        (stdout_handle.join().unwrap(), stderr_handle.join().unwrap())
-    });
+    let (_stdout_output, stderr_output) = process.read_until_boundary()?;
 
     // Check for errors
     if !stderr_output.trim().is_empty() {

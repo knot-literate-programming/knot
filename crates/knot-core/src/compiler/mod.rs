@@ -17,15 +17,14 @@ use crate::cache::Cache;
 use crate::get_cache_dir;
 use anyhow::{Context, Result};
 use log::info;
+use std::path::PathBuf;
 
 // From section 3.1 and 6.1 (Semaine 2) of the reference document
 
 pub struct Compiler {
     r_executor: Option<RExecutor>,
     config: Config,
-    // In the future, we'll have more executors
-    // lilypond_executor: Option<LilypondExecutor>,
-    // python_executor: Option<PythonExecutor>,
+    cache_dir: PathBuf,
 }
 
 impl Compiler {
@@ -48,19 +47,27 @@ impl Compiler {
             info!("Using R helper from knot.toml: {}", path.display());
         }
 
-        let cache_dir = get_cache_dir();
-        let r_executor = RExecutor::new(cache_dir, r_helper_path)
+        // Determine isolated cache directory for this file
+        let file_stem = knot_file_path.file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("main");
+        let cache_dir = get_cache_dir(&project_root, file_stem);
+        
+        info!("📦 Cache directory: {}", cache_dir.display());
+
+        let r_executor = RExecutor::new(cache_dir.clone(), r_helper_path)
             .context("Failed to initialize R executor")?;
 
         Ok(Self {
             r_executor: Some(r_executor),
             config,
+            cache_dir,
         })
     }
 
     /// Compiles a document by executing its code chunks and generating a new Typst source file.
     pub fn compile(&mut self, doc: &Document) -> Result<String> {
-        let mut cache = Cache::new(get_cache_dir())?;
+        let mut cache = Cache::new(self.cache_dir.clone())?;
         let mut previous_hash = String::new();
         let mut typst_output = String::new();
         let mut last_pos = 0;

@@ -114,10 +114,13 @@ mod tests {
                 fig_format: None,
                 fig_alt: None,
             },
+            errors: vec![],
             range: dummy_range.clone(),
             code_range: dummy_range,
             start_byte: 100,
             end_byte: 200,
+            code_start_byte: 110,
+            code_end_byte: 190,
         }
     }
 

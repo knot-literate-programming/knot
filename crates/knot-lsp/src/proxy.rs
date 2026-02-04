@@ -9,7 +9,9 @@
 
 use anyhow::{Context, Result};
 use serde_json::Value;
+use tower_lsp::lsp_types::Url;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -38,13 +40,27 @@ pub struct TinymistProxy {
 impl TinymistProxy {
     /// Spawn a new tinymist subprocess
     ///
+    /// # Arguments
+    /// * `root_uri` - Optional root URI of the workspace
+    /// * `path_override` - Optional path to tinymist executable
+    ///
     /// # Returns
     /// * `Ok((proxy, notification_receiver))` - Proxy for sending requests + Receiver for notifications
     /// * `Err(_)` - Failed to spawn or initialize
-    pub async fn spawn() -> Result<(Self, mpsc::Receiver<Value>)> {
-        // Try to find tinymist in PATH
-        let tinymist_path = which::which("tinymist")
-            .context("tinymist not found in PATH. Install from: https://github.com/Myriad-Dreamin/tinymist")?;
+    pub async fn spawn(root_uri: Option<Url>, path_override: Option<PathBuf>) -> Result<(Self, mpsc::Receiver<Value>)> {
+        // Try to find tinymist
+        let tinymist_path = if let Some(path) = path_override {
+            if path.exists() {
+                path
+            } else {
+                crate::path_resolver::resolve_binary("tinymist")?
+            }
+        } else {
+            crate::path_resolver::resolve_binary("tinymist")?
+        };
+
+        let tinymist_path_str = tinymist_path.to_string_lossy().to_string();
+        eprintln!("Spawning tinymist from: {}", tinymist_path_str);
 
         // Spawn tinymist with stdio transport
         let mut child = Command::new(&tinymist_path)
@@ -78,7 +94,7 @@ impl TinymistProxy {
         };
 
         // Send initialize request
-        proxy.initialize().await?;
+        proxy.initialize(root_uri).await?;
 
         Ok((proxy, notification_rx))
     }
@@ -181,7 +197,7 @@ impl TinymistProxy {
 
 impl TinymistProxy {
     /// Send the LSP initialize request to tinymist
-    async fn initialize(&mut self) -> Result<()> {
+    async fn initialize(&mut self, root_uri: Option<Url>) -> Result<()> {
         let init_params = serde_json::json!({
             "processId": std::process::id(),
             "clientInfo": {
@@ -195,7 +211,7 @@ impl TinymistProxy {
                     "completion": {},
                 }
             },
-            "rootUri": null,
+            "rootUri": root_uri,
         });
 
         let response = self.send_request("initialize", init_params).await?;
@@ -310,7 +326,7 @@ mod tests {
     #[tokio::test]
     #[ignore] // Only run if tinymist is installed
     async fn test_spawn_tinymist() {
-        let result = TinymistProxy::spawn().await;
+        let result = TinymistProxy::spawn(None, None).await;
         match result {
             Ok((mut proxy, _notification_rx)) => {
                 println!("tinymist spawned successfully");
@@ -325,7 +341,7 @@ mod tests {
     #[tokio::test]
     #[ignore] // Only run if tinymist is installed
     async fn test_send_notification() {
-        let (mut proxy, _notification_rx) = match TinymistProxy::spawn().await {
+        let (mut proxy, _notification_rx) = match TinymistProxy::spawn(None, None).await {
             Ok((p, rx)) => (p, rx),
             Err(_) => {
                 eprintln!("tinymist not available, skipping test");

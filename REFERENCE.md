@@ -1,7 +1,7 @@
 # Knot Reference Documentation
 
 **Version**: 0.1.0 (pre-release)
-**Last Updated**: 2026-02-02
+**Last Updated**: 2026-02-04
 
 This document describes the current state of the Knot project: architecture, implemented features, and design principles.
 
@@ -180,12 +180,17 @@ code here
 
 ### Storage Structure
 
+Knot uses isolated cache directories for each `.knot` file to prevent collisions and support future parallel compilation.
+
 ```
 .knot_cache/
-├── metadata.json           # Index of cached chunks/inline
-├── chunk_0_stdout.txt      # Chunk output files
-├── chunk_0_plot.svg
-└── inline_abc123.txt       # Inline result files
+├── main/                   # Cache for main.knot
+│   ├── metadata.json
+│   └── snapshot_abc123.RData
+├── 01-intro/               # Cache for 01-intro.knot
+│   ├── metadata.json
+│   ├── chunk_0_plot.svg
+│   └── snapshot_def456.RData
 ```
 
 ---
@@ -199,8 +204,9 @@ code here
 **Robustness**: Uses a **Side-Channel** approach.
 1. Knot creates a temporary JSON file path.
 2. Passes it to R via `KNOT_METADATA_FILE` environment variable.
-3. R writes metadata (paths to plots, tables) to this JSON file.
-4. Rust reads the JSON to reconstruct the execution result.
+3. Passes the isolated cache path via `KNOT_CACHE_DIR`.
+4. R writes metadata (paths to plots, tables) to this JSON file.
+5. Rust reads the JSON to reconstruct the execution result.
 
 This avoids fragile stdout parsing and ensures robust communication.
 

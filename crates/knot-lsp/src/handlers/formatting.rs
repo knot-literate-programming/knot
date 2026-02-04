@@ -5,7 +5,8 @@ use knot_core::Document;
 
 pub async fn handle_formatting(state: &ServerState, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
     // Check if formatter is available
-    let formatter = match &state.formatter {
+    let formatter_guard = state.formatter.read().await;
+    let formatter = match formatter_guard.as_ref() {
         Some(f) => f,
         None => return Ok(None),
     };
@@ -62,7 +63,8 @@ pub async fn handle_on_type_formatting(state: &ServerState, params: DocumentOnTy
     }
 
     // Check if formatter is available
-    let formatter = match &state.formatter {
+    let formatter_guard = state.formatter.read().await;
+    let formatter = match formatter_guard.as_ref() {
         Some(f) => f,
         None => return Ok(None),
     };
@@ -124,13 +126,12 @@ mod tests {
     use crate::formatter::AirFormatter;
 
     async fn create_test_state(uri: &str, text: &str, with_formatter: bool) -> (ServerState, Url) {
-        let formatter = if with_formatter {
-            AirFormatter::new().ok()
-        } else {
-            None
-        };
-
-        let state = ServerState::new(formatter);
+        let state = ServerState::new();
+        if with_formatter {
+            if let Ok(f) = AirFormatter::new(None) {
+                *state.formatter.write().await = Some(f);
+            }
+        }
         let url = Url::parse(uri).unwrap();
 
         // Insert document
@@ -193,7 +194,7 @@ x<-1+2
 
     #[tokio::test]
     async fn test_formatting_document_not_found() {
-        let state = ServerState::new(None);
+        let state = ServerState::new();
         let uri = Url::parse("file:///nonexistent.knot").unwrap();
 
         let params = create_formatting_params(&uri);
@@ -227,7 +228,7 @@ x = 1 + 2
 ```
 "#;
 
-        let formatter = AirFormatter::new().ok();
+        let formatter = AirFormatter::new(None).ok();
         if formatter.is_none() {
             eprintln!("Air not installed, skipping test");
             return;
@@ -248,7 +249,7 @@ x = 1 + 2
 x <- 1 + 2
 ```"#;
 
-        let formatter = AirFormatter::new().ok();
+        let formatter = AirFormatter::new(None).ok();
         if formatter.is_none() {
             eprintln!("Air not installed, skipping test");
             return;
@@ -275,7 +276,7 @@ x<-1
 y<-2
 ```"#;
 
-        let formatter = AirFormatter::new().ok();
+        let formatter = AirFormatter::new(None).ok();
         if formatter.is_none() {
             eprintln!("Air not installed, skipping test");
             return;
@@ -314,7 +315,7 @@ x <- 1
 x <- 1
 ```"#;
 
-        let formatter = AirFormatter::new().ok();
+        let formatter = AirFormatter::new(None).ok();
         if formatter.is_none() {
             eprintln!("Air not installed, skipping test");
             return;
@@ -332,7 +333,7 @@ x <- 1
 
     #[tokio::test]
     async fn test_on_type_formatting_document_not_found() {
-        let state = ServerState::new(None);
+        let state = ServerState::new();
         let uri = Url::parse("file:///nonexistent.knot").unwrap();
 
         let params = create_on_type_formatting_params(&uri, 0, 0, "\n");
@@ -366,7 +367,7 @@ x <- 1
 Regular text here.
 "#;
 
-        let formatter = AirFormatter::new().ok();
+        let formatter = AirFormatter::new(None).ok();
         if formatter.is_none() {
             eprintln!("Air not installed, skipping test");
             return;
@@ -388,7 +389,7 @@ Regular text here.
 x=1+2
 ```"#;
 
-        let formatter = AirFormatter::new().ok();
+        let formatter = AirFormatter::new(None).ok();
         if formatter.is_none() {
             eprintln!("Air not installed, skipping test");
             return;
@@ -410,7 +411,7 @@ x=1+2
 x<-1+2
 ```"#;
 
-        let formatter = AirFormatter::new().ok();
+        let formatter = AirFormatter::new(None).ok();
         if formatter.is_none() {
             eprintln!("Air not installed, skipping test");
             return;

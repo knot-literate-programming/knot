@@ -174,6 +174,7 @@ impl Cache {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::get_cache_dir;
     use std::thread;
     use std::time::Duration;
     use tempfile::tempdir;
@@ -181,7 +182,9 @@ mod tests {
     #[test]
     fn test_hash_chaining_basic() {
         let tmp_dir = tempdir().unwrap();
-        let cache = Cache::new(tmp_dir.path().to_path_buf()).unwrap();
+        let project_root = tmp_dir.path();
+        let cache_dir = get_cache_dir(project_root, "test");
+        let cache = Cache::new(cache_dir).unwrap();
         let opts = ChunkOptions::default();
 
         let hash1 = cache.get_chunk_hash("x <- 1", &opts, "", "");
@@ -201,6 +204,8 @@ mod tests {
     #[test]
     fn test_dependency_invalidation() {
         let tmp_dir = tempdir().unwrap();
+        let project_root = tmp_dir.path();
+        let cache_dir = get_cache_dir(project_root, "test");
         let tmp_file = tmp_dir.path().join("data.csv");
         fs::write(&tmp_file, "a,b\n1,2").unwrap();
 
@@ -210,7 +215,7 @@ mod tests {
         };
 
         let deps_hash1 = hash_dependencies(&opts.depends).unwrap();
-        let hash1 = Cache::new(tmp_dir.path().to_path_buf())
+        let hash1 = Cache::new(cache_dir.clone())
             .unwrap()
             .get_chunk_hash("read.csv('data.csv')", &opts, "", &deps_hash1);
 
@@ -219,7 +224,7 @@ mod tests {
         fs::write(&tmp_file, "a,b\n3,4").unwrap();
 
         let deps_hash2 = hash_dependencies(&opts.depends).unwrap();
-        let hash2 = Cache::new(tmp_dir.path().to_path_buf())
+        let hash2 = Cache::new(cache_dir)
             .unwrap()
             .get_chunk_hash("read.csv('data.csv')", &opts, "", &deps_hash2);
 
@@ -230,7 +235,9 @@ mod tests {
     #[test]
     fn test_options_affect_hash() {
         let tmp_dir = tempdir().unwrap();
-        let cache = Cache::new(tmp_dir.path().to_path_buf()).unwrap();
+        let project_root = tmp_dir.path();
+        let cache_dir = get_cache_dir(project_root, "test");
+        let cache = Cache::new(cache_dir).unwrap();
 
         let opts1 = ChunkOptions {
             eval: Some(true),
@@ -250,7 +257,9 @@ mod tests {
     #[test]
     fn test_snapshot_path_generation() {
         let tmp_dir = tempdir().unwrap();
-        let cache = Cache::new(tmp_dir.path().to_path_buf()).unwrap();
+        let project_root = tmp_dir.path();
+        let cache_dir = get_cache_dir(project_root, "test");
+        let cache = Cache::new(cache_dir).unwrap();
 
         let hash = "abc123def456";
         let snapshot_path = cache.get_snapshot_path(hash);
@@ -277,7 +286,9 @@ mod tests {
     #[test]
     fn test_snapshot_different_hashes() {
         let tmp_dir = tempdir().unwrap();
-        let cache = Cache::new(tmp_dir.path().to_path_buf()).unwrap();
+        let project_root = tmp_dir.path();
+        let cache_dir = get_cache_dir(project_root, "test");
+        let cache = Cache::new(cache_dir).unwrap();
 
         let hash1 = "hash1";
         let hash2 = "hash2";

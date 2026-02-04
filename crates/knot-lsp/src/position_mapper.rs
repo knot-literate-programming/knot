@@ -67,18 +67,18 @@ impl PositionMapper {
     /// Convert LSP Position (line, character) to byte offset in the document
     fn position_to_byte_offset(&self, pos: Position) -> usize {
         let mut line = 0;
-        let mut col = 0;
+        let mut utf16_col = 0;
 
         for (byte_idx, ch) in self.knot_content.char_indices() {
-            if line == pos.line as usize && col == pos.character as usize {
+            if line == pos.line as usize && utf16_col == pos.character as usize {
                 return byte_idx;
             }
 
             if ch == '\n' {
                 line += 1;
-                col = 0;
+                utf16_col = 0;
             } else {
-                col += 1;
+                utf16_col += ch.len_utf16();
             }
         }
 
@@ -88,24 +88,121 @@ impl PositionMapper {
 }
 
 #[cfg(test)]
+
 mod tests {
+
     use super::*;
-    use crate::transform::transform_to_placeholder;
+
+    use crate::transform::transform_to_typst;
+
+
 
     #[test]
+
     fn test_mapper_identity() {
+
         let knot = r#"Line 0
+
 ```{r}
+
 chunk code
+
 ```
+
 Line 4"#;
 
-        let typ = transform_to_placeholder(knot);
+
+
+        let typ = transform_to_typst(knot);
+
         let mapper = PositionMapper::new(knot, &typ);
 
+
+
         // Position 4:0 should be exactly 4:0 in both
+
         let pos = Position { line: 4, character: 0 };
+
         assert_eq!(mapper.knot_to_typ_position(pos), Some(pos));
+
         assert_eq!(mapper.typ_to_knot_position(pos), Some(pos));
+
     }
+
+
+
+    #[test]
+
+    fn test_is_position_in_chunk() {
+
+        let knot = "Text `{r} 1+1` end";
+
+        let typ = transform_to_typst(knot);
+
+        let mapper = PositionMapper::new(knot, &typ);
+
+
+
+        // Outside
+
+        assert!(!mapper.is_position_in_chunk(Position { line: 0, character: 0 }));
+
+        assert!(!mapper.is_position_in_chunk(Position { line: 0, character: 4 }));
+
+        
+
+        // Inside `{r} 1+1` (starts at 5, ends at 14)
+
+        assert!(mapper.is_position_in_chunk(Position { line: 0, character: 5 }));
+
+        assert!(mapper.is_position_in_chunk(Position { line: 0, character: 10 }));
+
+        assert!(mapper.is_position_in_chunk(Position { line: 0, character: 13 }));
+
+        
+
+        // After
+
+        assert!(!mapper.is_position_in_chunk(Position { line: 0, character: 14 }));
+
+    }
+
+
+
+    #[test]
+
+    fn test_position_with_emoji() {
+
+        // '😀' is 2 UTF-16 units.
+
+        let knot = "😀 `{r} 1+1` end";
+
+        let typ = transform_to_typst(knot);
+
+        let mapper = PositionMapper::new(knot, &typ);
+
+
+
+
+
+        // '😀' is at col 0 (2 UTF-16 units)
+
+        // ' ' is at col 2
+
+        // '`' (start of inline) is at col 3
+
+        
+
+        assert!(!mapper.is_position_in_chunk(Position { line: 0, character: 0 }));
+
+        assert!(!mapper.is_position_in_chunk(Position { line: 0, character: 2 }));
+
+        
+
+        // Inside inline expr (starts at char 3)
+
+        assert!(mapper.is_position_in_chunk(Position { line: 0, character: 3 }));
+
+    }
+
 }

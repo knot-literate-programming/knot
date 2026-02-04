@@ -63,8 +63,11 @@ mod tests {
             language: "r".to_string(),
             code: code.to_string(),
             options,
+            errors: vec![],
             start: 0,
             end: code.len(),
+            code_start_byte: 0,
+            code_end_byte: code.len(),
         }
     }
 

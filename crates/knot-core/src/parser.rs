@@ -3,8 +3,8 @@ use serde::Serialize;
 use std::path::PathBuf;
 use winnow::Parser;
 use winnow::token::{take_until, take_while, take};
-use winnow::ascii::{space0, line_ending};
-use winnow::combinator::{opt, peek};
+use winnow::ascii::{space0, space1, line_ending};
+use winnow::combinator::{opt, peek, separated, alt};
 use winnow::stream::Offset;
 use winnow::ModalResult;
 use winnow::error::ContextError;
@@ -140,10 +140,13 @@ pub struct Chunk {
     pub name: Option<String>,
     pub code: String,
     pub options: ChunkOptions,
+    pub errors: Vec<String>,
     pub range: Range,       // Position du chunk entier (de ```{r}} à ```)
     pub code_range: Range,  // Position du code seul à l'intérieur
     pub start_byte: usize,
     pub end_byte: usize,
+    pub code_start_byte: usize,
+    pub code_end_byte: usize,
 }
 
 /// Options for inline expressions
@@ -173,7 +176,10 @@ pub struct InlineExpr {
     pub code: String,      // The expression to evaluate
     pub start: usize,      // Byte offset in source
     pub end: usize,        // Byte offset in source (exclusive)
+    pub code_start_byte: usize,
+    pub code_end_byte: usize,
     pub options: InlineOptions,
+    pub errors: Vec<String>,
 }
 
 pub struct Document {
@@ -204,48 +210,45 @@ fn parse_document(source: &str) -> anyhow::Result<Document> {
         // We try to parse a chunk
         let start_input = input; // Snapshot before parsing attempt
         
-        match parse_chunk_internal.parse_next(&mut input) {
-            Ok((mut chunk, code_slice)) => {
-                // Calculation of absolute offsets using pointer arithmetic (safe via Offset trait)
-                let chunk_start_offset = Offset::offset_from(&start_input, &original_source);
-                let chunk_end_offset = Offset::offset_from(&input, &original_source);
-                
-                let code_start_offset = Offset::offset_from(&code_slice, &original_source);
-                // code_end_offset is simply start + len
-                let code_end_offset = code_start_offset + code_slice.len();
+        // If we see ```{, we MUST be able to parse a chunk
+        if input.starts_with("```{") {
+            match parse_chunk_internal.parse_next(&mut input) {
+                Ok((mut chunk, code_slice)) => {
+                    // Calculation of absolute offsets
+                    let chunk_start_offset = Offset::offset_from(&start_input, &original_source);
+                    let chunk_end_offset = Offset::offset_from(&input, &original_source);
+                    
+                    let code_start_offset = Offset::offset_from(&code_slice, &original_source);
+                    let code_end_offset = code_start_offset + code_slice.len();
 
-                // Fill the offsets in the chunk
-                chunk.start_byte = chunk_start_offset;
-                chunk.end_byte = chunk_end_offset;
-                
-                // Calculate Line/Col positions
-                chunk.range.start = offset_to_position(original_source, chunk_start_offset);
-                chunk.range.end = offset_to_position(original_source, chunk_end_offset);
-                
-                chunk.code_range.start = offset_to_position(original_source, code_start_offset);
-                chunk.code_range.end = offset_to_position(original_source, code_end_offset);
-                
-                chunks.push(chunk);
+                    chunk.start_byte = chunk_start_offset;
+                    chunk.end_byte = chunk_end_offset;
+                    chunk.code_start_byte = code_start_offset;
+                    chunk.code_end_byte = code_end_offset;
+                    
+                    chunk.range.start = offset_to_position(original_source, chunk_start_offset);
+                    chunk.range.end = offset_to_position(original_source, chunk_end_offset);
+                    
+                    chunk.code_range.start = offset_to_position(original_source, code_start_offset);
+                    chunk.code_range.end = offset_to_position(original_source, code_end_offset);
+                    
+                    chunks.push(chunk);
+                }
+                Err(err) => {
+                    let pos = offset_to_position(original_source, Offset::offset_from(&start_input, &original_source));
+                    anyhow::bail!("Malformed or unclosed code chunk at line {}, column {}: {}", pos.line + 1, pos.column + 1, err);
+                }
             }
-            Err(_) => {
-                // Reset input to start_input because the failed parser might have consumed some
-                input = start_input;
-                
-                // Find next "```"
-                // Hint the error type for type inference
-                match take_until::<_, _, ContextError>(0.., "```").parse_next(&mut input) {
-                    Ok(_) => {
-                        // Check if it's a valid chunk start
-                        let checkpoint = input;
-                        if parse_chunk_internal.parse_next(&mut input).is_ok() {
-                            // It is valid!
-                            input = checkpoint; // Reset so loop picks it up
-                        } else {
-                            // Not valid, consume ```
-                            let _ = take::<_, _, ContextError>(3usize).parse_next(&mut input);
-                        }
-                    }
-                    Err(_) => break, // No more ```
+        } else {
+            // Not a chunk start, move forward by one character
+            // (or until the next ```{)
+            match take_until::<_, _, ContextError>(1.., "```{").parse_next(&mut input) {
+                Ok(_) => {
+                    // input now points to ```{
+                }
+                Err(_) => {
+                    // No more chunks
+                    break;
                 }
             }
         }
@@ -297,7 +300,7 @@ fn parse_chunk_internal<'i>(input: &mut Input<'i>) -> ModalResult<(Chunk, &'i st
         }
     }
     
-    let options = parse_options(&options_str).unwrap_or_default();
+    let (options, errors) = parse_options(&options_str);
 
     // Body
     let code_slice = take_until(0.., "```").parse_next(input)?;
@@ -309,10 +312,13 @@ fn parse_chunk_internal<'i>(input: &mut Input<'i>) -> ModalResult<(Chunk, &'i st
         name,
         code: code_slice.to_string(),
         options,
+        errors,
         range: Range::default(),
         code_range: Range::default(),
         start_byte: 0, // patched later
         end_byte: 0,   // patched later
+        code_start_byte: 0, // patched later
+        code_end_byte: 0,   // patched later
     };
 
     Ok((chunk, code_slice))
@@ -389,72 +395,82 @@ fn parse_inline_expr<'a>(original_source: &'a str) -> impl FnMut(&mut &'a str) -
         let _ = opt(" ").parse_next(input)?;
 
         // Code: take until closing backtick
-        let code = take_until(0.., "`").parse_next(input)?;
+        let code_slice = take_until(0.., "`").parse_next(input)?;
+        let code_start_byte = Offset::offset_from(&code_slice, &original_source);
+        let code_end_byte = code_start_byte + code_slice.len();
         let _ = "`".parse_next(input)?;
 
         let start = Offset::offset_from(&start_input, &original_source);
         let end = Offset::offset_from(&*input, &original_source);
 
         // Parse inline options from the captured string
-        let options = parse_inline_options(options_str);
+        let (options, errors) = parse_inline_options(options_str);
 
         Ok(InlineExpr {
             language: lang.to_string(),
-            code: code.to_string(),
+            code: code_slice.to_string(),
             start,
             end,
+            code_start_byte,
+            code_end_byte,
             options,
+            errors,
         })
     }
 }
 
 /// Parse inline options from a string like "echo=false, digits=3"
-fn parse_inline_options(options_str: &str) -> InlineOptions {
+fn parse_inline_options(options_str: &str) -> (InlineOptions, Vec<String>) {
     let mut options = InlineOptions::default();
+    let mut errors = Vec::new();
+    let mut input = options_str.trim();
 
-    let trimmed = options_str.trim();
-    if trimmed.is_empty() {
-        return options;
+    if input.is_empty() {
+        return (options, errors);
     }
 
     // Handle initial comma if present (e.g., "{r, echo=false}")
-    let cleaned = if trimmed.starts_with(',') {
-        &trimmed[1..]
-    } else {
-        trimmed
-    };
+    if input.starts_with(',') {
+        input = &input[1..].trim();
+    }
 
-    // Split by comma or whitespace to get individual key=value pairs
-    for part in cleaned.split(|c| c == ',' || c == ' ') {
-        let part = part.trim();
-        if part.is_empty() {
-            continue;
-        }
-        
-        if let Some((key, value)) = part.split_once('=') {
-            match key.trim() {
-                "echo" => {
-                    options.echo = value.trim() == "true";
-                }
-                "eval" => {
-                    options.eval = value.trim() == "true";
-                }
-                "output" => {
-                    options.output = value.trim() == "true";
-                }
+    if let Ok(pairs) = parse_kv_pairs.parse_next(&mut input) {
+        for (key, value) in pairs {
+            match key {
+                "echo" => options.echo = value == "true",
+                "eval" => options.eval = value == "true",
+                "output" => options.output = value == "true",
                 "digits" => {
-                    if let Ok(n) = value.trim().parse::<u32>() {
-                        options.digits = Some(n);
+                    match value.parse::<u32>() {
+                        Ok(n) => options.digits = Some(n),
+                        Err(e) => errors.push(format!("Option 'digits': {}", e)),
                     }
                 }
                 _ => {
-                    // Ignore unknown options for forward compatibility
+                    errors.push(format!("Unknown option: '{}'", key));
                 }
             }
         }
     }
 
-    options
+    (options, errors)
+}
+
+fn parse_kv_pairs<'a>(input: &mut &'a str) -> ModalResult<Vec<(&'a str, &'a str)>> {
+    fn parse_kv<'a>(input: &mut &'a str) -> ModalResult<(&'a str, &'a str)> {
+        let key = take_while(1.., |c: char| c.is_alphanumeric() || c == '_' || c == '-').parse_next(input)?;
+        let _ = space0.parse_next(input)?;
+        let _ = "=".parse_next(input)?;
+        let _ = space0.parse_next(input)?;
+        let value = take_while(1.., |c: char| !c.is_whitespace() && c != ',' && c != '}').parse_next(input)?;
+        Ok((key, value))
+    }
+
+    let _ = space0.parse_next(input)?;
+    separated(0.., parse_kv, alt((
+        (space0, ",", space0).map(|_| ()),
+        space1.map(|_| ())
+    ))).parse_next(input)
 }
 
 fn is_inside_chunk(pos: usize, chunks: &[Chunk]) -> bool {
@@ -471,8 +487,9 @@ fn is_inside_chunk(pos: usize, chunks: &[Chunk]) -> bool {
 // -----------------------------------------------------------------------------
 
 // La logique de parsing des options est basée sur la section 8.2
-pub fn parse_options(options_block: &str) -> Result<ChunkOptions> {
+pub fn parse_options(options_block: &str) -> (ChunkOptions, Vec<String>) {
     let mut options = ChunkOptions::default();
+    let mut errors = Vec::new();
 
     for line in options_block.lines() {
         let line = line.trim();
@@ -487,10 +504,22 @@ pub fn parse_options(options_block: &str) -> Result<ChunkOptions> {
             let value = value.trim();
 
             match key {
-                "eval" => options.eval = Some(parse_bool(value)?),
-                "echo" => options.echo = Some(parse_bool(value)?),
-                "output" => options.output = Some(parse_bool(value)?),
-                "cache" => options.cache = Some(parse_bool(value)?),
+                "eval" => match parse_bool(value) {
+                    Ok(v) => options.eval = Some(v),
+                    Err(e) => errors.push(format!("Option 'eval': {}", e)),
+                },
+                "echo" => match parse_bool(value) {
+                    Ok(v) => options.echo = Some(v),
+                    Err(e) => errors.push(format!("Option 'echo': {}", e)),
+                },
+                "output" => match parse_bool(value) {
+                    Ok(v) => options.output = Some(v),
+                    Err(e) => errors.push(format!("Option 'output': {}", e)),
+                },
+                "cache" => match parse_bool(value) {
+                    Ok(v) => options.cache = Some(v),
+                    Err(e) => errors.push(format!("Option 'cache': {}", e)),
+                },
                 "label" => options.label = Some(value.to_string()),
                 "caption" => options.caption = Some(value.to_string()),
                 "depends" => {
@@ -500,17 +529,28 @@ pub fn parse_options(options_block: &str) -> Result<ChunkOptions> {
                         .collect();
                 }
                 // Graphics options (Phase 4)
-                "fig-width" => options.fig_width = Some(parse_float(value)?),
-                "fig-height" => options.fig_height = Some(parse_float(value)?),
-                "dpi" => options.dpi = Some(parse_uint(value)?),
+                "fig-width" => match parse_float(value) {
+                    Ok(v) => options.fig_width = Some(v),
+                    Err(e) => errors.push(format!("Option 'fig-width': {}", e)),
+                },
+                "fig-height" => match parse_float(value) {
+                    Ok(v) => options.fig_height = Some(v),
+                    Err(e) => errors.push(format!("Option 'fig-height': {}", e)),
+                },
+                "dpi" => match parse_uint(value) {
+                    Ok(v) => options.dpi = Some(v),
+                    Err(e) => errors.push(format!("Option 'dpi': {}", e)),
+                },
                 "fig-format" => options.fig_format = Some(value.to_string()),
                 "fig-alt" => options.fig_alt = Some(value.to_string()),
-                _ => {} // Ignorer les options inconnues pour le moment
+                _ => {
+                    errors.push(format!("Unknown option: '{}'", key));
+                }
             }
         }
     }
 
-    Ok(options)
+    (options, errors)
 }
 
 fn parse_bool(s: &str) -> Result<bool> {
@@ -654,6 +694,30 @@ More text below."###;
     }
 
     #[test]
+    fn test_parse_invalid_option_value() {
+        let content = r###"```{r}
+#| eval: maybe
+1 + 1
+```"###;
+        let doc = Document::parse(content.to_string()).unwrap();
+        assert_eq!(doc.chunks.len(), 1);
+        assert_eq!(doc.chunks[0].errors.len(), 1);
+        assert!(doc.chunks[0].errors[0].contains("Option 'eval'"));
+    }
+
+    #[test]
+    fn test_parse_unknown_option() {
+        let content = r###"```{r}
+#| unknown-opt: 42
+1 + 1
+```"###;
+        let doc = Document::parse(content.to_string()).unwrap();
+        assert_eq!(doc.chunks.len(), 1);
+        assert_eq!(doc.chunks[0].errors.len(), 1);
+        assert!(doc.chunks[0].errors[0].contains("Unknown option"));
+    }
+
+    #[test]
     fn test_parse_simple_chunk_winnow() {
         let content = r###"# Titre
 
@@ -739,24 +803,40 @@ More text below."###;
     }
 
     #[test]
-    fn test_parse_inline_unknown_options_ignored() {
-        // Unknown options should be silently ignored
+    fn test_parse_inline_options_with_spaces_around_equals() {
+        // Options can have spaces around the '=' sign
+        let content = "`{r echo = false , eval  =  true} sqrt(2)` is root 2";
+        let doc = Document::parse(content.to_string()).unwrap();
+        assert_eq!(doc.inline_exprs.len(), 1);
+        let inline = &doc.inline_exprs[0];
+        assert_eq!(inline.code, "sqrt(2)");
+        assert_eq!(inline.options.echo, false);
+        assert_eq!(inline.options.eval, true);
+    }
+
+    #[test]
+    fn test_parse_inline_unknown_options_captured() {
+        // Unknown options should be captured as errors
         let content = "`{r unknown=value echo=true} x` end";
         let doc = Document::parse(content.to_string()).unwrap();
         assert_eq!(doc.inline_exprs.len(), 1);
         let inline = &doc.inline_exprs[0];
         assert_eq!(inline.options.echo, true);
         assert_eq!(inline.options.eval, true);  // default
+        assert_eq!(inline.errors.len(), 1);
+        assert!(inline.errors[0].contains("Unknown option: 'unknown'"));
     }
 
     #[test]
     fn test_parse_inline_invalid_digits() {
-        // Invalid digit value should be ignored
+        // Invalid digit value should be captured as an error
         let content = "`{r digits=abc} pi` value";
         let doc = Document::parse(content.to_string()).unwrap();
         assert_eq!(doc.inline_exprs.len(), 1);
         let inline = &doc.inline_exprs[0];
         assert_eq!(inline.options.digits, None); // Invalid value ignored
+        assert_eq!(inline.errors.len(), 1);
+        assert!(inline.errors[0].contains("Option 'digits'"));
     }
 
     #[test]

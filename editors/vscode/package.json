@@ -18,6 +18,10 @@
     "literate programming",
     "reproducible research"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nklutchnikoff/knot"
+  },
   "main": "./out/extension.js",
   "activationEvents": [
     "onLanguage:knot"
@@ -30,8 +34,8 @@
         "extensions": [".knot"],
         "configuration": "./language-configuration.json",
         "icon": {
-          "light": "./icons/knot-light.png",
-          "dark": "./icons/knot-dark.png"
+          "light": "./icons/knot-light.svg",
+          "dark": "./icons/knot-dark.svg"
         }
       }
     ],
@@ -67,7 +71,7 @@
         },
         "knot.formatter.formatOnType": {
           "type": "boolean",
-          "default": true,
+          "default": false,
           "description": "Format R chunks automatically on new line"
         },
         "knot.formatter.formatOnSave": {
@@ -82,7 +86,7 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "package": "vsce package",
+    "package": "vsce package --allow-missing-repository",
     "lint": "eslint src --ext ts"
   },
   "dependencies": {

@@ -73,14 +73,6 @@ impl RProcess {
             .stdin
             .as_mut()
             .context("R process stdin is not available")?;
-        let stdout = self
-            .stdout
-            .as_mut()
-            .context("R process stdout is not available")?;
-        let stderr = self
-            .stderr
-            .as_mut()
-            .context("R process stderr is not available")?;
 
         // Determine loading strategy
         let load_command = if let Some(ref path) = r_helper_path {
@@ -106,7 +98,36 @@ impl RProcess {
         stdin.flush()?;
 
         // Collect output
-        let (_stdout_output, stderr_output) = thread::scope(|s| {
+        let (_stdout_output, stderr_output) = self.read_until_boundary()?;
+
+        // If there's an error, it likely means the package/file is not available
+        // We don't fail here - just log a warning
+        if !stderr_output.trim().is_empty() {
+            log::warn!("Could not load R helpers: {}", stderr_output.trim());
+            log::warn!("Rich output features (dataframes, plots) will not be available.");
+        } else {
+            if r_helper_path.is_some() {
+                log::info!("✓ Loaded R helpers from local file");
+            } else {
+                log::info!("✓ Loaded knot.r.package");
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Read from stdout and stderr until boundary markers are reached
+    pub fn read_until_boundary(&mut self) -> Result<(String, String)> {
+        let stdout = self
+            .stdout
+            .as_mut()
+            .context("R process stdout is not available")?;
+        let stderr = self
+            .stderr
+            .as_mut()
+            .context("R process stderr is not available")?;
+
+        let (stdout_output, stderr_output) = thread::scope(|s| {
             let stdout_handle = s.spawn(move || {
                 let mut output = String::new();
                 let mut line_buffer = String::new();
@@ -147,20 +168,7 @@ impl RProcess {
             )
         });
 
-        // If there's an error, it likely means the package/file is not available
-        // We don't fail here - just log a warning
-        if !stderr_output.trim().is_empty() {
-            log::warn!("Could not load R helpers: {}", stderr_output.trim());
-            log::warn!("Rich output features (dataframes, plots) will not be available.");
-        } else {
-            if r_helper_path.is_some() {
-                log::info!("✓ Loaded R helpers from local file");
-            } else {
-                log::info!("✓ Loaded knot.r.package");
-            }
-        }
-
-        Ok(())
+        Ok((stdout_output, stderr_output))
     }
 
     /// Terminate the R process

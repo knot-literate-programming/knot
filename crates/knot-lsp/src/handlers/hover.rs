@@ -123,7 +123,7 @@ mod tests {
     use crate::position_mapper::PositionMapper;
 
     async fn create_test_state(uri: &str, text: &str) -> (ServerState, Url) {
-        let state = ServerState::new(None);
+        let state = ServerState::new();
         let url = Url::parse(uri).unwrap();
 
         // Insert document
@@ -275,7 +275,7 @@ x <- 1
 
     #[tokio::test]
     async fn test_hover_document_not_found() {
-        let state = ServerState::new(None);
+        let state = ServerState::new();
         let uri = Url::parse("file:///nonexistent.knot").unwrap();
 
         let params = create_hover_params(&uri, 0, 0);

@@ -9,7 +9,6 @@
 
 mod process;
 mod execution;
-mod file_manager;
 mod formatters;
 
 use super::{ExecutionResult, GraphicsOptions, LanguageExecutor};

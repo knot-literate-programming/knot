@@ -16,7 +16,8 @@
   "repository": {
     "r-code-chunk": {
       "name": "meta.embedded.block.r",
-      "begin": "^(```)(\\{)(r)(?:\\s+([^}]+))?(\\})",
+      "contentName": "source.r",
+      "begin": "^(```)(\\{)(r)(?:\\s+([^\\s}]+))?\\s*(\\})",
       "end": "^(```)",
       "beginCaptures": {
         "1": {
@@ -28,10 +29,10 @@
         "3": {
           "name": "entity.name.function.chunk-language.knot"
         },
-        "4": {
+        "5": {
           "name": "variable.parameter.chunk-name.knot"
         },
-        "5": {
+        "6": {
           "name": "punctuation.definition.chunk-options.end.knot"
         }
       },
@@ -73,7 +74,8 @@
     },
     "r-inline": {
       "name": "meta.embedded.inline.r",
-      "begin": "(`)(\\{)(r)(?:,\\s*([^}]+))?(\\})",
+      "contentName": "source.r",
+      "begin": "(`)(\\{)(r)(?:\\s*([^{}]+))?(\\})",
       "end": "(`)",
       "beginCaptures": {
         "1": {
@@ -193,7 +195,7 @@
     },
     "typst-raw-block": {
       "name": "markup.raw.block.typst",
-      "begin": "^(```)((?!\\{r)[a-z]*)",
+      "begin": "^(```)(?!\\{r)",
       "end": "^(```)",
       "beginCaptures": {
         "1": {

@@ -1,5 +1,21 @@
 # R/typst.R
 
+#' Get the base directory for knot-generated files
+#'
+#' Priority:
+#' 1. KNOT_CACHE_DIR environment variable
+#' 2. tempdir() as fallback
+.get_base_dir <- function() {
+  cache_dir <- Sys.getenv("KNOT_CACHE_DIR", unset = NA)
+  if (!is.na(cache_dir) && nzchar(cache_dir)) {
+    if (!dir.exists(cache_dir)) {
+      dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
+    }
+    return(normalizePath(cache_dir))
+  }
+  return(tempdir())
+}
+
 #' Write metadata to side-channel (KNOT_METADATA_FILE)
 #'
 #' Appends metadata to the side-channel file if KNOT_METADATA_FILE is set.
@@ -68,7 +84,7 @@ typst.data.frame <- function(x, row.names = FALSE, ...) {
   # Generate unique filename based on dataframe hash
   df_hash <- digest::digest(x, algo = "sha256")
   filename <- sprintf("data_%s.csv", substr(df_hash, 1, 16))
-  filepath <- file.path(tempdir(), filename)
+  filepath <- file.path(.get_base_dir(), filename)
 
   # Write CSV to temp file
   utils::write.csv(x, filepath, row.names = row.names, ...)
@@ -128,7 +144,7 @@ typst.ggplot <- function(x, width = NULL, height = NULL, dpi = NULL, format = NU
   # Generate unique filename based on plot object hash
   plot_hash <- digest::digest(x, algo = "sha256")
   filename <- sprintf("plot_%s.%s", substr(plot_hash, 1, 16), format)
-  filepath <- file.path(tempdir(), filename)
+  filepath <- file.path(.get_base_dir(), filename)
 
   # Save plot using ggsave
   ggplot2::ggsave(
@@ -200,7 +216,7 @@ typst.recordedplot <- function(x, width = NULL, height = NULL, dpi = NULL, forma
   # Generate unique filename based on plot object hash
   plot_hash <- digest::digest(x, algo = "sha256")
   filename <- sprintf("plot_%s.%s", substr(plot_hash, 1, 16), format)
-  filepath <- file.path(tempdir(), filename)
+  filepath <- file.path(.get_base_dir(), filename)
 
   # Open device with correct dimensions
   if (format == "svg") {

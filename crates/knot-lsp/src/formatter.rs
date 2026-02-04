@@ -17,50 +17,27 @@ pub struct AirFormatter {
 }
 
 impl AirFormatter {
-    /// Create a new Air formatter, finding the air executable in PATH
-    pub fn new() -> Result<Self> {
-        let air_path = Self::find_air()?;
+    /// Create a new Air formatter, finding the air executable
+    pub fn new(path_override: Option<PathBuf>) -> Result<Self> {
+        let air_path = if let Some(path) = path_override {
+            if path.exists() {
+                path
+            } else {
+                Self::find_air()?
+            }
+        } else {
+            Self::find_air()?
+        };
         Ok(Self { air_path })
     }
 
     /// Find the air executable in PATH or common installation locations
     fn find_air() -> Result<PathBuf> {
-        // Try to find in PATH first
-        if let Ok(path) = which::which("air") {
-            return Ok(path);
-        }
-
-        // Try common installation locations
-        let fallback_paths = if cfg!(target_os = "macos") {
-            vec![
-                PathBuf::from("/usr/local/bin/air"),
-                PathBuf::from("/opt/homebrew/bin/air"),
-            ]
-        } else if cfg!(target_os = "linux") {
-            vec![
-                PathBuf::from("/usr/local/bin/air"),
-                PathBuf::from(shellexpand::tilde("~/.local/bin/air").to_string()),
-            ]
-        } else if cfg!(target_os = "windows") {
-            vec![PathBuf::from(
-                shellexpand::env("%LOCALAPPDATA%\\Programs\\air\\air.exe")
-                    .unwrap_or_default()
-                    .to_string(),
-            )]
-        } else {
-            vec![]
-        };
-
-        for path in fallback_paths {
-            if path.exists() {
-                return Ok(path);
-            }
-        }
-
-        anyhow::bail!(
-            "Air formatter not found. Install from: https://posit-dev.github.io/air/\n\
-             Or specify custom path via 'knot.formatter.air.path' setting"
-        )
+        crate::path_resolver::resolve_binary("air")
+            .map_err(|_| anyhow::anyhow!(
+                "Air formatter not found. Install from: https://posit-dev.github.io/air/\n\
+                 Or specify custom path via 'knot.formatter.air.path' setting"
+            ))
     }
 
     /// Format R code using Air
@@ -121,7 +98,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_format_simple_r_code() {
-        let formatter = match AirFormatter::new() {
+        let formatter = match AirFormatter::new(None) {
             Ok(f) => f,
             Err(_) => {
                 eprintln!("Air not installed, skipping test");
@@ -146,7 +123,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_format_multiline_r_code() {
-        let formatter = match AirFormatter::new() {
+        let formatter = match AirFormatter::new(None) {
             Ok(f) => f,
             Err(_) => {
                 eprintln!("Air not installed, skipping test");

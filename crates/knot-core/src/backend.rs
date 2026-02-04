@@ -29,6 +29,15 @@ impl Backend for TypstBackend {
 
         args.push(format!("echo: {}", resolved_options.echo));
 
+        // Include errors as a special argument to code-chunk (if any)
+        if !chunk.errors.is_empty() {
+            let error_list = chunk.errors.iter()
+                .map(|e| format!("\"{}\"", e.replace('\"', "\\\"")))
+                .collect::<Vec<_>>()
+                .join(", ");
+            args.push(format!("errors: ({})", error_list));
+        }
+
         if resolved_options.echo {
             let input_str = format!("[```{}\n{}```]", chunk.language, chunk.code.trim());
             args.push(format!("input: {}", input_str));
@@ -148,11 +157,28 @@ mod tests {
                 fig_format: None,
                 fig_alt: None,
             },
+            errors: vec![],
             range: dummy_range.clone(),
             code_range: dummy_range,
             start_byte: 0,
             end_byte: 0,
+            code_start_byte: 0,
+            code_end_byte: 0,
         }
+    }
+
+    #[test]
+    fn test_format_chunk_with_errors() {
+        let backend = TypstBackend::new();
+        let mut chunk = create_test_chunk("r", "1 + 1", None, true, true, None);
+        chunk.errors.push("Unknown option: 'foo'".to_string());
+        chunk.errors.push("Invalid value for 'eval'".to_string());
+        let result = ExecutionResult::Text("[1] 2".to_string());
+        let resolved = chunk.options.resolve();
+
+        let output = backend.format_chunk(&chunk, &resolved, &result);
+
+        assert!(output.contains("errors: (\"Unknown option: 'foo'\", \"Invalid value for 'eval'\")"));
     }
 
     #[test]

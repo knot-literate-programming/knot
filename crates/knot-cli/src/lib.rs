@@ -201,7 +201,7 @@ fn fix_paths_in_typst(source: &str, typ_file: &PathBuf) -> Result<String> {
     let local_files_dir = typ_dir.join(Defaults::R_FILES_DIR);
     fs::create_dir_all(&local_files_dir)?;
 
-    // Pattern to match absolute paths to .knot_cache
+    // Pattern to match absolute paths to .knot_cache (including sub-directories)
     let path_regex = Regex::new(r#""(/[^"]+\.knot_cache/[^"]+)""#)?;
 
     let result = path_regex.replace_all(source, |caps: &regex::Captures| {

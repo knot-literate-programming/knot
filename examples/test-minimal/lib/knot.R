@@ -1,5 +1,21 @@
 # R/typst.R
 
+#' Get the base directory for knot-generated files
+#'
+#' Priority:
+#' 1. KNOT_CACHE_DIR environment variable
+#' 2. tempdir() as fallback
+.get_base_dir <- function() {
+  cache_dir <- Sys.getenv("KNOT_CACHE_DIR", unset = NA)
+  if (!is.na(cache_dir) && nzchar(cache_dir)) {
+    if (!dir.exists(cache_dir)) {
+      dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
+    }
+    return(normalizePath(cache_dir))
+  }
+  return(tempdir())
+}
+
 #' Write metadata to side-channel (KNOT_METADATA_FILE)
 #'
 #' Appends metadata to the side-channel file if KNOT_METADATA_FILE is set.
@@ -68,7 +84,7 @@ typst.data.frame <- function(x, row.names = FALSE, ...) {
   # Generate unique filename based on dataframe hash
   df_hash <- digest::digest(x, algo = "sha256")
   filename <- sprintf("data_%s.csv", substr(df_hash, 1, 16))
-  filepath <- file.path(tempdir(), filename)
+  filepath <- file.path(.get_base_dir(), filename)
 
   # Write CSV to temp file
   utils::write.csv(x, filepath, row.names = row.names, ...)
@@ -92,14 +108,35 @@ typst.data.frame <- function(x, row.names = FALSE, ...) {
 #' Saves a ggplot2 plot to a file and communicates via side-channel.
 #' If not in knot environment, prints the plot normally.
 #'
+#' Dimensions are read from chunk options via environment variables set by knot:
+#' - KNOT_FIG_WIDTH: figure width in inches
+#' - KNOT_FIG_HEIGHT: figure height in inches
+#' - KNOT_FIG_DPI: resolution in DPI
+#' - KNOT_FIG_FORMAT: output format (svg, png, pdf)
+#'
+#' These can be overridden by explicitly passing arguments.
+#'
 #' @param x A ggplot2 object
-#' @param width Plot width in inches (default: 7)
-#' @param height Plot height in inches (default: 5)
-#' @param dpi Resolution in dots per inch (default: 300)
-#' @param format Output format: "svg", "png", or "pdf" (default: "svg")
+#' @param width Plot width in inches (default: from KNOT_FIG_WIDTH or 7)
+#' @param height Plot height in inches (default: from KNOT_FIG_HEIGHT or 5)
+#' @param dpi Resolution in dots per inch (default: from KNOT_FIG_DPI or 300)
+#' @param format Output format: "svg", "png", or "pdf" (default: from KNOT_FIG_FORMAT or "svg")
 #' @param ... Additional arguments passed to ggsave
 #' @export
-typst.ggplot <- function(x, width = 7, height = 5, dpi = 300, format = "svg", ...) {
+typst.ggplot <- function(x, width = NULL, height = NULL, dpi = NULL, format = NULL, ...) {
+  # Read defaults from environment variables (set by knot from chunk options)
+  if (is.null(width)) {
+    width <- as.numeric(Sys.getenv("KNOT_FIG_WIDTH", "7"))
+  }
+  if (is.null(height)) {
+    height <- as.numeric(Sys.getenv("KNOT_FIG_HEIGHT", "5"))
+  }
+  if (is.null(dpi)) {
+    dpi <- as.integer(Sys.getenv("KNOT_FIG_DPI", "300"))
+  }
+  if (is.null(format)) {
+    format <- Sys.getenv("KNOT_FIG_FORMAT", "svg")
+  }
   if (!requireNamespace("ggplot2", quietly = TRUE)) {
     stop("ggplot2 package required for typst.ggplot(). Please install it.")
   }
@@ -107,7 +144,7 @@ typst.ggplot <- function(x, width = 7, height = 5, dpi = 300, format = "svg", ..
   # Generate unique filename based on plot object hash
   plot_hash <- digest::digest(x, algo = "sha256")
   filename <- sprintf("plot_%s.%s", substr(plot_hash, 1, 16), format)
-  filepath <- file.path(tempdir(), filename)
+  filepath <- file.path(.get_base_dir(), filename)
 
   # Save plot using ggsave
   ggplot2::ggsave(
@@ -134,3 +171,81 @@ typst.ggplot <- function(x, width = 7, height = 5, dpi = 300, format = "svg", ..
   invisible(x)
 }
 
+
+#' Convert recorded base R plot to Typst image
+#'
+#' Saves a recorded plot (from recordPlot()) to a file and communicates via side-channel.
+#' If not in knot environment, prints the plot normally.
+#'
+#' Dimensions are read from chunk options via environment variables set by knot:
+#' - KNOT_FIG_WIDTH: figure width in inches
+#' - KNOT_FIG_HEIGHT: figure height in inches
+#' - KNOT_FIG_DPI: resolution in DPI
+#' - KNOT_FIG_FORMAT: output format (svg, png, pdf)
+#'
+#' These can be overridden by explicitly passing arguments.
+#'
+#' Usage:
+#'   plot(1:10)
+#'   lines(1:10 * 2, col = "red")
+#'   p <- recordPlot()
+#'   typst(p)
+#'
+#' @param x A recordedplot object (from recordPlot())
+#' @param width Plot width in inches (default: from KNOT_FIG_WIDTH or 7)
+#' @param height Plot height in inches (default: from KNOT_FIG_HEIGHT or 5)
+#' @param dpi Resolution in dots per inch (default: from KNOT_FIG_DPI or 300)
+#' @param format Output format: "svg", "png", or "pdf" (default: from KNOT_FIG_FORMAT or "svg")
+#' @param ... Additional arguments (ignored)
+#' @export
+typst.recordedplot <- function(x, width = NULL, height = NULL, dpi = NULL, format = NULL, ...) {
+  # Read defaults from environment variables (set by knot from chunk options)
+  if (is.null(width)) {
+    width <- as.numeric(Sys.getenv("KNOT_FIG_WIDTH", "7"))
+  }
+  if (is.null(height)) {
+    height <- as.numeric(Sys.getenv("KNOT_FIG_HEIGHT", "5"))
+  }
+  if (is.null(dpi)) {
+    dpi <- as.integer(Sys.getenv("KNOT_FIG_DPI", "300"))
+  }
+  if (is.null(format)) {
+    format <- Sys.getenv("KNOT_FIG_FORMAT", "svg")
+  }
+
+  # Generate unique filename based on plot object hash
+  plot_hash <- digest::digest(x, algo = "sha256")
+  filename <- sprintf("plot_%s.%s", substr(plot_hash, 1, 16), format)
+  filepath <- file.path(.get_base_dir(), filename)
+
+  # Open device with correct dimensions
+  if (format == "svg") {
+    svg(filepath, width = width, height = height)
+  } else if (format == "png") {
+    png(filepath, width = width * dpi, height = height * dpi, res = dpi, units = "px")
+  } else if (format == "pdf") {
+    pdf(filepath, width = width, height = height)
+  } else {
+    stop("Unsupported format: ", format, ". Use 'svg', 'png', or 'pdf'.")
+  }
+
+  # Replay the recorded plot
+  tryCatch({
+    replayPlot(x)
+  }, finally = {
+    dev.off()
+  })
+
+  # Normalize path for cross-platform compatibility
+  filepath_normalized <- normalizePath(filepath)
+
+  # Write metadata via side-channel
+  metadata <- list(type = "plot", path = filepath_normalized, format = format)
+
+  if (!.write_metadata(metadata)) {
+    # Not in knot environment, print normally
+    print(x)
+  }
+
+  invisible(x)
+}
