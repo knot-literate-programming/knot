@@ -17,8 +17,8 @@ pub async fn handle_completion(state: &ServerState, params: CompletionParams) ->
         }
     };
 
-    // 2. Determine if we are in a chunk
-    if mapper.is_position_in_chunk(pos) {
+    // 2. Determine if we are in a chunk (but not on a fence line)
+    if mapper.is_position_in_chunk(pos) && !mapper.is_position_on_fence(pos) {
         // Knot (R chunk) Completion
         let lines: Vec<&str> = text.lines().collect();
         let line_idx = pos.line as usize;
@@ -184,32 +184,128 @@ fn get_r_token_at_pos(text: &str, pos: Position) -> Option<String> {
 }
 
 async fn get_r_completion(state: &ServerState, uri: &Url, token: &str) -> Option<CompletionResponse> {
+    // Sync with cache if snapshot has changed (e.g., knot watch updated it)
+    sync_cache_if_needed(state, uri).await;
+
     // Acquire write lock to get mutable access to executor
     let mut executors = state.r_executors.write().await;
     if let Some(executor) = executors.get_mut(uri) {
-        // Construct R code for completion
-        // Use utils::apropos for basic completion of global objects
-        // TODO: Handle $ and :: for specific member completion
-        let code = format!(
-            r#"try(cat(paste(utils::apropos("^{}"), collapse="\n")), silent=TRUE)"#, 
-            token.replace('"', "\\\"")
-        );
-        
-        eprintln!("DEBUG LSP: Completion query for '{}'", token);
+        // Check if this is a $ completion (e.g., df$col)
+        let code = if let Some(dollar_pos) = token.rfind('$') {
+            // Extract object name before $ and prefix after $
+            let obj_name = &token[..dollar_pos];
+            let prefix = &token[dollar_pos + 1..];
+
+            // Get names of the object (columns for df, elements for list)
+            format!(
+                r#"{{
+                    if (exists("{}")) {{
+                        obj <- get("{}")
+                        obj_names <- names(obj)
+                        if (!is.null(obj_names)) {{
+                            matches <- obj_names[startsWith(obj_names, "{}")]
+                            if (length(matches) > 0) {{
+                                cat(paste(head(matches, 50), collapse="\n"), "\n")
+                            }} else {{
+                                cat("")
+                            }}
+                        }} else {{
+                            cat("")
+                        }}
+                    }} else {{
+                        cat("")
+                    }}
+                }}"#,
+                obj_name.replace('"', "\\\""),
+                obj_name.replace('"', "\\\""),
+                prefix.replace('"', "\\\"")
+            )
+        } else {
+            // Regular completion using apropos for global objects
+            format!(
+                r#"{{
+                    matches <- utils::apropos("^{}")
+                    if (length(matches) > 0) {{
+                        cat(paste(head(matches, 50), collapse="\n"), "\n")
+                    }} else {{
+                        cat("")
+                    }}
+                }}"#,
+                token.replace('"', "\\\"")
+            )
+        };
+
         if let Ok(output) = executor.query(&code) {
-            eprintln!("DEBUG LSP: Completion result len: {}", output.len());
-            let items = output.lines()
+            // Determine if this is $ completion to use appropriate icon
+            let is_dollar_completion = token.contains('$');
+            let kind = if is_dollar_completion {
+                CompletionItemKind::FIELD // Column/element icon
+            } else {
+                CompletionItemKind::FUNCTION // Function icon
+            };
+
+            let items: Vec<CompletionItem> = output.lines()
                 .filter(|l| !l.trim().is_empty())
                 .map(|name| CompletionItem {
                     label: name.trim().to_string(),
-                    kind: Some(CompletionItemKind::FUNCTION), // Default to function for now
+                    kind: Some(kind),
                     ..Default::default()
                 })
                 .collect();
-            return Some(CompletionResponse::Array(items));
+
+            if !items.is_empty() {
+                return Some(CompletionResponse::Array(items));
+            }
         }
     }
     None
+}
+
+/// Sync with cache if the snapshot has changed (e.g., from knot watch)
+async fn sync_cache_if_needed(state: &ServerState, uri: &Url) {
+    use knot_core::config::Config;
+    use knot_core::get_cache_dir;
+    use knot_core::cache::Cache;
+    use std::path::Path;
+
+    let path = match uri.to_file_path() {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+
+    let start_dir = path.parent().unwrap_or(Path::new("."));
+    let (_config, project_root) = match Config::find_and_load(start_dir) {
+        Ok(res) => res,
+        Err(_) => return,
+    };
+
+    let file_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("main");
+    let cache_dir = get_cache_dir(&project_root, file_stem);
+
+    if let Ok(cache) = Cache::new(cache_dir.clone()) {
+        if let Some(last_chunk) = cache.metadata.chunks.iter().max_by_key(|c| c.index) {
+            let snapshot_hash = &last_chunk.hash;
+
+            // Check if this snapshot is different from the last loaded one
+            let should_reload = {
+                let loaded_hashes = state.loaded_snapshot_hash.read().await;
+                loaded_hashes.get(uri).map_or(true, |h| h != snapshot_hash)
+            };
+
+            if should_reload {
+                let snapshot_path = cache_dir.join(format!("snapshot_{}.RData", snapshot_hash));
+                if snapshot_path.exists() {
+                    let mut executors = state.r_executors.write().await;
+                    if let Some(executor) = executors.get_mut(uri) {
+                        if executor.load_session(&snapshot_path).is_ok() {
+                            drop(executors);
+                            state.loaded_snapshot_hash.write().await.insert(uri.clone(), snapshot_hash.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]

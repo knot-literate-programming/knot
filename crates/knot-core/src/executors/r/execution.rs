@@ -225,9 +225,6 @@ pub fn load_session(process: &mut RProcess, snapshot_file: &Path) -> Result<()> 
 /// Unlike execute(), this does not use the side-channel and returns the raw output string.
 /// Useful for LSP queries (completion, help) and constant object operations.
 pub fn query(process: &mut RProcess, code: &str) -> Result<String> {
-    // Debug log
-    eprintln!("DEBUG CORE: R query: {}", code);
-
     let stdin = process
         .stdin
         .as_mut()
@@ -244,11 +241,27 @@ pub fn query(process: &mut RProcess, code: &str) -> Result<String> {
     if !stderr_output.trim().is_empty() {
         // Log warning but don't fail, return what we have
         log::warn!("R query stderr: {}", stderr_output.trim());
-        eprintln!("DEBUG CORE: R stderr: {}", stderr_output.trim());
-    } else {
-        eprintln!("DEBUG CORE: R stdout len: {}", stdout_output.len());
     }
 
     Ok(stdout_output)
+}
+
+/// Get the SHA256 hash of an R object using the digest package
+pub fn get_object_hash(process: &mut RProcess, object_name: &str) -> Result<String> {
+    // We assume digest package is available (it's a dependency of knot-r-package)
+    let code = format!(
+        r#"try(cat(digest::digest({}, algo="sha256")), silent=TRUE)"#,
+        object_name
+    );
+    
+    // Use query mechanism (no side-channel needed for a simple hash string)
+    let output = query(process, &code)?;
+    
+    // Check for R errors in output (since we used try(..., silent=TRUE), errors won't be in stderr)
+    if output.trim().is_empty() || output.contains("Error") {
+        anyhow::bail!("Failed to get hash for object '{}' (it may not exist)", object_name);
+    }
+    
+    Ok(output.trim().to_string())
 }
 

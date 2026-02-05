@@ -16,6 +16,20 @@ pub fn get_diagnostics(text: &str) -> Vec<Diagnostic> {
     // Try to parse the document
     match Document::parse(text.to_string()) {
         Ok(doc) => {
+            // Check for global document errors
+            for error in doc.errors {
+                diagnostics.push(Diagnostic {
+                    range: Range {
+                        start: Position { line: 0, character: 0 },
+                        end: Position { line: 0, character: 1 },
+                    },
+                    severity: Some(DiagnosticSeverity::ERROR),
+                    source: Some("knot".to_string()),
+                    message: error,
+                    ..Diagnostic::default()
+                });
+            }
+
             // Check for errors in chunks
             for chunk in doc.chunks {
                 for error in chunk.errors {

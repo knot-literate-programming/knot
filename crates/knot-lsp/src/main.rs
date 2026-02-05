@@ -83,6 +83,7 @@ impl LanguageServer for KnotLanguageServer {
                         "#".to_string(),
                         "|".to_string(),
                         ":".to_string(),
+                        "$".to_string(), // Trigger completion for df$ (column names)
                     ]),
                     ..Default::default()
                 }),
@@ -215,6 +216,9 @@ impl LanguageServer for KnotLanguageServer {
             }
         }
 
+        // Sync with cache to restore previous R session state (only on open, not on every change)
+        self.sync_with_cache(&uri).await;
+
         // Trigger diagnostics on file open
         self.on_change(uri, text).await;
     }
@@ -300,10 +304,7 @@ impl LanguageServer for KnotLanguageServer {
 
 impl KnotLanguageServer {
     async fn on_change(&self, uri: Url, text: String) {
-        // 1. Sync with cache if possible (load last snapshot)
-        self.sync_with_cache(&uri).await;
-
-        // 2. Get knot-specific diagnostics (R chunks parsing)
+        // 1. Get knot-specific diagnostics (R chunks parsing)
         let knot_diagnostics = diagnostics::get_diagnostics(&text);
 
         // 2. Cache knot diagnostics
@@ -319,7 +320,7 @@ impl KnotLanguageServer {
 
         // 4. Transform .knot to .typ placeholder for tinymist
         let typ_content = transform_to_typst(&text);
-        
+
         // 5. Create and store PositionMapper
         let mapper = PositionMapper::new(&text, &typ_content);
         self.state.mappers.write().await.insert(uri.clone(), mapper);
@@ -393,19 +394,32 @@ impl KnotLanguageServer {
 
         let file_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("main");
         let cache_dir = get_cache_dir(&project_root, file_stem);
-        
+
         // 2. Load metadata to find the latest snapshot
         if let Ok(cache) = Cache::new(cache_dir.clone()) {
             if let Some(last_chunk) = cache.metadata.chunks.iter().max_by_key(|c| c.index) {
-                let snapshot_path = cache_dir.join(format!("snapshot_{}.RData", last_chunk.hash));
-                if snapshot_path.exists() {
-                    // 3. Load this snapshot into our live R session
-                    let mut executors = self.state.r_executors.write().await;
-                    if let Some(executor) = executors.get_mut(uri) {
-                        if let Err(e) = executor.load_session(&snapshot_path) {
-                            self.client.log_message(MessageType::WARNING, format!("Failed to load R snapshot: {}", e)).await;
-                        } else {
-                            self.client.log_message(MessageType::INFO, format!("Synced R session with snapshot for chunk {}", last_chunk.index)).await;
+                let snapshot_hash = &last_chunk.hash;
+
+                // 3. Check if this snapshot is different from the last loaded one
+                let should_reload = {
+                    let loaded_hashes = self.state.loaded_snapshot_hash.read().await;
+                    loaded_hashes.get(uri).map_or(true, |h| h != snapshot_hash)
+                };
+
+                if should_reload {
+                    let snapshot_path = cache_dir.join(format!("snapshot_{}.RData", snapshot_hash));
+                    if snapshot_path.exists() {
+                        // 4. Load this snapshot into our live R session
+                        let mut executors = self.state.r_executors.write().await;
+                        if let Some(executor) = executors.get_mut(uri) {
+                            if let Err(e) = executor.load_session(&snapshot_path) {
+                                self.client.log_message(MessageType::WARNING, format!("Failed to load R snapshot: {}", e)).await;
+                            } else {
+                                // 5. Update the loaded hash
+                                drop(executors); // Release executor lock
+                                self.state.loaded_snapshot_hash.write().await.insert(uri.clone(), snapshot_hash.clone());
+                                self.client.log_message(MessageType::INFO, format!("Synced R session with snapshot for chunk {} (hash: {})", last_chunk.index, &snapshot_hash[..8])).await;
+                            }
                         }
                     }
                 }

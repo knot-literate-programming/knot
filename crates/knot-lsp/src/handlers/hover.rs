@@ -19,22 +19,20 @@ pub async fn handle_hover(state: &ServerState, params: HoverParams) -> Result<Op
 
     // 2. Determine if we are in a chunk
     if mapper.is_position_in_chunk(pos) {
-        // Check if we're hovering specifically over the chunk fence (header or closing)
-        let doc = match Document::parse(text.clone()) {
-            Ok(doc) => doc,
-            Err(_) => return Ok(None),
-        };
+        // If on fence line, show chunk metadata (not Typst hover)
+        if mapper.is_position_on_fence(pos) {
+            let doc = match Document::parse(text.clone()) {
+                Ok(doc) => doc,
+                Err(_) => return Ok(None),
+            };
 
-        let line = pos.line as usize;
-        let current_chunk = doc
-            .chunks
-            .iter()
-            .find(|c| c.range.start.line <= line && c.range.end.line >= line);
+            let line = pos.line as usize;
+            let current_chunk = doc
+                .chunks
+                .iter()
+                .find(|c| c.range.start.line <= line && c.range.end.line >= line);
 
-        if let Some(chunk) = current_chunk {
-            // Only show chunk metadata if hovering over the fence lines
-            // (chunk.range.start.line is the ```{r line, chunk.range.end.line is the closing ```)
-            if line == chunk.range.start.line || line == chunk.range.end.line {
+            if let Some(chunk) = current_chunk {
                 let name = chunk.name.as_deref().unwrap_or("unnamed");
                 let mut content = format!("### Knot Chunk: `{}`\n\n", name);
                 content.push_str(&format!("- **Language**: `{}`\n", chunk.language));
@@ -71,16 +69,26 @@ pub async fn handle_hover(state: &ServerState, params: HoverParams) -> Result<Op
                     }),
                 }));
             }
-            
-            // We are hovering over R code content -> Intelligent R Hover
-            if let Some(token) = get_r_token_at_pos(&text, pos) {
-                if !token.is_empty() {
-                    return Ok(get_r_help(state, uri, &token).await);
-                }
-            }
-            
             return Ok(None);
         }
+
+        // Not on fence line, so we're in chunk content (option lines or R code)
+        let line = pos.line as usize;
+        let lines: Vec<&str> = text.lines().collect();
+
+        // Check if we are on an option line (#|)
+        if line < lines.len() && lines[line].trim_start().starts_with("#|") {
+            return Ok(None);
+        }
+
+        // We are hovering over R code content -> Intelligent R Hover
+        if let Some(token) = get_r_token_at_pos(&text, pos) {
+            if !token.is_empty() {
+                return Ok(get_r_help(state, uri, &token).await);
+            }
+        }
+
+        return Ok(None);
     } else {
         // Typst Hover (forward to tinymist)
         if let Some(typ_pos) = mapper.knot_to_typ_position(pos) {
@@ -145,7 +153,7 @@ fn get_r_token_at_pos(text: &str, pos: Position) -> Option<String> {
     // Scan backwards
     while start > 0 {
         let c = chars[start - 1];
-        if c.is_alphanumeric() || c == '_' || c == '.' || c == '$' || c == ':' {
+        if c.is_alphanumeric() || c == '_' || c == '.' {
             start -= 1;
         } else {
             break;
@@ -155,7 +163,7 @@ fn get_r_token_at_pos(text: &str, pos: Position) -> Option<String> {
     // Scan forwards
     while end < chars.len() {
         let c = chars[end];
-        if c.is_alphanumeric() || c == '_' || c == '.' || c == '$' || c == ':' {
+        if c.is_alphanumeric() || c == '_' || c == '.' {
             end += 1;
         } else {
             break;
@@ -170,30 +178,40 @@ fn get_r_token_at_pos(text: &str, pos: Position) -> Option<String> {
 }
 
 async fn get_r_help(state: &ServerState, uri: &Url, token: &str) -> Option<Hover> {
+    // Sync with cache if snapshot has changed (e.g., knot watch updated it)
+    sync_cache_if_needed(state, uri).await;
+
     let mut executors = state.r_executors.write().await;
     if let Some(executor) = executors.get_mut(uri) {
-        // Robust R help query:
-        // 1. Try help() on token
-        // 2. If length 0, try with try.all.packages = TRUE
-        // 3. Capture output via tools::Rd2txt
+        // Robust R help query using a simpler approach:
+        // 1. Write help to a temp file directly (avoids capture.output issues)
+        // 2. Read back the file content
         let code = format!(
-            r#"tryCatch({{
+            r#"{{
                 topic <- "{0}"
                 h <- utils::help(topic)
                 if (length(h) == 0) h <- utils::help(topic, try.all.packages = TRUE)
                 if (length(h) > 0) {{
-                    cat(paste(utils::capture.output(tools::Rd2txt(h[1])), collapse="\n"))
+                    tf <- tempfile()
+                    tryCatch({{
+                        rd <- utils:::.getHelpFile(h)
+                        tools::Rd2txt(rd, out = tf, options = list(underline_titles = FALSE))
+                        cat(readLines(tf, warn = FALSE), sep = "\n")
+                    }}, error = function(e) {{
+                        cat("Error rendering help:", as.character(e), "\n")
+                    }}, finally = {{
+                        if (file.exists(tf)) unlink(tf)
+                    }})
+                }} else {{
+                    cat("No help found for '{0}'\n")
                 }}
-            }}, error = function(e) {{ cat(as.character(e)) }})"#, 
+            }}"#,
             token.replace('"', "\\\"")
         );
-        
-        eprintln!("DEBUG LSP: Hover query for '{}'", token);
+
         if let Ok(output) = executor.query(&code) {
-            eprintln!("DEBUG LSP: Hover result len: {}", output.len());
             if !output.trim().is_empty() {
-                // Wrap in Markdown code block or just text
-                // Rd2txt produces mostly plain text with some formatting
+                // Wrap in Markdown code block
                 return Some(Hover {
                     contents: HoverContents::Markup(MarkupContent {
                         kind: MarkupKind::Markdown,
@@ -205,6 +223,53 @@ async fn get_r_help(state: &ServerState, uri: &Url, token: &str) -> Option<Hover
         }
     }
     None
+}
+
+/// Sync with cache if the snapshot has changed (e.g., from knot watch)
+async fn sync_cache_if_needed(state: &ServerState, uri: &Url) {
+    use knot_core::config::Config;
+    use knot_core::get_cache_dir;
+    use knot_core::cache::Cache;
+    use std::path::Path;
+
+    let path = match uri.to_file_path() {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+
+    let start_dir = path.parent().unwrap_or(Path::new("."));
+    let (_config, project_root) = match Config::find_and_load(start_dir) {
+        Ok(res) => res,
+        Err(_) => return,
+    };
+
+    let file_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("main");
+    let cache_dir = get_cache_dir(&project_root, file_stem);
+
+    if let Ok(cache) = Cache::new(cache_dir.clone()) {
+        if let Some(last_chunk) = cache.metadata.chunks.iter().max_by_key(|c| c.index) {
+            let snapshot_hash = &last_chunk.hash;
+
+            // Check if this snapshot is different from the last loaded one
+            let should_reload = {
+                let loaded_hashes = state.loaded_snapshot_hash.read().await;
+                loaded_hashes.get(uri).map_or(true, |h| h != snapshot_hash)
+            };
+
+            if should_reload {
+                let snapshot_path = cache_dir.join(format!("snapshot_{}.RData", snapshot_hash));
+                if snapshot_path.exists() {
+                    let mut executors = state.r_executors.write().await;
+                    if let Some(executor) = executors.get_mut(uri) {
+                        if executor.load_session(&snapshot_path).is_ok() {
+                            drop(executors);
+                            state.loaded_snapshot_hash.write().await.insert(uri.clone(), snapshot_hash.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
