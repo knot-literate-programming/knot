@@ -1,5 +1,5 @@
 use anyhow::Result;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub mod r;
 pub mod side_channel;
@@ -29,4 +29,33 @@ pub struct GraphicsOptions {
 pub trait LanguageExecutor {
     fn initialize(&mut self) -> Result<()>;
     fn execute(&mut self, code: &str, graphics: &GraphicsOptions) -> Result<ExecutionResult>;
+}
+
+/// Trait for managing constant objects (cache optimization)
+///
+/// Allows language executors to save/load large immutable objects separately
+/// from environment snapshots to reduce cache size.
+pub trait ConstantObjectHandler {
+    /// Compute the hash of an object in the language environment
+    ///
+    /// Uses xxHash64 for speed. Returns hex string representation.
+    fn hash_object(&mut self, object_name: &str) -> Result<String>;
+
+    /// Save a constant object to content-addressed storage
+    ///
+    /// Stores the object at: cache_dir/objects/{hash}.{ext}
+    fn save_constant(&mut self, object_name: &str, hash: &str, cache_dir: &Path) -> Result<()>;
+
+    /// Load a constant object from content-addressed storage
+    ///
+    /// Restores the object into the language environment
+    fn load_constant(&mut self, object_name: &str, hash: &str, cache_dir: &Path) -> Result<()>;
+
+    /// Remove an object from the language environment
+    ///
+    /// Used to exclude constant objects from environment snapshots
+    fn remove_from_env(&mut self, object_name: &str) -> Result<()>;
+
+    /// File extension for serialized objects (.rds, .pkl, .jls)
+    fn object_extension(&self) -> &'static str;
 }

@@ -223,7 +223,7 @@ pub fn load_session(process: &mut RProcess, snapshot_file: &Path) -> Result<()> 
 /// Execute lightweight R code and return raw stdout
 ///
 /// Unlike execute(), this does not use the side-channel and returns the raw output string.
-/// Useful for LSP queries (completion, help).
+/// Useful for LSP queries (completion, help) and constant object operations.
 pub fn query(process: &mut RProcess, code: &str) -> Result<String> {
     // Debug log
     eprintln!("DEBUG CORE: R query: {}", code);
