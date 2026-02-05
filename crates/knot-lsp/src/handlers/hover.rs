@@ -211,7 +211,7 @@ async fn get_r_help(state: &ServerState, uri: &Url, token: &str) -> Option<Hover
                     token.replace('"', "\\\"")
                 );
 
-                executor.execute_inline(&code).ok()
+                executor.query(&code).ok()
             } else {
                 None
             }
@@ -221,15 +221,12 @@ async fn get_r_help(state: &ServerState, uri: &Url, token: &str) -> Option<Hover
     };
 
     if let Some(output) = output {
-         // Remove potential backticks from execute_inline formatting
-        let clean_output = output.trim().trim_matches('`').trim();
-
-        if !clean_output.is_empty() {
+        if !output.trim().is_empty() {
             // Wrap in Markdown code block
             return Some(Hover {
                 contents: HoverContents::Markup(MarkupContent {
                     kind: MarkupKind::Markdown,
-                    value: format!("```text\n{}\n```", clean_output),
+                    value: format!("```text\n{}\n```", output.trim()),
                 }),
                 range: None,
             });
@@ -313,7 +310,7 @@ mod tests {
         // Insert mapper (needs typ_content, use same text for simplicity in tests)
         let mapper = PositionMapper::new(text, text);
         {
-            let mut mappers = state.mappers.read().await;
+            let mut mappers = state.mappers.write().await;
             mappers.insert(url.clone(), mapper);
         }
 

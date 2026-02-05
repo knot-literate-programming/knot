@@ -32,6 +32,8 @@ pub trait LanguageExecutor: Send + Sync {
     fn initialize(&mut self) -> Result<()>;
     fn execute(&mut self, code: &str, graphics: &GraphicsOptions) -> Result<ExecutionResult>;
     fn execute_inline(&mut self, code: &str) -> Result<String>;
+    /// Execute a lightweight query and return raw stdout (no formatting)
+    fn query(&mut self, code: &str) -> Result<String>;
 }
 
 /// Combined trait for language executors that support caching and constant objects

@@ -83,7 +83,7 @@ mod tests {
         // Insert mapper
         let mapper = PositionMapper::new(text, text);
         {
-            let mut mappers = state.mappers.read().await;
+            let mut mappers = state.mappers.write().await;
             mappers.insert(url.clone(), mapper);
         }
 

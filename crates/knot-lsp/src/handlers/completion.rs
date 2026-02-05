@@ -238,7 +238,7 @@ async fn get_r_completion(state: &ServerState, uri: &Url, token: &str) -> Option
                     )
                 };
 
-                executor.execute_inline(&code).ok()
+                executor.query(&code).ok()
             } else {
                 None
             }
@@ -248,9 +248,6 @@ async fn get_r_completion(state: &ServerState, uri: &Url, token: &str) -> Option
     };
 
     if let Some(output) = output {
-        // Remove potential backticks from execute_inline formatting if any
-        let clean_output = output.trim().trim_matches('`').trim();
-
         // Determine if this is $ completion to use appropriate icon
         let is_dollar_completion = token.contains('$');
         let kind = if is_dollar_completion {
@@ -259,7 +256,7 @@ async fn get_r_completion(state: &ServerState, uri: &Url, token: &str) -> Option
             CompletionItemKind::FUNCTION // Function icon
         };
 
-        let items: Vec<CompletionItem> = clean_output.lines()
+        let items: Vec<CompletionItem> = output.lines()
             .filter(|l| !l.trim().is_empty())
             .map(|name| CompletionItem {
                 label: name.trim().to_string(),

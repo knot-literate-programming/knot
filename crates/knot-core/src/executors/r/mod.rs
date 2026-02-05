@@ -99,6 +99,10 @@ impl LanguageExecutor for RExecutor {
     fn execute_inline(&mut self, code: &str) -> Result<String> {
         execution::execute_inline(self, code)
     }
+
+    fn query(&mut self, code: &str) -> Result<String> {
+        execution::query(&mut self.process, code)
+    }
 }
 
 impl KnotExecutor for RExecutor {
