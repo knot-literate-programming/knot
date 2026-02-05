@@ -154,8 +154,10 @@ fn metadata_to_execution_result(
 
 /// Save the current R session to a snapshot file
 ///
-/// Executes `save.image(file)` in the R process to save all objects
-/// in the global environment to a .RData file.
+/// Executes `save.image(file)` to save all objects in the global environment
+/// to a .RData file, and also saves the list of loaded packages to a separate
+/// .rds file. This ensures that when the session is restored, both objects
+/// and packages are available.
 pub fn save_session(process: &mut RProcess, snapshot_file: &Path) -> Result<()> {
     let stdin = process
         .stdin
@@ -168,8 +170,20 @@ pub fn save_session(process: &mut RProcess, snapshot_file: &Path) -> Result<()> 
         .context("Invalid path for snapshot file")?
         .replace('\\', "\\\\");
 
-    // Execute save.image()
+    // Derive packages file path (snapshot.RData -> snapshot_packages.rds)
+    let packages_path = snapshot_file
+        .with_extension("")
+        .to_str()
+        .context("Invalid path for packages file")?
+        .replace('\\', "\\\\");
+    let packages_file = format!("{}_packages.rds", packages_path);
+
+    // Execute save.image() to save objects
     writeln!(stdin, "save.image(file = \"{}\")", path_str)?;
+
+    // Also save loaded packages (excluding base packages that are always loaded)
+    writeln!(stdin, "saveRDS(.packages(), \"{}\")", packages_file)?;
+
     writeln!(stdin, "cat('{}\\n', file=stdout())", BOUNDARY)?;
     writeln!(stdin, "cat('{}\\n', file=stderr())", BOUNDARY)?;
     stdin.flush()?;
@@ -183,13 +197,16 @@ pub fn save_session(process: &mut RProcess, snapshot_file: &Path) -> Result<()> 
     }
 
     log::debug!("💾 Saved R session to: {}", snapshot_file.display());
+    log::debug!("📦 Saved loaded packages to: {}", packages_file);
     Ok(())
 }
 
 /// Load an R session from a snapshot file
 ///
-/// Executes `load(file, envir = .GlobalEnv)` in the R process to restore
-/// all objects from a previously saved .RData file.
+/// First reloads all packages that were loaded when the session was saved,
+/// then executes `load(file, envir = .GlobalEnv)` to restore all objects
+/// from the .RData file. This ensures the complete R environment is restored,
+/// including both packages and objects.
 pub fn load_session(process: &mut RProcess, snapshot_file: &Path) -> Result<()> {
     let stdin = process
         .stdin
@@ -202,8 +219,23 @@ pub fn load_session(process: &mut RProcess, snapshot_file: &Path) -> Result<()> 
         .context("Invalid path for snapshot file")?
         .replace('\\', "\\\\");
 
-    // Execute load() with envir = .GlobalEnv to load into global environment
+    // Derive packages file path (snapshot.RData -> snapshot_packages.rds)
+    let packages_path = snapshot_file
+        .with_extension("")
+        .to_str()
+        .context("Invalid path for packages file")?
+        .replace('\\', "\\\\");
+    let packages_file = format!("{}_packages.rds", packages_path);
+
+    // First, reload packages if the packages file exists
+    writeln!(stdin, "if (file.exists(\"{}\")) {{", packages_file)?;
+    writeln!(stdin, "  pkgs <- readRDS(\"{}\")", packages_file)?;
+    writeln!(stdin, "  invisible(lapply(pkgs, library, character.only = TRUE))")?;
+    writeln!(stdin, "}}")?;
+
+    // Then load the objects with envir = .GlobalEnv to load into global environment
     writeln!(stdin, "load(file = \"{}\", envir = .GlobalEnv)", path_str)?;
+
     writeln!(stdin, "cat('{}\\n', file=stdout())", BOUNDARY)?;
     writeln!(stdin, "cat('{}\\n', file=stderr())", BOUNDARY)?;
     stdin.flush()?;
