@@ -208,7 +208,7 @@ fn watch() -> Result<()> {
 
     let mut watcher = RecommendedWatcher::new(
         tx,
-        NotifyConfig::default().with_poll_interval(Duration::from_millis(200))
+        NotifyConfig::default().with_poll_interval(Duration::from_millis(100))
     ).context("Failed to create file watcher")?;
 
     // Watch the project root directory (simpler and more robust)
@@ -223,7 +223,7 @@ fn watch() -> Result<()> {
 
     // Step 8: Event loop
     let mut last_rebuild = std::time::Instant::now();
-    let debounce_duration = Duration::from_millis(300);
+    let debounce_duration = Duration::from_millis(150);
 
     loop {
         match rx.recv() {
