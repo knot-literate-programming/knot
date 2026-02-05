@@ -104,6 +104,10 @@ impl KnotExecutor for PythonExecutor {
         self.query(&code)?;
         Ok(())
     }
+
+    fn snapshot_extension(&self) -> &'static str {
+        "pkl"
+    }
 }
 
 impl ConstantObjectHandler for PythonExecutor {

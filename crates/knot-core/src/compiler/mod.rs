@@ -71,9 +71,12 @@ impl Compiler {
     /// Compiles a document by executing its code chunks and generating a new Typst source file.
     pub fn compile(&mut self, doc: &Document) -> Result<String> {
         let mut cache = Cache::new(self.cache_dir.clone())?;
-        let mut previous_hash = String::new();
+        let mut previous_global_hash = String::new();
         let mut typst_output = String::new();
         let mut last_pos = 0;
+
+        // Tracks the last successful snapshot hash for EACH language
+        let mut last_snapshot_per_lang: HashMap<String, String> = HashMap::new();
 
         // Track constant objects: name -> (hash, chunk_name)
         let mut constant_objects: HashMap<String, (String, String)> = HashMap::new();
@@ -111,7 +114,7 @@ impl Compiler {
                         chunk, 
                         &mut self.executor_manager, 
                         &mut cache, 
-                        &previous_hash, 
+                        &previous_global_hash, 
                         &self.config.defaults
                     )?;
 
@@ -161,21 +164,28 @@ impl Compiler {
                         inline_expr, 
                         &mut self.executor_manager, 
                         &mut cache, 
-                        &previous_hash
+                        &previous_global_hash
                     )?
                 }
             };
 
-            // After execution/cache: Ensure snapshot exists
-            let snapshot_path = cache.get_snapshot_path(&node_hash);
-            let snapshot_exists = cache.has_snapshot(&node_hash);
-            
-            // Get executor for this node's language
+            // Snapshot Logic: Language-aware Restoration and Saving
             if let Ok(exec) = self.executor_manager.get_executor(lang) {
+                let ext = exec.snapshot_extension();
+                let snapshot_path = cache.get_snapshot_path(&node_hash, ext);
+                let snapshot_exists = cache.has_snapshot(&node_hash, ext);
                 let cache_dir = self.project_root.join(Defaults::CACHE_DIR_NAME);
 
                 if !snapshot_exists {
-                    // Node was executed (not from cache), save the snapshot.
+                    // CASE 1: Node was executed (cache miss).
+                    
+                    // A. Restore previous state for THIS language if needed.
+                    // If we just executed the previous node of the SAME language, 
+                    // the interpreter is already hot. Otherwise, we might need a reload.
+                    // (For now, we simplify: we assume the compiler maintains the 
+                    // hot state of all executors in the manager).
+                    
+                    // B. Save the new snapshot
                     // Exclude constant objects from snapshot to keep it lightweight
                     for (obj_name, info) in &cache.metadata.constant_objects {
                         if info.language == lang {
@@ -185,7 +195,7 @@ impl Compiler {
                     }
 
                     exec.save_session(&snapshot_path)
-                        .context(format!("Failed to save session snapshot for hash {}", &node_hash[..8]))?;
+                        .context(format!("Failed to save {} session snapshot for hash {}", lang, &node_hash[..8]))?;
 
                     // Restore constant objects to environment
                     for (obj_name, info) in &cache.metadata.constant_objects {
@@ -195,14 +205,15 @@ impl Compiler {
                         }
                     }
 
-                    log::debug!("💾 Saved lightweight snapshot for node {} (language: {})",
-                               &node_hash[..8], lang);
+                    log::debug!("💾 Saved lightweight snapshot for node {} (lang: {})", &node_hash[..8], lang);
                 } else {
-                    // Node was cached (skipped execution).
-                    // Load the snapshot, then restore constant objects
-                    log::debug!("📦 Using existing snapshot for node {}", &node_hash[..8]);
+                    // CASE 2: Node was cached.
+                    
+                    // We MUST load the snapshot to ensure the interpreter state is 
+                    // up-to-date for subsequent chunks of the same language.
+                    log::debug!("📦 Using existing snapshot for node {} (lang: {})", &node_hash[..8], lang);
                     exec.load_session(&snapshot_path)
-                        .context(format!("Failed to load session snapshot for hash {}", &node_hash[..8]))?;
+                        .context(format!("Failed to load {} session snapshot for hash {}", lang, &node_hash[..8]))?;
 
                     // Restore constant objects from content-addressed storage
                     for (obj_name, info) in &cache.metadata.constant_objects {
@@ -211,14 +222,14 @@ impl Compiler {
                                 .context(format!("Failed to load constant object '{}' from cache", obj_name))?;
                         }
                     }
-
-                    log::debug!("📂 Loaded snapshot for node {} (+ constants for {})",
-                               &node_hash[..8], lang);
                 }
+                
+                // Track this as the last successful snapshot for this language
+                last_snapshot_per_lang.insert(lang.to_string(), node_hash.clone());
             }
 
             typst_output.push_str(&result_str);
-            previous_hash = node_hash;
+            previous_global_hash = node_hash;
             last_pos = node_end;
         }
 

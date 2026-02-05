@@ -385,9 +385,17 @@ impl KnotLanguageServer {
         let file_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("main");
         let cache_dir = get_cache_dir(&project_root, file_stem);
 
-        // 2. Load metadata to find the latest snapshot
+        // 2. Load metadata to find the latest snapshot for R
         if let Ok(cache) = Cache::new(cache_dir.clone()) {
-            if let Some(last_chunk) = cache.metadata.chunks.iter().max_by_key(|c| c.index) {
+            // Find the last chunk that was executed in R
+            let last_r_chunk = cache.metadata.chunks.iter()
+                .filter(|c| {
+                    // Check if snapshot exists with .RData extension
+                    cache.has_snapshot(&c.hash, "RData")
+                })
+                .max_by_key(|c| c.index);
+
+            if let Some(last_chunk) = last_r_chunk {
                 let snapshot_hash = &last_chunk.hash;
 
                 // 3. Check if this snapshot is different from the last loaded one
@@ -397,7 +405,7 @@ impl KnotLanguageServer {
                 };
 
                 if should_reload {
-                    let snapshot_path = cache_dir.join(format!("snapshot_{}.RData", snapshot_hash));
+                    let snapshot_path = cache.get_snapshot_path(snapshot_hash, "RData");
                     if snapshot_path.exists() {
                         // 4. Load this snapshot into our live R session
                         let result = {

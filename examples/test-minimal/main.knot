@@ -49,7 +49,12 @@ gg <- ggplot(df, aes(x = x, y = y)) +
 
 # Render the plot (requires knot.r.package)
 typst(gg, width = 4, height = 4)
-``` <rdeux>
+```
+
+```{python}
+x = [1, 2, 3, 3]
+print(x)
+```
 
 Voici la vie. Un peu de #emph[texte]. Toto. Tata. #lorem(200).
 

@@ -44,6 +44,9 @@ pub trait KnotExecutor: LanguageExecutor + ConstantObjectHandler + Send + Sync {
 
     /// Load an environment session from a file
     fn load_session(&mut self, path: &Path) -> Result<()>;
+
+    /// File extension for environment snapshots (.RData, .pkl, .jls)
+    fn snapshot_extension(&self) -> &'static str;
 }
 
 /// Trait for managing constant objects (cache optimization)

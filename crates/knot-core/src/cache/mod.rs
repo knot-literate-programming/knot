@@ -146,29 +146,18 @@ impl Cache {
         Ok(())
     }
 
-    /// Get the path where a snapshot file should be stored for a given hash
-    ///
-    /// Returns the path to the .RData snapshot file in the cache directory.
-    /// The snapshot file may or may not exist yet.
+    /// Get the path where a snapshot file should be stored for a given hash and extension
     ///
     /// # Arguments
     /// * `node_hash` - The hash of the chunk or inline expression
-    ///
-    /// # Returns
-    /// Path to the snapshot file: `.knot_cache/snapshot_{hash}.RData`
-    pub fn get_snapshot_path(&self, node_hash: &str) -> PathBuf {
-        self.cache_dir.join(format!("snapshot_{}.RData", node_hash))
+    /// * `extension` - The file extension (e.g., "RData", "pkl")
+    pub fn get_snapshot_path(&self, node_hash: &str, extension: &str) -> PathBuf {
+        self.cache_dir.join(format!("snapshot_{}.{}", node_hash, extension))
     }
 
-    /// Check if a snapshot exists for a given hash
-    ///
-    /// # Arguments
-    /// * `node_hash` - The hash of the chunk or inline expression
-    ///
-    /// # Returns
-    /// `true` if the snapshot file exists on disk, `false` otherwise
-    pub fn has_snapshot(&self, node_hash: &str) -> bool {
-        self.get_snapshot_path(node_hash).exists()
+    /// Check if a snapshot exists for a given hash and extension
+    pub fn has_snapshot(&self, node_hash: &str, extension: &str) -> bool {
+        self.get_snapshot_path(node_hash, extension).exists()
     }
 
     /// Save the cache metadata to disk

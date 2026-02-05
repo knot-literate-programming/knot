@@ -113,6 +113,10 @@ impl KnotExecutor for RExecutor {
     fn load_session(&mut self, path: &Path) -> Result<()> {
         execution::load_session(&mut self.process, path)
     }
+
+    fn snapshot_extension(&self) -> &'static str {
+        "RData"
+    }
 }
 
 impl ConstantObjectHandler for RExecutor {

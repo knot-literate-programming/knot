@@ -257,7 +257,12 @@ async fn sync_cache_if_needed(state: &ServerState, uri: &Url) {
     let cache_dir = get_cache_dir(&project_root, file_stem);
 
     if let Ok(cache) = Cache::new(cache_dir.clone()) {
-        if let Some(last_chunk) = cache.metadata.chunks.iter().max_by_key(|c| c.index) {
+        // Find the last chunk that was executed in R
+        let last_r_chunk = cache.metadata.chunks.iter()
+            .filter(|c| cache.has_snapshot(&c.hash, "RData"))
+            .max_by_key(|c| c.index);
+
+        if let Some(last_chunk) = last_r_chunk {
             let snapshot_hash = &last_chunk.hash;
 
             // Check if this snapshot is different from the last loaded one
@@ -267,7 +272,7 @@ async fn sync_cache_if_needed(state: &ServerState, uri: &Url) {
             };
 
             if should_reload {
-                let snapshot_path = cache_dir.join(format!("snapshot_{}.RData", snapshot_hash));
+                let snapshot_path = cache.get_snapshot_path(snapshot_hash, "RData");
                 if snapshot_path.exists() {
                     let success = {
                         let mut managers = state.executors.write().await;
