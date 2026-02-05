@@ -12,9 +12,9 @@ mod execution;
 mod file_manager;
 mod formatters;
 
-use super::{ExecutionResult, GraphicsOptions, LanguageExecutor};
+use super::{ConstantObjectHandler, ExecutionResult, GraphicsOptions, LanguageExecutor};
 use anyhow::Result;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub use process::RProcess;
 
@@ -84,6 +84,94 @@ impl LanguageExecutor for RExecutor {
 
     fn execute(&mut self, code: &str, graphics: &GraphicsOptions) -> Result<ExecutionResult> {
         execution::execute(&mut self.process, &self.cache_dir, code, graphics)
+    }
+}
+
+impl ConstantObjectHandler for RExecutor {
+    fn hash_object(&mut self, object_name: &str) -> Result<String> {
+        // Use digest package with xxhash64 algorithm for fast hashing
+        let code = format!(
+            r#"
+if (!requireNamespace("digest", quietly = TRUE)) {{
+    stop("Package 'digest' is required for constant objects. Install with: install.packages('digest')")
+}}
+cat(digest::digest({}, algo = "xxhash64"))
+"#,
+            object_name
+        );
+        execution::execute_simple(&mut self.process, &code)
+    }
+
+    fn save_constant(&mut self, object_name: &str, hash: &str, cache_dir: &Path) -> Result<()> {
+        let objects_dir = cache_dir.join("objects");
+        std::fs::create_dir_all(&objects_dir)?;
+
+        let object_path = objects_dir.join(format!("{}.rds", hash));
+        let path_str = object_path.to_string_lossy().replace('\\', "\\\\");
+
+        let code = format!(
+            r#"saveRDS({}, file = "{}")"#,
+            object_name, path_str
+        );
+        execution::execute_simple(&mut self.process, &code)?;
+
+        log::debug!("💾 Saved constant object '{}' to: {}", object_name, object_path.display());
+        Ok(())
+    }
+
+    fn load_constant(&mut self, object_name: &str, hash: &str, cache_dir: &Path) -> Result<()> {
+        let object_path = cache_dir.join("objects").join(format!("{}.rds", hash));
+
+        // Verify file integrity by hashing the file
+        let actual_hash = self.hash_file(&object_path)?;
+        if actual_hash != hash {
+            anyhow::bail!(
+                "Cache corruption detected for constant object '{}'.\n\
+                 Expected hash: {}\n\
+                 Actual hash: {}\n\
+                 File: {}",
+                object_name, hash, actual_hash, object_path.display()
+            );
+        }
+
+        let path_str = object_path.to_string_lossy().replace('\\', "\\\\");
+        let code = format!(
+            r#"{} <- readRDS("{}")"#,
+            object_name, path_str
+        );
+        execution::execute_simple(&mut self.process, &code)?;
+
+        log::debug!("📥 Loaded constant object '{}' from: {}", object_name, object_path.display());
+        Ok(())
+    }
+
+    fn remove_from_env(&mut self, object_name: &str) -> Result<()> {
+        let code = format!(r#"rm(list = "{}")"#, object_name);
+        execution::execute_simple(&mut self.process, &code)?;
+        log::debug!("🗑️  Removed '{}' from R environment", object_name);
+        Ok(())
+    }
+
+    fn object_extension(&self) -> &'static str {
+        "rds"
+    }
+}
+
+impl RExecutor {
+    /// Hash a file's content using xxHash64
+    ///
+    /// Used for verifying integrity of cached constant objects
+    fn hash_file(&self, file_path: &Path) -> Result<String> {
+        use std::fs::File;
+        use std::io::Read;
+
+        let mut file = File::open(file_path)?;
+        let mut buffer = Vec::new();
+        file.read_to_end(&mut buffer)?;
+
+        // Use xxHash64 for fast hashing
+        let hash = xxhash_rust::xxh64::xxh64(&buffer, 0);
+        Ok(format!("{:x}", hash))
     }
 }
 

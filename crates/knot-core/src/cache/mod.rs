@@ -10,7 +10,7 @@ mod metadata;
 mod hashing;
 mod storage;
 
-pub use metadata::{CacheMetadata, ChunkCacheEntry, InlineCacheEntry};
+pub use metadata::{CacheMetadata, ChunkCacheEntry, ConstantObjectInfo, InlineCacheEntry};
 pub use hashing::hash_dependencies;
 
 use crate::executors::ExecutionResult;
@@ -168,6 +168,13 @@ impl Cache {
     /// `true` if the snapshot file exists on disk, `false` otherwise
     pub fn has_snapshot(&self, node_hash: &str) -> bool {
         self.get_snapshot_path(node_hash).exists()
+    }
+
+    /// Save the cache metadata to disk
+    ///
+    /// Writes the metadata (including constant objects info) to metadata.json
+    pub fn save_metadata(&self) -> Result<()> {
+        storage::save_metadata(&self.cache_dir, &self.metadata)
     }
 }
 

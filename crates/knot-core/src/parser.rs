@@ -50,6 +50,9 @@ pub struct ChunkOptions {
     pub dpi: Option<u32>,
     pub fig_format: Option<String>,
     pub fig_alt: Option<String>,
+
+    // Constant objects (Cache optimization)
+    pub constant: Vec<String>,
 }
 
 impl ChunkOptions {
@@ -109,6 +112,8 @@ impl ChunkOptions {
             dpi: self.dpi.unwrap_or(crate::defaults::Defaults::DPI),
             fig_format: self.fig_format.clone().unwrap_or_else(|| crate::defaults::Defaults::FIG_FORMAT.to_string()),
             fig_alt: self.fig_alt.clone(),
+
+            constant: self.constant.clone(),
         }
     }
 }
@@ -132,6 +137,8 @@ pub struct ResolvedChunkOptions {
     pub dpi: u32,
     pub fig_format: String,
     pub fig_alt: Option<String>,
+
+    pub constant: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -497,6 +504,13 @@ pub fn parse_options(options_block: &str) -> Result<ChunkOptions> {
                     options.depends = value
                         .split(',')
                         .map(|s| PathBuf::from(s.trim()))
+                        .collect();
+                }
+                "constant" => {
+                    options.constant = value
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
                         .collect();
                 }
                 // Graphics options (Phase 4)

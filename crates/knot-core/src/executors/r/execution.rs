@@ -342,3 +342,66 @@ pub fn load_session(process: &mut RProcess, snapshot_file: &Path) -> Result<()> 
     Ok(())
 }
 
+/// Execute simple R code and capture stdout result
+///
+/// Used for constant object operations (hash, save, load, remove).
+/// Returns trimmed stdout output, fails if stderr has content.
+pub fn execute_simple(process: &mut RProcess, code: &str) -> Result<String> {
+    let stdin = process
+        .stdin
+        .as_mut()
+        .context("R process stdin is not available")?;
+    let stdout = process
+        .stdout
+        .as_mut()
+        .context("R process stdout is not available")?;
+    let stderr = process
+        .stderr
+        .as_mut()
+        .context("R process stderr is not available")?;
+
+    // Write the code
+    writeln!(stdin, "{}", code)?;
+    writeln!(stdin, "cat('{}\\n', file=stdout())", BOUNDARY)?;
+    writeln!(stdin, "cat('{}\\n', file=stderr())", BOUNDARY)?;
+    stdin.flush()?;
+
+    let (stdout_output, stderr_output) = thread::scope(|s| {
+        let stdout_handle = s.spawn(move || {
+            let mut output = String::new();
+            let mut line_buffer = String::new();
+            loop {
+                line_buffer.clear();
+                let bytes_read = stdout.read_line(&mut line_buffer).unwrap_or(0);
+                if bytes_read == 0 || line_buffer.trim_end() == BOUNDARY {
+                    break;
+                }
+                output.push_str(&line_buffer);
+            }
+            output
+        });
+
+        let stderr_handle = s.spawn(move || {
+            let mut output = String::new();
+            let mut line_buffer = String::new();
+            loop {
+                line_buffer.clear();
+                let bytes_read = stderr.read_line(&mut line_buffer).unwrap_or(0);
+                if bytes_read == 0 || line_buffer.trim_end() == BOUNDARY {
+                    break;
+                }
+                output.push_str(&line_buffer);
+            }
+            output
+        });
+
+        (stdout_handle.join().unwrap(), stderr_handle.join().unwrap())
+    });
+
+    if !stderr_output.trim().is_empty() {
+        anyhow::bail!("R error: {}", stderr_output.trim());
+    }
+
+    Ok(stdout_output.trim().to_string())
+}
+
