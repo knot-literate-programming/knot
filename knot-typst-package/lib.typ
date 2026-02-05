@@ -4,10 +4,11 @@
 #import "@preview/codly-languages:0.1.10": *
 #codly(languages: codly-languages)
 
-// Manual 'r' language definition to work around the codly-languages bug
+// Manual language definitions
 #codly(
   languages: (
     r: (name: "R", icon: "", color: rgb("#CE412B")),
+    python: (name: "Python", icon: "", color: rgb("#3572A5")),
   ),
 )
 

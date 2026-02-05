@@ -57,12 +57,23 @@
         "title": "Open Preview",
         "category": "Knot",
         "icon": "$(open-preview)"
+      },
+      {
+        "command": "knot.cleanProject",
+        "title": "Clean Project (Clear Cache)",
+        "category": "Knot",
+        "icon": "$(trash)"
       }
     ],
     "menus": {
       "editor/title": [
         {
           "command": "knot.openPreview",
+          "when": "resourceLangId == knot",
+          "group": "navigation"
+        },
+        {
+          "command": "knot.cleanProject",
           "when": "resourceLangId == knot",
           "group": "navigation"
         }

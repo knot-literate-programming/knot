@@ -157,6 +157,7 @@ pub fn save_result(
 pub fn create_chunk_entry(
     chunk_index: usize,
     chunk_name: Option<String>,
+    language: String,
     hash: String,
     files: Vec<String>,
     dependencies: Vec<PathBuf>,
@@ -164,6 +165,7 @@ pub fn create_chunk_entry(
     ChunkCacheEntry {
         index: chunk_index,
         name: chunk_name,
+        language,
         hash,
         files,
         dependencies: dependencies

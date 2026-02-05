@@ -4,6 +4,12 @@
 #import "@preview/codly-languages:0.1.1": *
 #show: codly-init.with()
 #codly(number-format: none)
+#codly(
+  languages: (
+    r: (name: "R", icon: "", color: rgb("#CE412B")),
+    python: (name: "Python", icon: "", color: rgb("#3572A5")),
+  ),
+)
 
 // ============================================
 // Document content
@@ -52,11 +58,8 @@ typst(gg, width = 4, height = 4)
 ```
 
 ```{python}
-x = [1, 2, 3, 3]
+x = [1, 2]
 print(x)
 ```
 
-
-Voici la vie. Un peu de #emph[texte]. Toto. Tata. #lorem(200).
-
-#lorem(20)
+#lorem(200)

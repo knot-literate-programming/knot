@@ -261,7 +261,7 @@ mod tests {
         let cache = Cache::new(cache_dir.clone()).unwrap();
 
         let hash = "abc123def456";
-        let snapshot_path = cache.get_snapshot_path(hash);
+        let snapshot_path = cache.get_snapshot_path(hash, "RData");
 
         // Check path format
         assert_eq!(
@@ -273,13 +273,13 @@ mod tests {
         assert_eq!(snapshot_path.parent().unwrap(), cache_dir);
 
         // Initially, snapshot should not exist
-        assert!(!cache.has_snapshot(hash));
+        assert!(!cache.has_snapshot(hash, "RData"));
 
         // Create the snapshot file
         std::fs::write(&snapshot_path, "dummy snapshot data").unwrap();
 
         // Now it should exist
-        assert!(cache.has_snapshot(hash));
+        assert!(cache.has_snapshot(hash, "RData"));
     }
 
     #[test]
@@ -292,8 +292,8 @@ mod tests {
         let hash1 = "hash1";
         let hash2 = "hash2";
 
-        let path1 = cache.get_snapshot_path(hash1);
-        let path2 = cache.get_snapshot_path(hash2);
+        let path1 = cache.get_snapshot_path(hash1, "RData");
+        let path2 = cache.get_snapshot_path(hash2, "RData");
 
         // Different hashes should give different paths
         assert_ne!(path1, path2);
@@ -301,7 +301,7 @@ mod tests {
         // Create only first snapshot
         std::fs::write(&path1, "snapshot 1").unwrap();
 
-        assert!(cache.has_snapshot(hash1));
-        assert!(!cache.has_snapshot(hash2));
+        assert!(cache.has_snapshot(hash1, "RData"));
+        assert!(!cache.has_snapshot(hash2, "RData"));
     }
 }

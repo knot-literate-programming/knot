@@ -35,6 +35,8 @@ enum Commands {
     Watch,
     /// Build the entire project and generate final PDF
     Build,
+    /// Clean project (remove cache and generated files)
+    Clean,
     /// Install the VSCode extension
     InstallVscode,
 }
@@ -57,6 +59,10 @@ fn main() -> Result<()> {
         }
         Commands::Build => {
             build_project()?;
+        }
+        Commands::Clean => {
+            knot_core::clean_project(None)?;
+            println!("\n✅ Project cleaned successfully!");
         }
         Commands::InstallVscode => {
             install_vscode()?;

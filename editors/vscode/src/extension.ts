@@ -170,6 +170,25 @@ export async function activate(context: ExtensionContext) {
             await openPreview(outputChannel);
         })
     );
+
+    // Register clean project command
+    context.subscriptions.push(
+        commands.registerCommand('knot.cleanProject', async () => {
+            if (!client) {
+                window.showErrorMessage('Knot Language Server is not running');
+                return;
+            }
+            outputChannel.appendLine('Executing Clean Project command...');
+            try {
+                await client.sendRequest('workspace/executeCommand', {
+                    command: 'knot.cleanProject',
+                    arguments: []
+                });
+            } catch (error) {
+                outputChannel.appendLine(`Error during clean: ${error}`);
+            }
+        })
+    );
 }
 
 export async function deactivate(): Promise<void> {
