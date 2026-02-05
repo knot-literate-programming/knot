@@ -17,7 +17,7 @@ mod state;
 mod symbols;
 mod transform;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tower_lsp::jsonrpc::Result;
@@ -300,7 +300,10 @@ impl LanguageServer for KnotLanguageServer {
 
 impl KnotLanguageServer {
     async fn on_change(&self, uri: Url, text: String) {
-        // 1. Get knot-specific diagnostics (R chunks parsing)
+        // 1. Sync with cache if possible (load last snapshot)
+        self.sync_with_cache(&uri).await;
+
+        // 2. Get knot-specific diagnostics (R chunks parsing)
         let knot_diagnostics = diagnostics::get_diagnostics(&text);
 
         // 2. Cache knot diagnostics
@@ -367,6 +370,45 @@ impl KnotLanguageServer {
                 self.client.log_message(MessageType::ERROR, format!("Failed to send to tinymist: {}", e)).await;
             } else if !is_opened {
                 opened_map.insert(uri, true);
+            }
+        }
+    }
+
+    async fn sync_with_cache(&self, uri: &Url) {
+        use knot_core::config::Config;
+        use knot_core::get_cache_dir;
+        use knot_core::cache::Cache;
+
+        let path = match uri.to_file_path() {
+            Ok(p) => p,
+            Err(_) => return,
+        };
+
+        // 1. Find project root and cache dir
+        let start_dir = path.parent().unwrap_or(Path::new("."));
+        let (_config, project_root) = match Config::find_and_load(start_dir) {
+            Ok(res) => res,
+            Err(_) => return,
+        };
+
+        let file_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("main");
+        let cache_dir = get_cache_dir(&project_root, file_stem);
+        
+        // 2. Load metadata to find the latest snapshot
+        if let Ok(cache) = Cache::new(cache_dir.clone()) {
+            if let Some(last_chunk) = cache.metadata.chunks.iter().max_by_key(|c| c.index) {
+                let snapshot_path = cache_dir.join(format!("snapshot_{}.RData", last_chunk.hash));
+                if snapshot_path.exists() {
+                    // 3. Load this snapshot into our live R session
+                    let mut executors = self.state.r_executors.write().await;
+                    if let Some(executor) = executors.get_mut(uri) {
+                        if let Err(e) = executor.load_session(&snapshot_path) {
+                            self.client.log_message(MessageType::WARNING, format!("Failed to load R snapshot: {}", e)).await;
+                        } else {
+                            self.client.log_message(MessageType::INFO, format!("Synced R session with snapshot for chunk {}", last_chunk.index)).await;
+                        }
+                    }
+                }
             }
         }
     }

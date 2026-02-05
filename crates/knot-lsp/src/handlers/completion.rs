@@ -195,7 +195,9 @@ async fn get_r_completion(state: &ServerState, uri: &Url, token: &str) -> Option
             token.replace('"', "\\\"")
         );
         
+        eprintln!("DEBUG LSP: Completion query for '{}'", token);
         if let Ok(output) = executor.query(&code) {
+            eprintln!("DEBUG LSP: Completion result len: {}", output.len());
             let items = output.lines()
                 .filter(|l| !l.trim().is_empty())
                 .map(|name| CompletionItem {

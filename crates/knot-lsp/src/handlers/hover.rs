@@ -20,7 +20,7 @@ pub async fn handle_hover(state: &ServerState, params: HoverParams) -> Result<Op
     // 2. Determine if we are in a chunk
     if mapper.is_position_in_chunk(pos) {
         // Check if we're hovering specifically over the chunk fence (header or closing)
-        let doc = match Document::parse(text) {
+        let doc = match Document::parse(text.clone()) {
             Ok(doc) => doc,
             Err(_) => return Ok(None),
         };
@@ -172,13 +172,25 @@ fn get_r_token_at_pos(text: &str, pos: Position) -> Option<String> {
 async fn get_r_help(state: &ServerState, uri: &Url, token: &str) -> Option<Hover> {
     let mut executors = state.r_executors.write().await;
     if let Some(executor) = executors.get_mut(uri) {
-        // Construct R code for help
+        // Robust R help query:
+        // 1. Try help() on token
+        // 2. If length 0, try with try.all.packages = TRUE
+        // 3. Capture output via tools::Rd2txt
         let code = format!(
-            r#"try(cat(paste(utils::capture.output(tools::Rd2txt(utils::help("{}"))), collapse="\n")), silent=TRUE)"#, 
+            r#"tryCatch({{
+                topic <- "{0}"
+                h <- utils::help(topic)
+                if (length(h) == 0) h <- utils::help(topic, try.all.packages = TRUE)
+                if (length(h) > 0) {{
+                    cat(paste(utils::capture.output(tools::Rd2txt(h[1])), collapse="\n"))
+                }}
+            }}, error = function(e) {{ cat(as.character(e)) }})"#, 
             token.replace('"', "\\\"")
         );
         
+        eprintln!("DEBUG LSP: Hover query for '{}'", token);
         if let Ok(output) = executor.query(&code) {
+            eprintln!("DEBUG LSP: Hover result len: {}", output.len());
             if !output.trim().is_empty() {
                 // Wrap in Markdown code block or just text
                 // Rd2txt produces mostly plain text with some formatting

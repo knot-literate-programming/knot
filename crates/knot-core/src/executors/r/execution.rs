@@ -225,6 +225,9 @@ pub fn load_session(process: &mut RProcess, snapshot_file: &Path) -> Result<()> 
 /// Unlike execute(), this does not use the side-channel and returns the raw output string.
 /// Useful for LSP queries (completion, help).
 pub fn query(process: &mut RProcess, code: &str) -> Result<String> {
+    // Debug log
+    eprintln!("DEBUG CORE: R query: {}", code);
+
     let stdin = process
         .stdin
         .as_mut()
@@ -241,6 +244,9 @@ pub fn query(process: &mut RProcess, code: &str) -> Result<String> {
     if !stderr_output.trim().is_empty() {
         // Log warning but don't fail, return what we have
         log::warn!("R query stderr: {}", stderr_output.trim());
+        eprintln!("DEBUG CORE: R stderr: {}", stderr_output.trim());
+    } else {
+        eprintln!("DEBUG CORE: R stdout len: {}", stdout_output.len());
     }
 
     Ok(stdout_output)
