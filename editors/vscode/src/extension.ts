@@ -173,16 +173,35 @@ export async function activate(context: ExtensionContext) {
 
     // Register clean project command
     context.subscriptions.push(
-        commands.registerCommand('knot.cleanProject', async () => {
+        commands.registerCommand('knot.cleanProject', async (resource?: Uri) => {
             if (!client) {
                 window.showErrorMessage('Knot Language Server is not running');
                 return;
             }
-            outputChannel.appendLine('Executing Clean Project command...');
+
+            // Determine which file we are cleaning for
+            let targetUri: string | undefined;
+            
+            if (resource) {
+                // Called from context menu or title bar with context
+                targetUri = resource.toString();
+            } else {
+                // Called from command palette, use active editor
+                if (window.activeTextEditor && window.activeTextEditor.document.languageId === 'knot') {
+                    targetUri = window.activeTextEditor.document.uri.toString();
+                }
+            }
+
+            if (!targetUri) {
+                window.showErrorMessage('No active Knot file to clean.');
+                return;
+            }
+
+            outputChannel.appendLine(`Executing Clean Project command for ${targetUri}...`);
             try {
                 await client.sendRequest('workspace/executeCommand', {
                     command: 'knot.cleanProject',
-                    arguments: []
+                    arguments: [targetUri]
                 });
             } catch (error) {
                 outputChannel.appendLine(`Error during clean: ${error}`);

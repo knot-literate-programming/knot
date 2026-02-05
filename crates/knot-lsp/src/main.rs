@@ -99,14 +99,29 @@ impl LanguageServer for KnotLanguageServer {
 
     async fn execute_command(&self, params: ExecuteCommandParams) -> Result<Option<serde_json::Value>> {
         if params.command == "knot.cleanProject" {
-            self.client.log_message(MessageType::INFO, "LSP: Cleaning project...").await;
-            
-            // Use the workspace root URI if available
-            let root_path = {
+            // Get the file URI from arguments if present
+            let start_path = if let Some(first) = params.arguments.first() {
+                if let Some(uri_str) = first.as_str() {
+                    if let Ok(uri) = Url::parse(uri_str) {
+                        uri.to_file_path().ok()
+                    } else { None }
+                } else { None }
+            } else { None };
+
+            // Fallback to workspace root
+            let root_path = if start_path.is_some() {
+                start_path
+            } else {
                 let guard = self.root_uri.read().await;
                 guard.as_ref().and_then(|uri| uri.to_file_path().ok())
             };
 
+            if let Some(path) = &root_path {
+                self.client.log_message(MessageType::INFO, format!("LSP: Cleaning project starting from {:?}", path)).await;
+            } else {
+                self.client.log_message(MessageType::INFO, "LSP: Cleaning project (unknown root)").await;
+            }
+            
             match knot_core::clean_project(root_path.as_deref()) {
                 Ok(_) => {
                     self.client.show_message(MessageType::INFO, "Project cleaned successfully!").await;
