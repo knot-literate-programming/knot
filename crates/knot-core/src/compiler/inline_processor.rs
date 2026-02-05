@@ -18,13 +18,13 @@ pub fn process_inline_expr(
 
     // If eval=false, skip execution
     if !inline_expr.options.eval {
-        info!("  ⊗ `{{r eval=false}} {}` [skipped]", inline_expr.code);
+        info!("  ⊗ `{{{}}} eval=false {}` [skipped]", inline_expr.language, inline_expr.code);
         return Ok((String::new(), inline_hash));
     }
 
     // Check cache
     if cache.has_cached_inline_result(&inline_hash) {
-        info!("  ✓ `{{r}} {}` [cached]", inline_expr.code);
+        info!("  ✓ `{{{}}} {}` [cached]", inline_expr.language, inline_expr.code);
         let cached_result = cache.get_cached_inline_result(&inline_hash)?;
         return Ok((cached_result, inline_hash));
     }
@@ -39,13 +39,6 @@ pub fn process_inline_expr(
             "Failed to execute inline expression: `{{{}}} {}`",
             inline_expr.language, inline_expr.code
         ))?;
-
-    // If output=false, we discard the result for the document
-    let final_result = if inline_expr.options.output {
-        result
-    } else {
-        String::new()
-    };
 
     // If output=false, we discard the result for the document
     let final_result = if inline_expr.options.output {
@@ -84,28 +77,21 @@ mod tests {
         (temp_dir, cache)
     }
 
-    #[test]
-    fn test_process_inline_no_executor() {
-        let inline = create_inline_expr("1 + 1", crate::parser::InlineOptions::default());
-        let (_temp_dir, mut cache) = setup_test_cache();
-        let mut executor: Option<RExecutor> = None;
-
-        let result = process_inline_expr(&inline, &mut executor, &mut cache, "prev_hash");
-
-        // Should error without executor
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("R executor not initialized"));
+    fn setup_test_manager() -> (TempDir, ExecutorManager) {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = ExecutorManager::new(temp_dir.path().to_path_buf(), None);
+        (temp_dir, manager)
     }
 
     #[test]
     fn test_process_inline_eval_false_no_executor() {
         let inline = create_inline_expr("x <- 42", crate::parser::InlineOptions { eval: false, ..Default::default() });
-        let (_temp_dir, mut cache) = setup_test_cache();
-        let mut executor: Option<RExecutor> = None;
+        let (_temp_dir_cache, mut cache) = setup_test_cache();
+        let (_temp_dir_mgr, mut manager) = setup_test_manager();
 
-        let result = process_inline_expr(&inline, &mut executor, &mut cache, "prev_hash");
+        let result = process_inline_expr(&inline, &mut manager, &mut cache, "prev_hash");
 
-        // Should succeed without executor when eval=false (skips execution)
+        // Should succeed even if manager can't start R (because eval=false skips execution)
         assert!(result.is_ok());
         let (output, _hash) = result.unwrap();
         assert_eq!(output, ""); // Empty output when eval=false
@@ -116,7 +102,7 @@ mod tests {
         let inline = create_inline_expr("1 + 1", crate::parser::InlineOptions::default());
         let (_temp_dir, cache) = setup_test_cache();
 
-        // Compute hash (will error on execution, but hash should be computed)
+        // Compute hash
         let hash1 = cache.get_inline_expr_hash(&inline.code, &inline.options, "prev_hash");
 
         // Same inputs should produce same hash

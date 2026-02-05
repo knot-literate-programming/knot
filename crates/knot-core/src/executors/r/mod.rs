@@ -11,7 +11,7 @@ mod process;
 mod execution;
 mod formatters;
 
-use super::{ConstantObjectHandler, ExecutionResult, GraphicsOptions, LanguageExecutor};
+use super::{ConstantObjectHandler, ExecutionResult, GraphicsOptions, LanguageExecutor, KnotExecutor};
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 

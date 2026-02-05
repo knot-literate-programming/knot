@@ -1,4 +1,4 @@
-use crate::executors::{ConstantObjectHandler, LanguageExecutor, KnotExecutor, ExecutorManager};
+use crate::executors::{ConstantObjectHandler, KnotExecutor, ExecutorManager};
 use crate::parser::{Chunk, Document, InlineExpr};
 use crate::config::Config;
 use crate::cache::ConstantObjectInfo;
@@ -97,7 +97,7 @@ impl Compiler {
         for node in executable_nodes {
             let (node_start, node_end, lang) = match node {
                 ExecutableNode::Chunk(chunk) => (chunk.start_byte, chunk.end_byte, chunk.language.as_str()),
-                ExecutableNode::InlineExpr(inline_expr) => (inline_expr.start, inline_expr.end, "r"), // Inline currently R only
+                ExecutableNode::InlineExpr(inline_expr) => (inline_expr.start, inline_expr.end, inline_expr.language.as_str()),
             };
 
             // Append raw text before the current node
@@ -254,44 +254,6 @@ impl Compiler {
             }
 
             info!("✓ All constant objects verified successfully.");
-        }
-
-            typst_output.push_str(&result_str);
-            previous_hash = node_hash;
-            last_pos = node_end;
-        }
-
-        // Append any remaining raw text after the last node
-        if last_pos < doc.source.len() {
-            typst_output.push_str(&doc.source[last_pos..]);
-        }
-
-        info!("✓ All nodes processed.");
-
-        // Final verification: Check that constant objects were not modified
-        if !constant_objects.is_empty() {
-            info!("🔍 Verifying {} constant objects...", constant_objects.len());
-
-            if let Some(ref mut r_exec) = self.r_executor {
-                for (obj_name, (initial_hash, chunk_name)) in &constant_objects {
-                    let final_hash = r_exec.hash_object(obj_name)
-                        .context(format!("Failed to verify constant object '{}'", obj_name))?;
-
-                    if &final_hash != initial_hash {
-                        anyhow::bail!(
-                            "❌ Constant object verification failed!\n\n\
-                             Object '{}' was declared as constant in chunk '{}' but was modified during execution.\n\n\
-                             Initial hash: {}\n\
-                             Final hash:   {}\n\n\
-                             This violates the constant object contract. The object must remain immutable after creation.\n\
-                             Output file NOT generated to preserve reproducibility.",
-                            obj_name, chunk_name, initial_hash, final_hash
-                        );
-                    }
-                }
-
-                info!("✓ All constant objects verified successfully.");
-            }
         }
 
         // Save metadata (includes constant_objects info)

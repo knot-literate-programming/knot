@@ -155,47 +155,43 @@ mod tests {
         (temp_dir, cache)
     }
 
-    fn setup_test_r_executor() -> Option<RExecutor> {
-        // For most tests, we'll use None to avoid needing R installed
-        // Some tests will explicitly set up an executor if needed
-        None
+    fn setup_test_manager() -> (TempDir, ExecutorManager) {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = ExecutorManager::new(temp_dir.path().to_path_buf(), None);
+        (temp_dir, manager)
     }
 
     #[test]
     fn test_process_chunk_eval_false() {
         let chunk = create_test_chunk("r", "x <- 1", None, false, true);
-        let (_temp_dir, mut cache) = setup_test_cache();
-        let mut executor = setup_test_r_executor();
+        let (_temp_dir_cache, mut cache) = setup_test_cache();
+        let (_temp_dir_mgr, mut manager) = setup_test_manager();
 
-        let (output, _hash) = process_chunk(&chunk, &mut executor, &mut cache, "prev_hash", &ChunkDefaults::default())
+        let (output, _hash) = process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &ChunkDefaults::default())
             .unwrap();
 
         // With eval=false, should produce output but not execute
         assert!(output.contains("#code-chunk("));
         assert!(output.contains("lang: \"r\""));
-        // Should not have executed (no R executor needed)
     }
 
     #[test]
     fn test_process_chunk_generates_name() {
         let chunk = create_test_chunk("r", "x <- 1", None, false, false);
-        let (_temp_dir, mut cache) = setup_test_cache();
-        let mut executor = setup_test_r_executor();
+        let (_temp_dir_cache, mut cache) = setup_test_cache();
+        let (_temp_dir_mgr, mut manager) = setup_test_manager();
 
-        let (_output, _hash) = process_chunk(&chunk, &mut executor, &mut cache, "prev_hash", &ChunkDefaults::default())
+        let (_output, _hash) = process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &ChunkDefaults::default())
             .unwrap();
-
-        // Should generate name from start_byte (100)
-        // We can't directly check the name, but the function should not panic
     }
 
     #[test]
     fn test_process_chunk_with_name() {
         let chunk = create_test_chunk("r", "x <- 1", Some("my-chunk".to_string()), false, false);
-        let (_temp_dir, mut cache) = setup_test_cache();
-        let mut executor = setup_test_r_executor();
+        let (_temp_dir_cache, mut cache) = setup_test_cache();
+        let (_temp_dir_mgr, mut manager) = setup_test_manager();
 
-        let (output, _hash) = process_chunk(&chunk, &mut executor, &mut cache, "prev_hash", &ChunkDefaults::default())
+        let (output, _hash) = process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &ChunkDefaults::default())
             .unwrap();
 
         // With name, should include it in output
@@ -206,14 +202,14 @@ mod tests {
     #[test]
     fn test_process_chunk_hash_consistency() {
         let chunk = create_test_chunk("r", "x <- 1", None, false, false);
-        let (_temp_dir, mut cache) = setup_test_cache();
-        let mut executor = setup_test_r_executor();
+        let (_temp_dir_cache, mut cache) = setup_test_cache();
+        let (_temp_dir_mgr, mut manager) = setup_test_manager();
 
-        let (_output1, hash1) = process_chunk(&chunk, &mut executor, &mut cache, "prev_hash", &ChunkDefaults::default())
+        let (_output1, hash1) = process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &ChunkDefaults::default())
             .unwrap();
 
         // Process same chunk again with same previous_hash
-        let (_output2, hash2) = process_chunk(&chunk, &mut executor, &mut cache, "prev_hash", &ChunkDefaults::default())
+        let (_output2, hash2) = process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &ChunkDefaults::default())
             .unwrap();
 
         // Should produce same hash
@@ -225,12 +221,12 @@ mod tests {
         let chunk1 = create_test_chunk("r", "x <- 1", None, false, false);
         let chunk2 = create_test_chunk("r", "x <- 2", None, false, false);
 
-        let (_temp_dir, mut cache) = setup_test_cache();
-        let mut executor = setup_test_r_executor();
+        let (_temp_dir_cache, mut cache) = setup_test_cache();
+        let (_temp_dir_mgr, mut manager) = setup_test_manager();
 
-        let (_output1, hash1) = process_chunk(&chunk1, &mut executor, &mut cache, "prev_hash", &ChunkDefaults::default())
+        let (_output1, hash1) = process_chunk(&chunk1, &mut manager, &mut cache, "prev_hash", &ChunkDefaults::default())
             .unwrap();
-        let (_output2, hash2) = process_chunk(&chunk2, &mut executor, &mut cache, "prev_hash", &ChunkDefaults::default())
+        let (_output2, hash2) = process_chunk(&chunk2, &mut manager, &mut cache, "prev_hash", &ChunkDefaults::default())
             .unwrap();
 
         // Different code should produce different hash
@@ -240,12 +236,12 @@ mod tests {
     #[test]
     fn test_process_chunk_hash_changes_with_previous() {
         let chunk = create_test_chunk("r", "x <- 1", None, false, false);
-        let (_temp_dir, mut cache) = setup_test_cache();
-        let mut executor = setup_test_r_executor();
+        let (_temp_dir_cache, mut cache) = setup_test_cache();
+        let (_temp_dir_mgr, mut manager) = setup_test_manager();
 
-        let (_output1, hash1) = process_chunk(&chunk, &mut executor, &mut cache, "prev_hash_1", &ChunkDefaults::default())
+        let (_output1, hash1) = process_chunk(&chunk, &mut manager, &mut cache, "prev_hash_1", &ChunkDefaults::default())
             .unwrap();
-        let (_output2, hash2) = process_chunk(&chunk, &mut executor, &mut cache, "prev_hash_2", &ChunkDefaults::default())
+        let (_output2, hash2) = process_chunk(&chunk, &mut manager, &mut cache, "prev_hash_2", &ChunkDefaults::default())
             .unwrap();
 
         // Different previous_hash should produce different hash
@@ -255,44 +251,14 @@ mod tests {
     #[test]
     fn test_process_chunk_unsupported_language() {
         let chunk = create_test_chunk("python", "print(42)", None, true, false);
-        let (_temp_dir, mut cache) = setup_test_cache();
-        let mut executor = setup_test_r_executor();
+        let (_temp_dir_cache, mut cache) = setup_test_cache();
+        let (_temp_dir_mgr, mut manager) = setup_test_manager();
 
-        let (output, _hash) = process_chunk(&chunk, &mut executor, &mut cache, "prev_hash", &ChunkDefaults::default())
-            .unwrap();
+        let result = process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &ChunkDefaults::default());
 
-        // Should handle unsupported language gracefully
-        assert!(output.contains("python"));
-        assert!(output.contains("not supported"));
-    }
-
-    #[test]
-    fn test_process_chunk_caching_disabled() {
-        let mut chunk = create_test_chunk("r", "x <- 1", None, true, false);
-        chunk.options.cache = Some(false);
-
-        let (_temp_dir, mut cache) = setup_test_cache();
-        let mut executor = setup_test_r_executor();
-
-        // First call (should not cache because R executor not available)
-        let result1 = process_chunk(&chunk, &mut executor, &mut cache, "prev_hash", &ChunkDefaults::default());
-
-        // Should fail because we need R executor when eval=true and language=r
-        assert!(result1.is_err());
-        assert!(result1.unwrap_err().to_string().contains("R executor not initialized"));
-    }
-
-    #[test]
-    fn test_process_chunk_no_executor_with_eval_true() {
-        let chunk = create_test_chunk("r", "x <- 1", None, true, true);
-        let (_temp_dir, mut cache) = setup_test_cache();
-        let mut executor = None; // No executor
-
-        let result = process_chunk(&chunk, &mut executor, &mut cache, "prev_hash", &ChunkDefaults::default());
-
-        // Should error when trying to execute without executor
+        // Should fail with unsupported language
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("R executor not initialized"));
+        assert!(result.unwrap_err().to_string().contains("Unsupported language"));
     }
 
     #[test]
@@ -313,10 +279,10 @@ mod tests {
 
         chunk.options.depends = vec![dep1.clone(), dep2.clone()];
 
-        let (_cache_dir, mut cache) = setup_test_cache();
-        let mut executor = setup_test_r_executor();
+        let (_temp_dir_cache, mut cache) = setup_test_cache();
+        let (_temp_dir_mgr, mut manager) = setup_test_manager();
 
-        let (_output, hash) = process_chunk(&chunk, &mut executor, &mut cache, "prev_hash", &ChunkDefaults::default())
+        let (_output, hash) = process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &ChunkDefaults::default())
             .unwrap();
 
         // Hash should incorporate dependencies
@@ -324,7 +290,7 @@ mod tests {
 
         // Changing dependencies should change hash
         chunk.options.depends = vec![dep1.clone(), dep3.clone()];
-        let (_output2, hash2) = process_chunk(&chunk, &mut executor, &mut cache, "prev_hash", &ChunkDefaults::default())
+        let (_output2, hash2) = process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &ChunkDefaults::default())
             .unwrap();
 
         assert_ne!(hash, hash2);
@@ -333,10 +299,10 @@ mod tests {
     #[test]
     fn test_process_chunk_empty_code() {
         let chunk = create_test_chunk("r", "", None, false, false);
-        let (_temp_dir, mut cache) = setup_test_cache();
-        let mut executor = setup_test_r_executor();
+        let (_temp_dir_cache, mut cache) = setup_test_cache();
+        let (_temp_dir_mgr, mut manager) = setup_test_manager();
 
-        let (output, _hash) = process_chunk(&chunk, &mut executor, &mut cache, "prev_hash", &ChunkDefaults::default())
+        let (output, _hash) = process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &ChunkDefaults::default())
             .unwrap();
 
         // Should handle empty code gracefully
@@ -346,10 +312,10 @@ mod tests {
     #[test]
     fn test_process_chunk_output_contains_language() {
         let chunk = create_test_chunk("r", "x <- 1", None, false, true);
-        let (_temp_dir, mut cache) = setup_test_cache();
-        let mut executor = setup_test_r_executor();
+        let (_temp_dir_cache, mut cache) = setup_test_cache();
+        let (_temp_dir_mgr, mut manager) = setup_test_manager();
 
-        let (output, _hash) = process_chunk(&chunk, &mut executor, &mut cache, "prev_hash", &ChunkDefaults::default())
+        let (output, _hash) = process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &ChunkDefaults::default())
             .unwrap();
 
         // Output should indicate language

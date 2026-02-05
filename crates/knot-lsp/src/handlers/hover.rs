@@ -181,50 +181,58 @@ async fn get_r_help(state: &ServerState, uri: &Url, token: &str) -> Option<Hover
     // Sync with cache if snapshot has changed (e.g., knot watch updated it)
     sync_cache_if_needed(state, uri).await;
 
-    let mut managers = state.executors.write().await;
-    if let Some(manager) = managers.get_mut(uri) {
-        if let Ok(executor) = manager.get_executor("r") {
-            // Robust R help query using a simpler approach:
-            // 1. Write help to a temp file directly (avoids capture.output issues)
-            // 2. Read back the file content
-            let code = format!(
-                r#"{{
-                    topic <- "{0}"
-                    h <- utils::help(topic)
-                    if (length(h) == 0) h <- utils::help(topic, try.all.packages = TRUE)
-                    if (length(h) > 0) {{
-                        tf <- tempfile()
-                        tryCatch({{
-                            rd <- utils:::.getHelpFile(h)
-                            tools::Rd2txt(rd, out = tf, options = list(underline_titles = FALSE))
-                            cat(readLines(tf, warn = FALSE), sep = "\n")
-                        }}, error = function(e) {{
-                            cat("Error rendering help:", as.character(e), "\n")
-                        }}, finally = {{
-                            if (file.exists(tf)) unlink(tf)
-                        }})
-                    }} else {{
-                        cat("No help found for '{0}'\n")
-                    }}
-                }}"#,
-                token.replace('"', "\\\"")
-            );
+    let output = {
+        let mut managers = state.executors.write().await;
+        if let Some(manager) = managers.get_mut(uri) {
+            if let Ok(executor) = manager.get_executor("r") {
+                // Robust R help query using a simpler approach:
+                // 1. Write help to a temp file directly (avoids capture.output issues)
+                // 2. Read back the file content
+                let code = format!(
+                    r#"{{
+                        topic <- "{0}"
+                        h <- utils::help(topic)
+                        if (length(h) == 0) h <- utils::help(topic, try.all.packages = TRUE)
+                        if (length(h) > 0) {{
+                            tf <- tempfile()
+                            tryCatch({{
+                                rd <- utils:::.getHelpFile(h)
+                                tools::Rd2txt(rd, out = tf, options = list(underline_titles = FALSE))
+                                cat(readLines(tf, warn = FALSE), sep = "\n")
+                            }}, error = function(e) {{
+                                cat("Error rendering help:", as.character(e), "\n")
+                            }}, finally = {{
+                                if (file.exists(tf)) unlink(tf)
+                            }})
+                        }} else {{
+                            cat("No help found for '{0}'\n")
+                        }}
+                    }}"#,
+                    token.replace('"', "\\\"")
+                );
 
-            if let Ok(output) = executor.execute_inline(&code) {
-                 // Remove potential backticks from execute_inline formatting
-                let clean_output = output.trim().trim_matches('`').trim();
-
-                if !clean_output.is_empty() {
-                    // Wrap in Markdown code block
-                    return Some(Hover {
-                        contents: HoverContents::Markup(MarkupContent {
-                            kind: MarkupKind::Markdown,
-                            value: format!("```text\n{}\n```", clean_output),
-                        }),
-                        range: None,
-                    });
-                }
+                executor.execute_inline(&code).ok()
+            } else {
+                None
             }
+        } else {
+            None
+        }
+    };
+
+    if let Some(output) = output {
+         // Remove potential backticks from execute_inline formatting
+        let clean_output = output.trim().trim_matches('`').trim();
+
+        if !clean_output.is_empty() {
+            // Wrap in Markdown code block
+            return Some(Hover {
+                contents: HoverContents::Markup(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: format!("```text\n{}\n```", clean_output),
+                }),
+                range: None,
+            });
         }
     }
     None
@@ -264,14 +272,21 @@ async fn sync_cache_if_needed(state: &ServerState, uri: &Url) {
             if should_reload {
                 let snapshot_path = cache_dir.join(format!("snapshot_{}.RData", snapshot_hash));
                 if snapshot_path.exists() {
-                    let mut managers = state.executors.write().await;
-                    if let Some(manager) = managers.get_mut(uri) {
-                        if let Ok(executor) = manager.get_executor("r") {
-                            if executor.load_session(&snapshot_path).is_ok() {
-                                drop(managers);
-                                state.loaded_snapshot_hash.write().await.insert(uri.clone(), snapshot_hash.clone());
+                    let success = {
+                        let mut managers = state.executors.write().await;
+                        if let Some(manager) = managers.get_mut(uri) {
+                            if let Ok(executor) = manager.get_executor("r") {
+                                executor.load_session(&snapshot_path).is_ok()
+                            } else {
+                                false
                             }
+                        } else {
+                            false
                         }
+                    };
+
+                    if success {
+                        state.loaded_snapshot_hash.write().await.insert(uri.clone(), snapshot_hash.clone());
                     }
                 }
             }
@@ -298,7 +313,7 @@ mod tests {
         // Insert mapper (needs typ_content, use same text for simplicity in tests)
         let mapper = PositionMapper::new(text, text);
         {
-            let mut mappers = state.mappers.write().await;
+            let mut mappers = state.mappers.read().await;
             mappers.insert(url.clone(), mapper);
         }
 

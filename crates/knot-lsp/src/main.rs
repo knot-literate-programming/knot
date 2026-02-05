@@ -400,18 +400,29 @@ impl KnotLanguageServer {
                     let snapshot_path = cache_dir.join(format!("snapshot_{}.RData", snapshot_hash));
                     if snapshot_path.exists() {
                         // 4. Load this snapshot into our live R session
-                        let mut managers = self.state.executors.write().await;
-                        if let Some(manager) = managers.get_mut(uri) {
-                            // We explicitly want to load the R session
-                            if let Ok(executor) = manager.get_executor("r") {
-                                if let Err(e) = executor.load_session(&snapshot_path) {
-                                    self.client.log_message(MessageType::WARNING, format!("Failed to load R snapshot: {}", e)).await;
+                        let result = {
+                            let mut managers = self.state.executors.write().await;
+                            if let Some(manager) = managers.get_mut(uri) {
+                                // We explicitly want to load the R session
+                                if let Ok(executor) = manager.get_executor("r") {
+                                    executor.load_session(&snapshot_path).map(|_| true)
                                 } else {
-                                    // 5. Update the loaded hash
-                                    drop(managers); // Release lock
-                                    self.state.loaded_snapshot_hash.write().await.insert(uri.clone(), snapshot_hash.clone());
-                                    self.client.log_message(MessageType::INFO, format!("Synced R session with snapshot for chunk {} (hash: {})", last_chunk.index, &snapshot_hash[..8])).await;
+                                    Ok(false)
                                 }
+                            } else {
+                                Ok(false)
+                            }
+                        };
+
+                        match result {
+                            Ok(true) => {
+                                // 5. Update the loaded hash
+                                self.state.loaded_snapshot_hash.write().await.insert(uri.clone(), snapshot_hash.clone());
+                                self.client.log_message(MessageType::INFO, format!("Synced R session with snapshot for chunk {} (hash: {})", last_chunk.index, &snapshot_hash[..8])).await;
+                            }
+                            Ok(false) => {}
+                            Err(e) => {
+                                self.client.log_message(MessageType::WARNING, format!("Failed to load R snapshot: {}", e)).await;
                             }
                         }
                     }

@@ -28,14 +28,14 @@ pub struct GraphicsOptions {
     pub format: String,
 }
 
-pub trait LanguageExecutor {
+pub trait LanguageExecutor: Send + Sync {
     fn initialize(&mut self) -> Result<()>;
     fn execute(&mut self, code: &str, graphics: &GraphicsOptions) -> Result<ExecutionResult>;
     fn execute_inline(&mut self, code: &str) -> Result<String>;
 }
 
 /// Combined trait for language executors that support caching and constant objects
-pub trait KnotExecutor: LanguageExecutor + ConstantObjectHandler {
+pub trait KnotExecutor: LanguageExecutor + ConstantObjectHandler + Send + Sync {
     /// Save the current environment session to a file
     fn save_session(&mut self, path: &Path) -> Result<()>;
 
@@ -47,7 +47,7 @@ pub trait KnotExecutor: LanguageExecutor + ConstantObjectHandler {
 ///
 /// Allows language executors to save/load large immutable objects separately
 /// from environment snapshots to reduce cache size.
-pub trait ConstantObjectHandler {
+pub trait ConstantObjectHandler: Send + Sync {
     /// Compute the hash of an object in the language environment
     ///
     /// Uses xxHash64 for speed. Returns hex string representation.

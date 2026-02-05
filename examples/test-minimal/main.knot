@@ -1,18 +1,9 @@
 // Import Knot helpers for R code execution
 #import "lib/knot.typ": *
 
-// ============================================
-// Optional: Import a Typst template
-// ============================================
-//
-// Examples:
-// #import "@preview/charged-ieee": ieee
-// #import "@preview/drafting": *
-//
-// #show: ieee.with(
-//   title: [My Document],
-//   authors: [Your Name]
-// )
+#import "@preview/codly-languages:0.1.1": *
+#show: codly-init.with()
+#codly(number-format: none)
 
 // ============================================
 // Document content
@@ -20,31 +11,30 @@
 
 /* KNOT-INJECT-CHAPTERS */
 
+```{r}
+#|echo: false
+
+library(ggplot2)
+```
+
 = My Document
 
 Here is some text with an inline R expression: `{r} 1 + 1`.
 
 ```{r}
-#| eval: true
-#| echo: true
-#| output: true
-# Load libraries
-library(ggplot2)
-
 # Create some data
 x <- 1:10
-y <- x^2
+y <- x^3
 
 # Display summary
 summary(x)
 ```
 
-The mean of x is `{r} mean(x)`.
+#lorem(50).
+The mean of `x` is `{r} mean(x)`.
 
 ```{r}
-#| eval: true
-#| echo: false
-#| output: true
+#| echo: true
 # Create a simple plot
 df <- data.frame(x = x, y = y)
 gg <- ggplot(df, aes(x = x, y = y)) +
@@ -58,5 +48,9 @@ gg <- ggplot(df, aes(x = x, y = y)) +
   )
 
 # Render the plot (requires knot.r.package)
-typst(gg, width = 6, height = 4)
-```
+typst(gg, width = 4, height = 4)
+``` <rdeux>
+
+Voici la vie. Un peu de #emph[texte]. Toto. Tata. #lorem(200).
+
+#lorem(20)

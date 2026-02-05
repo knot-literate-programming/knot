@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use anyhow::{Result, Context};
-use crate::executors::{KnotExecutor, r::RExecutor};
+use anyhow::Result;
+use crate::executors::{KnotExecutor, LanguageExecutor, r::RExecutor};
 
 pub struct ExecutorManager {
     executors: HashMap<String, Box<dyn KnotExecutor>>,

@@ -188,90 +188,88 @@ async fn get_r_completion(state: &ServerState, uri: &Url, token: &str) -> Option
     sync_cache_if_needed(state, uri).await;
 
     // Acquire write lock to get mutable access to executor manager
-    let mut managers = state.executors.write().await;
-    if let Some(manager) = managers.get_mut(uri) {
-        // Try to get R executor
-        if let Ok(executor) = manager.get_executor("r") {
-             // Check if this is a $ completion (e.g., df$col)
-            let code = if let Some(dollar_pos) = token.rfind('$') {
-                // Extract object name before $ and prefix after $
-                let obj_name = &token[..dollar_pos];
-                let prefix = &token[dollar_pos + 1..];
+    let output = {
+        let mut managers = state.executors.write().await;
+        if let Some(manager) = managers.get_mut(uri) {
+            // Try to get R executor
+            if let Ok(executor) = manager.get_executor("r") {
+                 // Check if this is a $ completion (e.g., df$col)
+                let code = if let Some(dollar_pos) = token.rfind('$') {
+                    // Extract object name before $ and prefix after $
+                    let obj_name = &token[..dollar_pos];
+                    let prefix = &token[dollar_pos + 1..];
 
-                // Get names of the object (columns for df, elements for list)
-                format!(
-                    r#"{{
-                        if (exists("{}")) {{
-                            obj <- get("{}")
-                            obj_names <- names(obj)
-                            if (!is.null(obj_names)) {{
-                                matches <- obj_names[startsWith(obj_names, "{}")]
-                                if (length(matches) > 0) {{
-                                    cat(paste(head(matches, 50), collapse="\n"), "\n")
+                    // Get names of the object (columns for df, elements for list)
+                    format!(
+                        r#"{{
+                            if (exists("{}")) {{
+                                obj <- get("{}")
+                                obj_names <- names(obj)
+                                if (!is.null(obj_names)) {{
+                                    matches <- obj_names[startsWith(obj_names, "{}")]
+                                    if (length(matches) > 0) {{
+                                        cat(paste(head(matches, 50), collapse="\n"), "\n")
+                                    }} else {{
+                                        cat("")
+                                    }}
                                 }} else {{
                                     cat("")
                                 }}
                             }} else {{
                                 cat("")
                             }}
-                        }} else {{
-                            cat("")
-                        }}
-                    }}"#,
-                    obj_name.replace('"', "\\\""),
-                    obj_name.replace('"', "\\\""),
-                    prefix.replace('"', "\\\"")
-                )
-            } else {
-                // Regular completion using apropos for global objects
-                format!(
-                    r#"{{
-                        matches <- utils::apropos("^{}")
-                        if (length(matches) > 0) {{
-                            cat(paste(head(matches, 50), collapse="\n"), "\n")
-                        }} else {{
-                            cat("")
-                        }}
-                    }}"#,
-                    token.replace('"', "\\\"")
-                )
-            };
-
-            // Use query method (which is specific to RExecutor, but for now we know it's R)
-            // Wait, KnotExecutor doesn't have query(). We need to cast or add query to trait.
-            // For now let's use execute() with a dummy GraphicsOptions, or execute_inline.
-            // execute_inline returns formatted string (backticks for vectors).
-            // Let's assume we can use execute_inline for queries if we format the R code to cat() pure text.
-            
-            // Actually, RExecutor specific method query() was useful.
-            // But since we are using dyn KnotExecutor, we can't access it easily without downcasting.
-            // Let's use execute_inline which is in the trait.
-            
-            if let Ok(output) = executor.execute_inline(&code) {
-                // Remove potential backticks from execute_inline formatting if any
-                let clean_output = output.trim().trim_matches('`').trim();
-
-                // Determine if this is $ completion to use appropriate icon
-                let is_dollar_completion = token.contains('$');
-                let kind = if is_dollar_completion {
-                    CompletionItemKind::FIELD // Column/element icon
+                        }}"#,
+                        obj_name.replace('"', "\\\""),
+                        obj_name.replace('"', "\\\""),
+                        prefix.replace('"', "\\\"")
+                    )
                 } else {
-                    CompletionItemKind::FUNCTION // Function icon
+                    // Regular completion using apropos for global objects
+                    format!(
+                        r#"{{
+                            matches <- utils::apropos("^{}")
+                            if (length(matches) > 0) {{
+                                cat(paste(head(matches, 50), collapse="\n"), "\n")
+                            }} else {{
+                                cat("")
+                            }}
+                        }}"#,
+                        token.replace('"', "\\\"")
+                    )
                 };
 
-                let items: Vec<CompletionItem> = clean_output.lines()
-                    .filter(|l| !l.trim().is_empty())
-                    .map(|name| CompletionItem {
-                        label: name.trim().to_string(),
-                        kind: Some(kind),
-                        ..Default::default()
-                    })
-                    .collect();
-
-                if !items.is_empty() {
-                    return Some(CompletionResponse::Array(items));
-                }
+                executor.execute_inline(&code).ok()
+            } else {
+                None
             }
+        } else {
+            None
+        }
+    };
+
+    if let Some(output) = output {
+        // Remove potential backticks from execute_inline formatting if any
+        let clean_output = output.trim().trim_matches('`').trim();
+
+        // Determine if this is $ completion to use appropriate icon
+        let is_dollar_completion = token.contains('$');
+        let kind = if is_dollar_completion {
+            CompletionItemKind::FIELD // Column/element icon
+        } else {
+            CompletionItemKind::FUNCTION // Function icon
+        };
+
+        let items: Vec<CompletionItem> = clean_output.lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(|name| CompletionItem {
+                label: name.trim().to_string(),
+                kind: Some(kind),
+                ..Default::default()
+            })
+            .collect();
+
+        if !items.is_empty() {
+            return Some(CompletionResponse::Array(items));
         }
     }
     None
@@ -311,14 +309,21 @@ async fn sync_cache_if_needed(state: &ServerState, uri: &Url) {
             if should_reload {
                 let snapshot_path = cache_dir.join(format!("snapshot_{}.RData", snapshot_hash));
                 if snapshot_path.exists() {
-                    let mut managers = state.executors.write().await;
-                    if let Some(manager) = managers.get_mut(uri) {
-                        if let Ok(executor) = manager.get_executor("r") {
-                            if executor.load_session(&snapshot_path).is_ok() {
-                                drop(managers);
-                                state.loaded_snapshot_hash.write().await.insert(uri.clone(), snapshot_hash.clone());
+                    let success = {
+                        let mut managers = state.executors.write().await;
+                        if let Some(manager) = managers.get_mut(uri) {
+                            if let Ok(executor) = manager.get_executor("r") {
+                                executor.load_session(&snapshot_path).is_ok()
+                            } else {
+                                false
                             }
+                        } else {
+                            false
                         }
+                    };
+
+                    if success {
+                        state.loaded_snapshot_hash.write().await.insert(uri.clone(), snapshot_hash.clone());
                     }
                 }
             }
@@ -345,7 +350,7 @@ mod tests {
         // Insert mapper
         let mapper = PositionMapper::new(text, text);
         {
-            let mut mappers = state.mappers.write().await;
+            let mut mappers = state.mappers.read().await;
             mappers.insert(url.clone(), mapper);
         }
 

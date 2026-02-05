@@ -278,22 +278,4 @@ pub fn query(process: &mut RProcess, code: &str) -> Result<String> {
     Ok(stdout_output)
 }
 
-/// Get the SHA256 hash of an R object using the digest package
-pub fn get_object_hash(process: &mut RProcess, object_name: &str) -> Result<String> {
-    // We assume digest package is available (it's a dependency of knot-r-package)
-    let code = format!(
-        r#"try(cat(digest::digest({}, algo="sha256")), silent=TRUE)"#,
-        object_name
-    );
-    
-    // Use query mechanism (no side-channel needed for a simple hash string)
-    let output = query(process, &code)?;
-    
-    // Check for R errors in output (since we used try(..., silent=TRUE), errors won't be in stderr)
-    if output.trim().is_empty() || output.contains("Error") {
-        anyhow::bail!("Failed to get hash for object '{}' (it may not exist)", object_name);
-    }
-    
-    Ok(output.trim().to_string())
-}
 
