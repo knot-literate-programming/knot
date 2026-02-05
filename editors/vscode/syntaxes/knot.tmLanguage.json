@@ -111,6 +111,9 @@
           "include": "#typst-heading"
         },
         {
+          "include": "#typst-import"
+        },
+        {
           "include": "#typst-bold"
         },
         {
@@ -145,6 +148,27 @@
         },
         "2": {
           "name": "entity.name.section.typst"
+        }
+      }
+    },
+    "typst-import": {
+      "name": "meta.import.typst",
+      "match": "^(#)(import)\\s+(\"[^\"]+\"|[^:]+)(:)(.*)$",
+      "captures": {
+        "1": {
+          "name": "punctuation.definition.function.typst"
+        },
+        "2": {
+          "name": "keyword.control.import.typst"
+        },
+        "3": {
+          "name": "string.other.import-path.typst"
+        },
+        "4": {
+          "name": "punctuation.separator.typst"
+        },
+        "5": {
+          "name": "variable.other.import-items.typst"
         }
       }
     },
