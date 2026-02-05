@@ -30,7 +30,7 @@ use proxy::TinymistProxy;
 use state::ServerState;
 use transform::transform_to_typst;
 use knot_core::executors::ExecutorManager;
-use knot_core::executors::{LanguageExecutor, KnotExecutor}; // Ensure traits are imported
+ // Traits used for dynamic dispatch // Ensure traits are imported
 
 struct KnotLanguageServer {
     client: Client,

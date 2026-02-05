@@ -1,4 +1,4 @@
-use crate::executors::{ConstantObjectHandler, KnotExecutor, ExecutorManager};
+use crate::executors::{ExecutorManager};
 use crate::parser::{Chunk, Document, InlineExpr};
 use crate::config::Config;
 use crate::cache::ConstantObjectInfo;

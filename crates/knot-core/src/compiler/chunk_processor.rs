@@ -1,10 +1,10 @@
-use crate::executors::{GraphicsOptions, LanguageExecutor, ConstantObjectHandler, ExecutorManager};
+use crate::executors::{GraphicsOptions, ExecutorManager};
 use crate::cache::{Cache, hash_dependencies};
 use crate::executors::ExecutionResult;
 use crate::parser::Chunk;
 use crate::config::ChunkDefaults;
 use crate::backend::{Backend, TypstBackend};
-use anyhow::{Context, Result};
+use anyhow::Result;
 use log::info;
 use sha2::{Digest, Sha256};
 
