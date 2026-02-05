@@ -81,6 +81,13 @@ impl RExecutor {
         execution::query(&mut self.process, code)
     }
 
+    /// Get the SHA256 hash of an R object
+    ///
+    /// Used for dependency tracking of R variables (contracts).
+    pub fn get_object_hash(&mut self, object_name: &str) -> Result<String> {
+        execution::get_object_hash(&mut self.process, object_name)
+    }
+
 }
 
 impl LanguageExecutor for RExecutor {
@@ -105,7 +112,7 @@ cat(digest::digest({}, algo = "xxhash64"))
 "#,
             object_name
         );
-        execution::execute_simple(&mut self.process, &code)
+        self.query(&code)
     }
 
     fn save_constant(&mut self, object_name: &str, hash: &str, cache_dir: &Path) -> Result<()> {
@@ -119,7 +126,7 @@ cat(digest::digest({}, algo = "xxhash64"))
             r#"saveRDS({}, file = "{}")"#,
             object_name, path_str
         );
-        execution::execute_simple(&mut self.process, &code)?;
+        self.query(&code)?;
 
         log::debug!("💾 Saved constant object '{}' to: {}", object_name, object_path.display());
         Ok(())
@@ -145,7 +152,7 @@ cat(digest::digest({}, algo = "xxhash64"))
             r#"{} <- readRDS("{}")"#,
             object_name, path_str
         );
-        execution::execute_simple(&mut self.process, &code)?;
+        self.query(&code)?;
 
         log::debug!("📥 Loaded constant object '{}' from: {}", object_name, object_path.display());
         Ok(())
@@ -153,7 +160,7 @@ cat(digest::digest({}, algo = "xxhash64"))
 
     fn remove_from_env(&mut self, object_name: &str) -> Result<()> {
         let code = format!(r#"rm(list = "{}")"#, object_name);
-        execution::execute_simple(&mut self.process, &code)?;
+        self.query(&code)?;
         log::debug!("🗑️  Removed '{}' from R environment", object_name);
         Ok(())
     }
