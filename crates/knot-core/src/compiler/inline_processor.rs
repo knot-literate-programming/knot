@@ -1,12 +1,12 @@
 use crate::cache::Cache;
-use crate::executors::r::RExecutor;
+use crate::executors::ExecutorManager;
 use crate::parser::InlineExpr;
 use anyhow::{Context, Result};
 use log::info;
 
 pub fn process_inline_expr(
     inline_expr: &InlineExpr,
-    r_executor: &mut Option<RExecutor>,
+    executor_manager: &mut ExecutorManager,
     cache: &mut Cache,
     previous_hash: &str,
 ) -> Result<(String, String)> {
@@ -30,15 +30,22 @@ pub fn process_inline_expr(
     }
 
     // Execute the inline expression
-    info!("  ⚙️ `{{r}} {}` [executing]", inline_expr.code);
-    let result = r_executor
-        .as_mut()
-        .context("R executor not initialized")?
+    info!("  ⚙️ `{{{}}} {}` [executing]", inline_expr.language, inline_expr.code);
+    
+    // Get the executor for the specific language of the inline expression
+    let result = executor_manager.get_executor(&inline_expr.language)?
         .execute_inline(&inline_expr.code)
         .context(format!(
-            "Failed to execute inline expression: `{{r}} {}`",
-            inline_expr.code
+            "Failed to execute inline expression: `{{{}}} {}`",
+            inline_expr.language, inline_expr.code
         ))?;
+
+    // If output=false, we discard the result for the document
+    let final_result = if inline_expr.options.output {
+        result
+    } else {
+        String::new()
+    };
 
     // If output=false, we discard the result for the document
     let final_result = if inline_expr.options.output {

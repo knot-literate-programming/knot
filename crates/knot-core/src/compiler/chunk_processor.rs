@@ -1,6 +1,5 @@
-use crate::executors::{GraphicsOptions, LanguageExecutor};
+use crate::executors::{GraphicsOptions, LanguageExecutor, ConstantObjectHandler, ExecutorManager};
 use crate::cache::{Cache, hash_dependencies};
-use crate::executors::r::RExecutor;
 use crate::executors::ExecutionResult;
 use crate::parser::Chunk;
 use crate::config::ChunkDefaults;
@@ -11,7 +10,7 @@ use sha2::{Digest, Sha256};
 
 pub fn process_chunk(
     chunk: &Chunk,
-    r_executor: &mut Option<RExecutor>,
+    executor_manager: &mut ExecutorManager,
     cache: &mut Cache,
     previous_hash: &str,
     config_defaults: &ChunkDefaults,
@@ -27,7 +26,7 @@ pub fn process_chunk(
         .unwrap_or_else(|| format!("chunk-{}", chunk.start_byte));
 
     let deps_hash = hash_dependencies(&chunk_options.depends)?;
-    let constants_hash = get_constants_hash(r_executor, &chunk_options.constant)?;
+    let constants_hash = get_constants_hash(executor_manager, &chunk.language, &chunk_options.constant)?;
 
     let chunk_hash = cache.get_chunk_hash(
         &chunk.code,
@@ -53,16 +52,9 @@ pub fn process_chunk(
             format: resolved_options.fig_format.clone(),
         };
 
-        let result = match chunk.language.as_str() {
-            "r" => r_executor
-                .as_mut()
-                .context("R executor not initialized")?
-                .execute(&chunk.code, &graphics_opts)?,
-            _ => ExecutionResult::Text(format!(
-                "Language '{}' not supported yet.",
-                chunk.language
-            )),
-        };
+        let exec = executor_manager.get_executor(&chunk.language)?;
+        let result = exec.execute(&chunk.code, &graphics_opts)?;
+        
         if resolved_options.cache {
             cache.save_result(
                 chunk.start_byte, // Use start_byte as unique ID for now
@@ -82,35 +74,32 @@ pub fn process_chunk(
 }
 
 fn get_constants_hash(
-    r_executor: &mut Option<RExecutor>,
+    executor_manager: &mut ExecutorManager,
+    lang: &str,
     constants: &[String]
 ) -> Result<String> {
     if constants.is_empty() {
         return Ok(String::new());
     }
 
-    if let Some(exec) = r_executor {
-        let mut combined_hash = Sha256::new();
-        for var in constants {
-            match exec.get_object_hash(var) {
-                Ok(hash) => {
-                    combined_hash.update(var.as_bytes());
-                    combined_hash.update(hash.as_bytes());
-                },
-                Err(e) => {
-                    // If we can't hash a constant, it implies it doesn't exist or is invalid.
-                    // We force invalidation by adding a random component.
-                    log::warn!("Could not hash constant '{}': {}", var, e);
-                    combined_hash.update(var.as_bytes());
-                    combined_hash.update(uuid::Uuid::new_v4().as_bytes());
-                }
+    let exec = executor_manager.get_executor(lang)?;
+    let mut combined_hash = Sha256::new();
+    for var in constants {
+        match exec.hash_object(var) {
+            Ok(hash) => {
+                combined_hash.update(var.as_bytes());
+                combined_hash.update(hash.as_bytes());
+            },
+            Err(e) => {
+                // If we can't hash a constant, it implies it doesn't exist or is invalid.
+                // We force invalidation by adding a random component.
+                log::warn!("Could not hash constant '{}' in {}: {}", var, lang, e);
+                combined_hash.update(var.as_bytes());
+                combined_hash.update(uuid::Uuid::new_v4().as_bytes());
             }
         }
-        Ok(format!("{:x}", combined_hash.finalize()))
-    } else {
-        // No executor available (e.g., eval=false or initialization failed)
-        Ok(String::new())
     }
+    Ok(format!("{:x}", combined_hash.finalize()))
 }
 
 #[cfg(test)]

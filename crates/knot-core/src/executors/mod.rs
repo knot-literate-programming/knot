@@ -3,8 +3,10 @@ use std::path::{Path, PathBuf};
 
 pub mod r;
 pub mod side_channel;
+pub mod manager;
 
 pub use side_channel::{OutputMetadata, SideChannel};
+pub use manager::ExecutorManager;
 
 // From section 3.3 of the reference document
 
@@ -29,6 +31,16 @@ pub struct GraphicsOptions {
 pub trait LanguageExecutor {
     fn initialize(&mut self) -> Result<()>;
     fn execute(&mut self, code: &str, graphics: &GraphicsOptions) -> Result<ExecutionResult>;
+    fn execute_inline(&mut self, code: &str) -> Result<String>;
+}
+
+/// Combined trait for language executors that support caching and constant objects
+pub trait KnotExecutor: LanguageExecutor + ConstantObjectHandler {
+    /// Save the current environment session to a file
+    fn save_session(&mut self, path: &Path) -> Result<()>;
+
+    /// Load an environment session from a file
+    fn load_session(&mut self, path: &Path) -> Result<()>;
 }
 
 /// Trait for managing constant objects (cache optimization)

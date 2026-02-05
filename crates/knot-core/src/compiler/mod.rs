@@ -1,5 +1,4 @@
-use crate::executors::r::RExecutor;
-use crate::executors::{ConstantObjectHandler, LanguageExecutor};
+use crate::executors::{ConstantObjectHandler, LanguageExecutor, KnotExecutor, ExecutorManager};
 use crate::parser::{Chunk, Document, InlineExpr};
 use crate::config::Config;
 use crate::cache::ConstantObjectInfo;
@@ -25,7 +24,7 @@ use std::path::PathBuf;
 // From section 3.1 and 6.1 (Semaine 2) of the reference document
 
 pub struct Compiler {
-    r_executor: Option<RExecutor>,
+    executor_manager: ExecutorManager,
     config: Config,
     project_root: PathBuf,
     cache_dir: PathBuf,
@@ -59,11 +58,10 @@ impl Compiler {
         
         info!("📦 Cache directory: {}", cache_dir.display());
 
-        let r_executor = RExecutor::new(cache_dir.clone(), r_helper_path)
-            .context("Failed to initialize R executor")?;
+        let executor_manager = ExecutorManager::new(cache_dir.clone(), r_helper_path);
 
         Ok(Self {
-            r_executor: Some(r_executor),
+            executor_manager,
             config,
             project_root,
             cache_dir,
@@ -93,18 +91,13 @@ impl Compiler {
             ExecutableNode::InlineExpr(inline_expr) => inline_expr.start,
         });
 
-        // Initialize R executor
-        if let Some(ref mut r_exec) = self.r_executor {
-            r_exec.initialize()?;
-        }
-
         info!("🔧 Processing {} executable nodes...", executable_nodes.len());
 
         // Phase 2: Iterate through sorted nodes, execute, and build output
         for node in executable_nodes {
-            let (node_start, node_end) = match node {
-                ExecutableNode::Chunk(chunk) => (chunk.start_byte, chunk.end_byte),
-                ExecutableNode::InlineExpr(inline_expr) => (inline_expr.start, inline_expr.end),
+            let (node_start, node_end, lang) = match node {
+                ExecutableNode::Chunk(chunk) => (chunk.start_byte, chunk.end_byte, chunk.language.as_str()),
+                ExecutableNode::InlineExpr(inline_expr) => (inline_expr.start, inline_expr.end, "r"), // Inline currently R only
             };
 
             // Append raw text before the current node
@@ -114,100 +107,154 @@ impl Compiler {
 
             let (result_str, node_hash) = match node {
                 ExecutableNode::Chunk(chunk) => {
-                    let result = chunk_processor::process_chunk(chunk, &mut self.r_executor, &mut cache, &previous_hash, &self.config.defaults)?;
+                    let result = chunk_processor::process_chunk(
+                        chunk, 
+                        &mut self.executor_manager, 
+                        &mut cache, 
+                        &previous_hash, 
+                        &self.config.defaults
+                    )?;
 
                     // Handle constant objects declared in this chunk
                     if !chunk.options.constant.is_empty() {
                         let chunk_name = chunk.name.as_deref().unwrap_or("unnamed").to_string();
+                        let exec = self.executor_manager.get_executor(&chunk.language)?;
+                        let cache_dir = self.project_root.join(Defaults::CACHE_DIR_NAME);
 
-                        if let Some(ref mut r_exec) = self.r_executor {
-                            let cache_dir = self.project_root.join(Defaults::CACHE_DIR_NAME);
+                        for obj_name in &chunk.options.constant {
+                            // 1. Hash the object
+                            let obj_hash = exec.hash_object(obj_name)
+                                .context(format!("Failed to hash constant object '{}'", obj_name))?;
 
-                            for obj_name in &chunk.options.constant {
-                                // 1. Hash the object
-                                let obj_hash = r_exec.hash_object(obj_name)
-                                    .context(format!("Failed to hash constant object '{}'", obj_name))?;
+                            // 2. Save to content-addressed storage
+                            exec.save_constant(obj_name, &obj_hash, &cache_dir)
+                                .context(format!("Failed to save constant object '{}'", obj_name))?;
 
-                                // 2. Save to content-addressed storage
-                                r_exec.save_constant(obj_name, &obj_hash, &cache_dir)
-                                    .context(format!("Failed to save constant object '{}'", obj_name))?;
+                            // 3. Get file size for metadata
+                            let ext = exec.object_extension();
+                            let object_path = cache_dir.join("objects").join(format!("{}.{}", obj_hash, ext));
+                            let size_bytes = std::fs::metadata(&object_path)?.len();
 
-                                // 3. Get file size for metadata
-                                let object_path = cache_dir.join("objects").join(format!("{}.rds", obj_hash));
-                                let size_bytes = std::fs::metadata(&object_path)?.len();
+                            // 4. Track for later verification
+                            constant_objects.insert(obj_name.clone(), (obj_hash.clone(), chunk_name.clone()));
 
-                                // 4. Track for later verification
-                                constant_objects.insert(obj_name.clone(), (obj_hash.clone(), chunk_name.clone()));
+                            // 5. Add to cache metadata
+                            cache.metadata.constant_objects.insert(
+                                obj_name.clone(),
+                                ConstantObjectInfo {
+                                    hash: obj_hash,
+                                    size_bytes,
+                                    language: chunk.language.clone(),
+                                    created_in_chunk: chunk_name.clone(),
+                                    created_at: chrono::Utc::now().to_rfc3339(),
+                                }
+                            );
 
-                                // 5. Add to cache metadata
-                                cache.metadata.constant_objects.insert(
-                                    obj_name.clone(),
-                                    ConstantObjectInfo {
-                                        hash: obj_hash,
-                                        size_bytes,
-                                        language: "r".to_string(),
-                                        created_in_chunk: chunk_name.clone(),
-                                        created_at: chrono::Utc::now().to_rfc3339(),
-                                    }
-                                );
-
-                                log::info!("🔒 Constant object '{}' declared in chunk '{}'", obj_name, chunk_name);
-                            }
+                            log::info!("🔒 Constant object '{}' ({}) declared in chunk '{}'", obj_name, chunk.language, chunk_name);
                         }
                     }
 
                     result
                 }
                 ExecutableNode::InlineExpr(inline_expr) => {
-                    inline_processor::process_inline_expr(inline_expr, &mut self.r_executor, &mut cache, &previous_hash)?
+                    inline_processor::process_inline_expr(
+                        inline_expr, 
+                        &mut self.executor_manager, 
+                        &mut cache, 
+                        &previous_hash
+                    )?
                 }
             };
 
             // After execution/cache: Ensure snapshot exists
             let snapshot_path = cache.get_snapshot_path(&node_hash);
             let snapshot_exists = cache.has_snapshot(&node_hash);
-
-            if let Some(ref mut r_exec) = self.r_executor {
+            
+            // Get executor for this node's language
+            if let Ok(exec) = self.executor_manager.get_executor(lang) {
                 let cache_dir = self.project_root.join(Defaults::CACHE_DIR_NAME);
 
                 if !snapshot_exists {
                     // Node was executed (not from cache), save the snapshot.
                     // Exclude constant objects from snapshot to keep it lightweight
-                    for obj_name in constant_objects.keys() {
-                        r_exec.remove_from_env(obj_name)
-                            .context(format!("Failed to remove constant object '{}' from environment", obj_name))?;
+                    for (obj_name, info) in &cache.metadata.constant_objects {
+                        if info.language == lang {
+                            exec.remove_from_env(obj_name)
+                                .context(format!("Failed to remove constant object '{}' from environment", obj_name))?;
+                        }
                     }
 
-                    r_exec.save_session(&snapshot_path)
+                    exec.save_session(&snapshot_path)
                         .context(format!("Failed to save session snapshot for hash {}", &node_hash[..8]))?;
 
                     // Restore constant objects to environment
-                    for (obj_name, (obj_hash, _)) in &constant_objects {
-                        r_exec.load_constant(obj_name, obj_hash, &cache_dir)
-                            .context(format!("Failed to restore constant object '{}' to environment", obj_name))?;
+                    for (obj_name, info) in &cache.metadata.constant_objects {
+                        if info.language == lang {
+                            exec.load_constant(obj_name, &info.hash, &cache_dir)
+                                .context(format!("Failed to restore constant object '{}' to environment", obj_name))?;
+                        }
                     }
 
-                    log::debug!("💾 Saved lightweight snapshot for node {} (excluded {} constant objects)",
-                               &node_hash[..8], constant_objects.len());
+                    log::debug!("💾 Saved lightweight snapshot for node {} (language: {})",
+                               &node_hash[..8], lang);
                 } else {
                     // Node was cached (skipped execution).
                     // Load the snapshot, then restore constant objects
                     log::debug!("📦 Using existing snapshot for node {}", &node_hash[..8]);
-                    r_exec.load_session(&snapshot_path)
+                    exec.load_session(&snapshot_path)
                         .context(format!("Failed to load session snapshot for hash {}", &node_hash[..8]))?;
 
                     // Restore constant objects from content-addressed storage
-                    for (obj_name, (obj_hash, _)) in &constant_objects {
-                        r_exec.load_constant(obj_name, obj_hash, &cache_dir)
-                            .context(format!("Failed to load constant object '{}' from cache", obj_name))?;
+                    for (obj_name, info) in &cache.metadata.constant_objects {
+                        if info.language == lang {
+                            exec.load_constant(obj_name, &info.hash, &cache_dir)
+                                .context(format!("Failed to load constant object '{}' from cache", obj_name))?;
+                        }
                     }
 
-                    log::debug!("📂 Loaded snapshot for node {} (+ {} constant objects)",
-                               &node_hash[..8], constant_objects.len());
+                    log::debug!("📂 Loaded snapshot for node {} (+ constants for {})",
+                               &node_hash[..8], lang);
                 }
-            } else if snapshot_exists {
-                log::debug!("📦 Using existing snapshot for node {} (no R executor)", &node_hash[..8]);
             }
+
+            typst_output.push_str(&result_str);
+            previous_hash = node_hash;
+            last_pos = node_end;
+        }
+
+        // Append any remaining raw text after the last node
+        if last_pos < doc.source.len() {
+            typst_output.push_str(&doc.source[last_pos..]);
+        }
+
+        info!("✓ All nodes processed.");
+
+        // Final verification: Check that constant objects were not modified
+        if !constant_objects.is_empty() {
+            info!("🔍 Verifying {} constant objects...", constant_objects.len());
+
+            for (obj_name, (initial_hash, chunk_name)) in &constant_objects {
+                let info = cache.metadata.constant_objects.get(obj_name).unwrap();
+                let exec = self.executor_manager.get_executor(&info.language)?;
+                
+                let final_hash = exec.hash_object(obj_name)
+                    .context(format!("Failed to verify constant object '{}'", obj_name))?;
+
+                if &final_hash != initial_hash {
+                    anyhow::bail!(
+                        "❌ Constant object verification failed!\n\n\
+                         Object '{}' ({}) was declared as constant in chunk '{}' but was modified during execution.\n\n\
+                         Initial hash: {}\n\
+                         Final hash:   {}\n\n\
+                         This violates the constant object contract. The object must remain immutable after creation.\n\
+                         Output file NOT generated to preserve reproducibility.",
+                        obj_name, info.language, chunk_name, initial_hash, final_hash
+                    );
+                }
+            }
+
+            info!("✓ All constant objects verified successfully.");
+        }
 
             typst_output.push_str(&result_str);
             previous_hash = node_hash;

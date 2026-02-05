@@ -29,8 +29,8 @@ use position_mapper::PositionMapper;
 use proxy::TinymistProxy;
 use state::ServerState;
 use transform::transform_to_typst;
-use knot_core::executors::r::RExecutor;
-use knot_core::executors::LanguageExecutor;
+use knot_core::executors::ExecutorManager;
+use knot_core::executors::{LanguageExecutor, KnotExecutor}; // Ensure traits are imported
 
 struct KnotLanguageServer {
     client: Client,
@@ -190,33 +190,23 @@ impl LanguageServer for KnotLanguageServer {
         // Store document text
         self.state.documents.write().await.insert(uri.clone(), text.clone());
 
-        // Initialize R Executor for this document
+        // Initialize ExecutorManager for this document
         {
-            let mut executors = self.state.r_executors.write().await;
-            if !executors.contains_key(&uri) {
+            let mut managers = self.state.executors.write().await;
+            if !managers.contains_key(&uri) {
                 // Create a temp dir for this LSP session
                 let temp_dir = std::env::temp_dir().join(format!("knot_lsp_{}", uuid::Uuid::new_v4()));
                 
-                // Initialize R executor (using installed package for now)
-                match RExecutor::new(temp_dir, None) {
-                    Ok(mut exec) => {
-                        // Initialize in a blocking way (spawn is fast enough)
-                        // We can't easily await inside this lock block if initialize was async, but it's synchronous
-                        if let Err(e) = exec.initialize() {
-                             self.client.log_message(MessageType::ERROR, format!("Failed to init R executor: {}", e)).await;
-                        } else {
-                             executors.insert(uri.clone(), exec);
-                             self.client.log_message(MessageType::INFO, "Initialized R session for document").await;
-                        }
-                    }
-                    Err(e) => {
-                        self.client.log_message(MessageType::ERROR, format!("Failed to create R executor: {}", e)).await;
-                    }
-                }
+                // Initialize ExecutorManager
+                // Note: r_helper_path is None here, we might want to pass it if we can resolve it quickly
+                // For now LSP uses a simpler initialization
+                let manager = ExecutorManager::new(temp_dir, None);
+                managers.insert(uri.clone(), manager);
+                self.client.log_message(MessageType::INFO, "Initialized executor manager for document").await;
             }
         }
 
-        // Sync with cache to restore previous R session state (only on open, not on every change)
+        // Sync with cache to restore previous session state (only on open, not on every change)
         self.sync_with_cache(&uri).await;
 
         // Trigger diagnostics on file open
@@ -241,9 +231,9 @@ impl LanguageServer for KnotLanguageServer {
         self.state.documents.write().await.remove(&uri);
         self.state.mappers.write().await.remove(&uri);
         
-        // Remove and drop R executor (terminates process)
-        if let Some(_exec) = self.state.r_executors.write().await.remove(&uri) {
-            self.client.log_message(MessageType::INFO, "Closed R session for document").await;
+        // Remove and drop executors (terminates processes)
+        if let Some(_manager) = self.state.executors.write().await.remove(&uri) {
+            self.client.log_message(MessageType::INFO, "Closed execution session for document").await;
         }
     }
 
@@ -410,15 +400,18 @@ impl KnotLanguageServer {
                     let snapshot_path = cache_dir.join(format!("snapshot_{}.RData", snapshot_hash));
                     if snapshot_path.exists() {
                         // 4. Load this snapshot into our live R session
-                        let mut executors = self.state.r_executors.write().await;
-                        if let Some(executor) = executors.get_mut(uri) {
-                            if let Err(e) = executor.load_session(&snapshot_path) {
-                                self.client.log_message(MessageType::WARNING, format!("Failed to load R snapshot: {}", e)).await;
-                            } else {
-                                // 5. Update the loaded hash
-                                drop(executors); // Release executor lock
-                                self.state.loaded_snapshot_hash.write().await.insert(uri.clone(), snapshot_hash.clone());
-                                self.client.log_message(MessageType::INFO, format!("Synced R session with snapshot for chunk {} (hash: {})", last_chunk.index, &snapshot_hash[..8])).await;
+                        let mut managers = self.state.executors.write().await;
+                        if let Some(manager) = managers.get_mut(uri) {
+                            // We explicitly want to load the R session
+                            if let Ok(executor) = manager.get_executor("r") {
+                                if let Err(e) = executor.load_session(&snapshot_path) {
+                                    self.client.log_message(MessageType::WARNING, format!("Failed to load R snapshot: {}", e)).await;
+                                } else {
+                                    // 5. Update the loaded hash
+                                    drop(managers); // Release lock
+                                    self.state.loaded_snapshot_hash.write().await.insert(uri.clone(), snapshot_hash.clone());
+                                    self.client.log_message(MessageType::INFO, format!("Synced R session with snapshot for chunk {} (hash: {})", last_chunk.index, &snapshot_hash[..8])).await;
+                                }
                             }
                         }
                     }

@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use crate::position_mapper::PositionMapper;
 use crate::proxy::TinymistProxy;
 use crate::formatter::AirFormatter;
-use knot_core::executors::r::RExecutor;
+use knot_core::executors::ExecutorManager;
 
 /// Centralized state for the Knot Language Server
 pub struct ServerState {
@@ -22,8 +22,8 @@ pub struct ServerState {
     pub document_versions: Arc<RwLock<HashMap<Url, i32>>>,
     /// The R code formatter (Air)
     pub formatter: Arc<RwLock<Option<AirFormatter>>>,
-    /// Live R executors for each document (for completion/hover)
-    pub r_executors: Arc<RwLock<HashMap<Url, RExecutor>>>,
+    /// Live executors for each document (managed per language)
+    pub executors: Arc<RwLock<HashMap<Url, ExecutorManager>>>,
     /// Path overrides from client initialization
     pub air_path_override: Arc<RwLock<Option<PathBuf>>>,
     pub tinymist_path_override: Arc<RwLock<Option<PathBuf>>>,
@@ -42,7 +42,7 @@ impl ServerState {
             opened_in_tinymist: Arc::new(RwLock::new(HashMap::new())),
             document_versions: Arc::new(RwLock::new(HashMap::new())),
             formatter: Arc::new(RwLock::new(None)),
-            r_executors: Arc::new(RwLock::new(HashMap::new())),
+            executors: Arc::new(RwLock::new(HashMap::new())),
             air_path_override: Arc::new(RwLock::new(None)),
             tinymist_path_override: Arc::new(RwLock::new(None)),
             tinymist: Arc::new(RwLock::new(None)),

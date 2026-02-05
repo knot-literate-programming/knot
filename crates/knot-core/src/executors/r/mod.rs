@@ -85,14 +85,6 @@ impl RExecutor {
     pub fn query(&mut self, code: &str) -> Result<String> {
         execution::query(&mut self.process, code)
     }
-
-    /// Get the SHA256 hash of an R object
-    ///
-    /// Used for dependency tracking of R variables (contracts).
-    pub fn get_object_hash(&mut self, object_name: &str) -> Result<String> {
-        execution::get_object_hash(&mut self.process, object_name)
-    }
-
 }
 
 impl LanguageExecutor for RExecutor {
@@ -102,6 +94,20 @@ impl LanguageExecutor for RExecutor {
 
     fn execute(&mut self, code: &str, graphics: &GraphicsOptions) -> Result<ExecutionResult> {
         execution::execute(&mut self.process, &self.cache_dir, code, graphics)
+    }
+
+    fn execute_inline(&mut self, code: &str) -> Result<String> {
+        execution::execute_inline(self, code)
+    }
+}
+
+impl KnotExecutor for RExecutor {
+    fn save_session(&mut self, path: &Path) -> Result<()> {
+        execution::save_session(&mut self.process, path)
+    }
+
+    fn load_session(&mut self, path: &Path) -> Result<()> {
+        execution::load_session(&mut self.process, path)
     }
 }
 
