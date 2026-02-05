@@ -1,8 +1,9 @@
 # Knot
 *.typ
+.*.typ
 *.pdf
 .knot_cache/
-_knot_files/
+_knot_r_files/
 
 # Rust
 /target/
