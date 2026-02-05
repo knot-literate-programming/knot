@@ -113,6 +113,7 @@ impl Cache {
         &mut self,
         chunk_index: usize,
         chunk_name: Option<String>,
+        language: String,
         hash: String,
         result: &ExecutionResult,
         dependencies: Vec<PathBuf>,
@@ -131,6 +132,7 @@ impl Cache {
         let new_entry = storage::create_chunk_entry(
             chunk_index,
             chunk_name,
+            language,
             hash,
             files_to_cache,
             dependencies,

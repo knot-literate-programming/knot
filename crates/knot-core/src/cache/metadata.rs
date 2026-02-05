@@ -21,6 +21,7 @@ pub struct CacheMetadata {
 pub struct ChunkCacheEntry {
     pub index: usize,
     pub name: Option<String>,
+    pub language: String,
     pub hash: String,
     pub files: Vec<String>,
     pub dependencies: Vec<String>,

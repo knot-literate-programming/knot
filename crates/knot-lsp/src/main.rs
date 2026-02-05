@@ -390,8 +390,8 @@ impl KnotLanguageServer {
             // Find the last chunk that was executed in R
             let last_r_chunk = cache.metadata.chunks.iter()
                 .filter(|c| {
-                    // Check if snapshot exists with .RData extension
-                    cache.has_snapshot(&c.hash, "RData")
+                    // Check if chunk is R AND snapshot exists with .RData extension
+                    c.language == "r" && cache.has_snapshot(&c.hash, "RData")
                 })
                 .max_by_key(|c| c.index);
 

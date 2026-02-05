@@ -259,7 +259,7 @@ async fn sync_cache_if_needed(state: &ServerState, uri: &Url) {
     if let Ok(cache) = Cache::new(cache_dir.clone()) {
         // Find the last chunk that was executed in R
         let last_r_chunk = cache.metadata.chunks.iter()
-            .filter(|c| cache.has_snapshot(&c.hash, "RData"))
+            .filter(|c| c.language == "r" && cache.has_snapshot(&c.hash, "RData"))
             .max_by_key(|c| c.index);
 
         if let Some(last_chunk) = last_r_chunk {

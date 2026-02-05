@@ -59,6 +59,7 @@ pub fn process_chunk(
             cache.save_result(
                 chunk.start_byte, // Use start_byte as unique ID for now
                 chunk.name.clone(),
+                chunk.language.clone(),
                 chunk_hash.clone(),
                 &result,
                 chunk_options.depends.clone(),
