@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use anyhow::Result;
-use crate::executors::{KnotExecutor, LanguageExecutor, r::RExecutor};
+use crate::executors::{KnotExecutor, LanguageExecutor, r::RExecutor, python::PythonExecutor};
 
 pub struct ExecutorManager {
     executors: HashMap<String, Box<dyn KnotExecutor>>,
@@ -27,7 +27,11 @@ impl ExecutorManager {
                     exec.initialize()?;
                     Box::new(exec)
                 }
-                // future: "python" => Box::new(PythonExecutor::new(...)),
+                "python" => {
+                    let mut exec = PythonExecutor::new(self.cache_dir.clone())?;
+                    exec.initialize()?;
+                    Box::new(exec)
+                }
                 _ => anyhow::bail!("Unsupported language: {}", lang),
             };
             self.executors.insert(lang.to_string(), executor);
@@ -38,6 +42,6 @@ impl ExecutorManager {
 
     /// Check if a language is supported
     pub fn is_supported(&self, lang: &str) -> bool {
-        matches!(lang, "r") // Add more as they are implemented
+        matches!(lang, "r" | "python")
     }
 }

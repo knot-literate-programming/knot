@@ -2,6 +2,7 @@ use anyhow::Result;
 use std::path::{Path, PathBuf};
 
 pub mod r;
+pub mod python;
 pub mod side_channel;
 pub mod manager;
 
