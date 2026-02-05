@@ -7,6 +7,7 @@ use crate::config::ChunkDefaults;
 use crate::backend::{Backend, TypstBackend};
 use anyhow::{Context, Result};
 use log::info;
+use sha2::{Digest, Sha256};
 
 pub fn process_chunk(
     chunk: &Chunk,
@@ -26,12 +27,14 @@ pub fn process_chunk(
         .unwrap_or_else(|| format!("chunk-{}", chunk.start_byte));
 
     let deps_hash = hash_dependencies(&chunk_options.depends)?;
+    let constants_hash = get_constants_hash(r_executor, &chunk_options.constant)?;
 
     let chunk_hash = cache.get_chunk_hash(
         &chunk.code,
         &chunk_options,
         previous_hash,
         &deps_hash,
+        &constants_hash,
     );
 
     let execution_result = if !resolved_options.eval {
@@ -78,6 +81,38 @@ pub fn process_chunk(
     Ok((chunk_output_final, chunk_hash))
 }
 
+fn get_constants_hash(
+    r_executor: &mut Option<RExecutor>,
+    constants: &[String]
+) -> Result<String> {
+    if constants.is_empty() {
+        return Ok(String::new());
+    }
+
+    if let Some(exec) = r_executor {
+        let mut combined_hash = Sha256::new();
+        for var in constants {
+            match exec.get_object_hash(var) {
+                Ok(hash) => {
+                    combined_hash.update(var.as_bytes());
+                    combined_hash.update(hash.as_bytes());
+                },
+                Err(e) => {
+                    // If we can't hash a constant, it implies it doesn't exist or is invalid.
+                    // We force invalidation by adding a random component.
+                    log::warn!("Could not hash constant '{}': {}", var, e);
+                    combined_hash.update(var.as_bytes());
+                    combined_hash.update(uuid::Uuid::new_v4().as_bytes());
+                }
+            }
+        }
+        Ok(format!("{:x}", combined_hash.finalize()))
+    } else {
+        // No executor available (e.g., eval=false or initialization failed)
+        Ok(String::new())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -113,6 +148,7 @@ mod tests {
                 dpi: None,
                 fig_format: None,
                 fig_alt: None,
+                constant: vec![],
             },
             errors: vec![],
             range: dummy_range.clone(),

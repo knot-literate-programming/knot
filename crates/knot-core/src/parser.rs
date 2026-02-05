@@ -193,12 +193,19 @@ pub struct Document {
     pub source: String,
     pub chunks: Vec<Chunk>,
     pub inline_exprs: Vec<InlineExpr>,
+    pub errors: Vec<String>,
 }
 
 impl Document {
     // La logique de parsing utilise winnow (v2)
     pub fn parse(source: String) -> Result<Self> {
-        parse_document(&source)
+        let doc = parse_document(&source);
+        if !doc.errors.is_empty() {
+            // For now, we still return Ok but the document contains errors.
+            // This is good for LSP. 
+            // In the future, the compiler might want to check doc.errors.
+        }
+        Ok(doc)
     }
 }
 
@@ -206,18 +213,19 @@ impl Document {
 // Winnow Parser Implementation
 // -----------------------------------------------------------------------------
 
-fn parse_document(source: &str) -> anyhow::Result<Document> {
+fn parse_document(source: &str) -> Document {
     let mut input = source; // This slice will advance
     let original_source = source; // This one stays fixed for offset calculation
 
     let mut chunks = Vec::new();
+    let mut errors = Vec::new();
     
     // 1. Extract Chunks
     while !input.is_empty() {
         // We try to parse a chunk
         let start_input = input; // Snapshot before parsing attempt
         
-        // If we see ```{, we MUST be able to parse a chunk
+        // If we see ```{, we try to parse a chunk
         if input.starts_with("```{") {
             match parse_chunk_internal.parse_next(&mut input) {
                 Ok((mut chunk, code_slice)) => {
@@ -243,12 +251,14 @@ fn parse_document(source: &str) -> anyhow::Result<Document> {
                 }
                 Err(err) => {
                     let pos = offset_to_position(original_source, Offset::offset_from(&start_input, &original_source));
-                    anyhow::bail!("Malformed or unclosed code chunk at line {}, column {}: {}", pos.line + 1, pos.column + 1, err);
+                    errors.push(format!("Malformed or unclosed code chunk at line {}, column {}: {}", pos.line + 1, pos.column + 1, err));
+                    
+                    // Consume the opening to avoid infinite loop
+                    let _ = take::<_, _, ContextError>(4usize).parse_next(&mut input);
                 }
             }
         } else {
-            // Not a chunk start, move forward by one character
-            // (or until the next ```{)
+            // Not a chunk start, move forward until next ```{
             match take_until::<_, _, ContextError>(1.., "```{").parse_next(&mut input) {
                 Ok(_) => {
                     // input now points to ```{
@@ -262,13 +272,14 @@ fn parse_document(source: &str) -> anyhow::Result<Document> {
     }
 
     // 2. Extract Inline Expressions
-    let inline_exprs = extract_inline_exprs_winnow(source, &chunks)?;
+    let inline_exprs = extract_inline_exprs_winnow(source, &chunks).unwrap_or_default();
 
-    Ok(Document {
+    Document {
         source: source.to_string(),
         chunks,
         inline_exprs,
-    })
+        errors,
+    }
 }
 
 // Returns (Chunk, code_slice)

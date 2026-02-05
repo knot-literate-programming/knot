@@ -23,11 +23,12 @@ pub fn get_chunk_hash(
     options: &ChunkOptions,
     previous_hash: &str,
     dependencies_hash: &str,
+    constants_hash: &str,
 ) -> String {
     let options_str = serde_json::to_string(options).unwrap_or_default();
     let chunk_content = format!(
-        "{}|{}|{}|{}",
-        code, options_str, previous_hash, dependencies_hash
+        "{}|{}|{}|{}|{}",
+        code, options_str, previous_hash, dependencies_hash, constants_hash
     );
 
     let mut hasher = Sha256::new();

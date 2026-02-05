@@ -156,6 +156,7 @@ mod tests {
                 dpi: None,
                 fig_format: None,
                 fig_alt: None,
+                constant: vec![],
             },
             errors: vec![],
             range: dummy_range.clone(),

@@ -17,6 +17,7 @@ pub enum ExecutableNode<'a> {
 
 use crate::cache::Cache;
 use crate::get_cache_dir;
+use crate::defaults::Defaults;
 use anyhow::{Context, Result};
 use log::info;
 use std::path::PathBuf;
@@ -26,6 +27,7 @@ use std::path::PathBuf;
 pub struct Compiler {
     r_executor: Option<RExecutor>,
     config: Config,
+    project_root: PathBuf,
     cache_dir: PathBuf,
 }
 
@@ -63,6 +65,7 @@ impl Compiler {
         Ok(Self {
             r_executor: Some(r_executor),
             config,
+            project_root,
             cache_dir,
         })
     }
@@ -118,7 +121,7 @@ impl Compiler {
                         let chunk_name = chunk.name.as_deref().unwrap_or("unnamed").to_string();
 
                         if let Some(ref mut r_exec) = self.r_executor {
-                            let cache_dir = get_cache_dir();
+                            let cache_dir = self.project_root.join(Defaults::CACHE_DIR_NAME);
 
                             for obj_name in &chunk.options.constant {
                                 // 1. Hash the object
@@ -165,7 +168,7 @@ impl Compiler {
             let snapshot_exists = cache.has_snapshot(&node_hash);
 
             if let Some(ref mut r_exec) = self.r_executor {
-                let cache_dir = get_cache_dir();
+                let cache_dir = self.project_root.join(Defaults::CACHE_DIR_NAME);
 
                 if !snapshot_exists {
                     // Node was executed (not from cache), save the snapshot.
