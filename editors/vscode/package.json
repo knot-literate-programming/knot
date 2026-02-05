@@ -51,6 +51,31 @@
         }
       }
     ],
+    "commands": [
+      {
+        "command": "knot.openPreview",
+        "title": "Open Preview",
+        "category": "Knot",
+        "icon": "$(open-preview)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "knot.openPreview",
+          "when": "resourceLangId == knot",
+          "group": "navigation"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "knot.openPreview",
+        "key": "ctrl+k v",
+        "mac": "cmd+k v",
+        "when": "resourceLangId == knot"
+      }
+    ],
     "configuration": {
       "title": "Knot",
       "properties": {
@@ -63,6 +88,12 @@
           "type": "string",
           "default": "knot-lsp",
           "description": "Path to knot-lsp executable"
+        },
+        "knot.preview.pdfViewer": {
+          "type": "string",
+          "enum": ["vscode", "external"],
+          "default": "vscode",
+          "description": "PDF viewer to use for preview (vscode: built-in PDF viewer, external: system default)"
         },
         "knot.formatter.air.path": {
           "type": "string",
