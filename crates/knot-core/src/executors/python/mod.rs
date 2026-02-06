@@ -99,7 +99,22 @@ impl LanguageExecutor for PythonExecutor {
         let (stdout, stderr) = self.process.read_until_boundary()?;
 
         if !stderr.is_empty() && stderr.to_lowercase().contains("traceback") {
-            anyhow::bail!("Python execution failed:\n{}", stderr);
+            let code_preview = if code.lines().count() > 5 {
+                let lines: Vec<&str> = code.lines().take(5).collect();
+                format!(
+                    "{}\n... ({} lines truncated)",
+                    lines.join("\n"),
+                    code.lines().count() - 5
+                )
+            } else {
+                code.to_string()
+            };
+
+            anyhow::bail!(
+                "Python execution failed.\n\nCode:\n{}\n\nError:\n{}",
+                code_preview,
+                stderr.trim()
+            );
         }
 
         Ok(ExecutionResult::Text(stdout))
@@ -120,7 +135,11 @@ impl LanguageExecutor for PythonExecutor {
 
         match result {
             ExecutionResult::Text(t) => Ok(t.trim().to_string()),
-            _ => anyhow::bail!("Unexpected result type for inline expression"),
+            _ => anyhow::bail!(
+                "Inline expression returned a complex object (plot or dataframe).\n\
+                 Inline code must return text or a simple value.\n\
+                 Use a code chunk instead: ```{{python}}\n...\n```"
+            ),
         }
     }
 
@@ -136,7 +155,7 @@ impl LanguageExecutor for PythonExecutor {
         )?;
         match result {
             ExecutionResult::Text(t) => Ok(t.trim().to_string()),
-            _ => anyhow::bail!("Unexpected result type for query"),
+            _ => anyhow::bail!("Internal Error: Query returned unexpected non-text result"),
         }
     }
 }

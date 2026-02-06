@@ -62,11 +62,22 @@ pub fn execute(
             || stderr_lower.contains("objet") && stderr_lower.contains("introuvable");
 
         if is_error {
+            // Format a cleaner error message
+            let code_preview = if code.lines().count() > 5 {
+                let lines: Vec<&str> = code.lines().take(5).collect();
+                format!(
+                    "{}\n... ({} lines truncated)",
+                    lines.join("\n"),
+                    code.lines().count() - 5
+                )
+            } else {
+                code.to_string()
+            };
+
             anyhow::bail!(
-                "R execution failed:\n\n--- Code ---\n{}\n\n--- Stderr ---\n{}\n\n--- Stdout ---\n{}",
-                code,
-                stderr_output.trim(),
-                stdout_output.trim()
+                "R execution failed.\n\nCode:\n{}\n\nError:\n{}",
+                code_preview,
+                stderr_output.trim()
             );
         } else {
             // Just warnings or informational messages, log them but don't fail
