@@ -215,7 +215,7 @@ y<-2
 
         // Should format both chunks
         if let Some(edits) = result {
-            assert!(edits.len() >= 1);
+            assert!(!edits.is_empty());
         }
     }
 }

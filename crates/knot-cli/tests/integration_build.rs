@@ -9,7 +9,6 @@
 // Note: These tests use set_current_dir() which is not thread-safe.
 // Run with: cargo test -- --test-threads=1
 
-use pathdiff;
 use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;

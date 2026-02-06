@@ -110,7 +110,6 @@ impl PositionMapper {
 }
 
 #[cfg(test)]
-
 mod tests {
 
     use super::*;

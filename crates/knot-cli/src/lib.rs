@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use knot_core::{Compiler, Document};
 use log::info;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Build the project and generate final PDF
 ///
@@ -194,7 +194,7 @@ pub fn compile_file(file: &PathBuf, output_path: Option<&PathBuf>) -> Result<Pat
 /// Copies generated files (CSVs, plots) to a local directory and updates paths
 ///
 /// Converts absolute cache paths to relative paths in _knot_r_files/
-fn fix_paths_in_typst(source: &str, typ_file: &PathBuf) -> Result<String> {
+fn fix_paths_in_typst(source: &str, typ_file: &Path) -> Result<String> {
     use knot_core::Defaults;
     use regex::Regex;
     use std::path::Path;
@@ -218,15 +218,17 @@ fn fix_paths_in_typst(source: &str, typ_file: &PathBuf) -> Result<String> {
         let dest_path = local_files_dir.join(filename.as_ref());
 
         // Copy file
-        if abs_path.exists() {
-            if let Err(e) = fs::copy(abs_path, &dest_path) {
-                log::warn!("Failed to copy {}: {}", abs_path.display(), e);
-                return format!("\"{}\"", abs_path_str);
+        match abs_path.exists() {
+            true => {
+                if let Err(e) = fs::copy(abs_path, &dest_path) {
+                    log::warn!("Failed to copy {}: {}", abs_path.display(), e);
+                    format!("\"{}\"", abs_path_str)
+                } else {
+                    format!("\"{}/{}\"", Defaults::R_FILES_DIR, filename)
+                }
             }
+            false => format!("\"{}/{}\"", Defaults::R_FILES_DIR, filename),
         }
-
-        // Return relative path
-        format!("\"{}/{}\"", Defaults::R_FILES_DIR, filename)
     });
 
     Ok(result.to_string())

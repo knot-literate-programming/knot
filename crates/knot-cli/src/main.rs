@@ -81,7 +81,7 @@ fn init(project_name: &PathBuf) -> Result<()> {
         );
     }
 
-    fs::create_dir_all(&project_name).context(format!(
+    fs::create_dir_all(project_name).context(format!(
         "Failed to create project directory: {:?}",
         project_name
     ))?;
@@ -90,7 +90,7 @@ fn init(project_name: &PathBuf) -> Result<()> {
 
     // Extract minimal template files (knot.toml, main.knot)
     MINIMAL_TEMPLATE
-        .extract(&project_name)
+        .extract(project_name)
         .context("Failed to extract minimal template")?;
     println!("  ✓ Copied template files");
 

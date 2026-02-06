@@ -277,7 +277,7 @@ async fn sync_cache_if_needed(state: &ServerState, uri: &Url) {
             // Check if this snapshot is different from the last loaded one
             let should_reload = {
                 let loaded_hashes = state.loaded_snapshot_hash.read().await;
-                loaded_hashes.get(uri).map_or(true, |h| h != snapshot_hash)
+                loaded_hashes.get(uri) != Some(snapshot_hash)
             };
 
             if should_reload {

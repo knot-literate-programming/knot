@@ -77,15 +77,17 @@ pub fn clean_project(start_dir: Option<&Path>) -> Result<()> {
     let entries = fs::read_dir(&project_root)?;
     for entry in entries.flatten() {
         let path = entry.path();
-        if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
-            if path.is_file()
-                && filename.starts_with('.')
-                && (filename.ends_with(".typ") || filename.ends_with(".pdf"))
+        let filename = path.file_name().and_then(|n| n.to_str());
+
+        match (path.is_file(), filename) {
+            (true, Some(name))
+                if name.starts_with('.') && (name.ends_with(".typ") || name.ends_with(".pdf")) =>
             {
                 fs::remove_file(&path)
                     .with_context(|| format!("Failed to remove file: {:?}", path))?;
-                println!("  ✓ Removed generated file: {}", filename);
+                println!("  ✓ Removed generated file: {}", name);
             }
+            _ => {}
         }
     }
 

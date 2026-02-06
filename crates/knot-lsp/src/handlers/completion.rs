@@ -327,7 +327,7 @@ async fn sync_cache_if_needed(state: &ServerState, uri: &Url) {
             // Check if this snapshot is different from the last loaded one
             let should_reload = {
                 let loaded_hashes = state.loaded_snapshot_hash.read().await;
-                loaded_hashes.get(uri).map_or(true, |h| h != snapshot_hash)
+                loaded_hashes.get(uri) != Some(snapshot_hash)
             };
 
             if should_reload {
@@ -378,7 +378,7 @@ mod tests {
         // Insert mapper
         let mapper = PositionMapper::new(text, text);
         {
-            let mut mappers = state.mappers.read().await;
+            let mut mappers = state.mappers.write().await;
             mappers.insert(url.clone(), mapper);
         }
 
@@ -413,7 +413,7 @@ x <- 1
         assert!(result.is_some());
 
         if let Some(CompletionResponse::Array(items)) = result {
-            assert!(items.len() > 0);
+            assert!(!items.is_empty());
 
             // Check that we have expected options
             let labels: Vec<String> = items.iter().map(|i| i.label.clone()).collect();
@@ -455,7 +455,7 @@ x <- 1
 
         // Should still return all options (filtering is done by the editor)
         if let Some(CompletionResponse::Array(items)) = result {
-            assert!(items.len() > 0);
+            assert!(!items.is_empty());
         }
     }
 
