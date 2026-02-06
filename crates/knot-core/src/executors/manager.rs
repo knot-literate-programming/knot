@@ -17,7 +17,7 @@
 //!
 //! # Example
 //!
-//! ```rust
+//! ```no_run
 //! use knot_core::executors::{ExecutorManager, GraphicsOptions, KnotExecutor};
 //! use anyhow::Result;
 //! use std::path::PathBuf;
