@@ -10,3 +10,4 @@ _knot_r_files/
 Cargo.lock
 .RData
 .Rhistory
+_knot_files/
