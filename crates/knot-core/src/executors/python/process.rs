@@ -1,6 +1,41 @@
-// Python Process Management
-//
-// Handles the lifecycle of the persistent Python subprocess using a robust event loop wrapper.
+//! Python Process Management
+//!
+//! Manages the lifecycle of a persistent Python3 subprocess using an embedded event loop wrapper.
+//!
+//! # Design
+//!
+//! Unlike traditional approaches that spawn Python per-chunk, this implementation:
+//! - Embeds a Python event loop as a string constant (`PYTHON_WRAPPER`)
+//! - Spawns Python once with `-c` flag to execute the wrapper
+//! - Communicates via stdin/stdout using a simple protocol
+//!
+//! # Protocol
+//!
+//! 1. **Send code**: Write lines to stdin, terminated by "END_EXEC"
+//! 2. **Execute**: Python runs `exec(code, globals())`
+//! 3. **Receive**: Read stdout/stderr until "---KNOT_BOUNDARY---"
+//! 4. **Repeat**: Loop back to step 1
+//!
+//! # Thread Safety
+//!
+//! The `read_until_boundary()` method uses `thread::scope` to read stdout and stderr
+//! concurrently, preventing deadlocks when both streams have data.
+//!
+//! # Example
+//!
+//! ```rust
+//! let mut process = PythonProcess::uninitialized();
+//! process.initialize()?;
+//!
+//! process.execute_code("x = 42\nprint(x)")?;
+//! let (stdout, stderr) = process.read_until_boundary()?;
+//! assert_eq!(stdout.trim(), "42");
+//!
+//! // Variables persist across executions
+//! process.execute_code("print(x * 2)")?;
+//! let (stdout, _) = process.read_until_boundary()?;
+//! assert_eq!(stdout.trim(), "84");
+//! ```
 
 use anyhow::{Context, Result};
 use std::io::{BufRead, BufReader, Write};

@@ -1,6 +1,45 @@
-// Python Executor - Public API and main struct
-//
-// Orchestrates Python code execution.
+//! Python Executor
+//!
+//! Manages a persistent Python3 subprocess for executing code chunks and inline expressions.
+//!
+//! # Architecture
+//!
+//! The executor maintains a single Python process that runs for the entire document compilation.
+//! Code is executed in a shared global namespace, allowing variables to persist across chunks.
+//!
+//! ## Process Management
+//!
+//! Uses an embedded event loop wrapper (see `process.rs`) that:
+//! - Runs in an infinite loop reading commands from stdin
+//! - Executes code blocks using `exec()` in global scope
+//! - Returns results via stdout/stderr with boundary markers
+//!
+//! ## Session Persistence
+//!
+//! Sessions are saved using Python's `pickle` module:
+//! - Filters out non-picklable objects (modules, functions)
+//! - Stores only user-defined variables
+//! - Can restore state between compilation runs
+//!
+//! ## Constant Objects
+//!
+//! Large immutable objects can be cached separately using content-addressed storage:
+//! - Objects are hashed with xxHash64 (requires `xxhash` package)
+//! - Stored as `.pkl` files indexed by hash
+//! - Automatically verified on load to detect corruption
+//!
+//! # Example
+//!
+//! ```rust
+//! let mut executor = PythonExecutor::new(cache_dir)?;
+//! executor.initialize()?;
+//!
+//! // Execute a chunk
+//! let result = executor.execute("x = 1 + 1\nprint(x)", &graphics)?;
+//!
+//! // Execute inline expression
+//! let value = executor.execute_inline("x * 2")?; // Returns "4"
+//! ```
 
 pub mod process;
 
@@ -113,13 +152,16 @@ impl KnotExecutor for PythonExecutor {
 impl ConstantObjectHandler for PythonExecutor {
     fn hash_object(&mut self, object_name: &str) -> Result<String> {
         let code = format!(
-            "import hashlib\n\
+            "try:\n    \
+                 import xxhash\n\
+             except ImportError:\n    \
+                 raise ImportError('Package xxhash is required for constant objects. Install with: pip install xxhash')\n\
              import pickle\n\
              obj = globals().get('{}')\n\
              if obj is None:\n    \
                  print('NONE')\n\
              else:\n    \
-                 h = hashlib.sha1(pickle.dumps(obj)).hexdigest()\n    \
+                 h = xxhash.xxh64(pickle.dumps(obj)).hexdigest()\n    \
                  print(h)",
             object_name
         );

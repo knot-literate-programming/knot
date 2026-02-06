@@ -57,6 +57,8 @@ pub trait ConstantObjectHandler: Send + Sync {
     /// Compute the hash of an object in the language environment
     ///
     /// Uses xxHash64 for speed. Returns hex string representation.
+    /// - R: Requires `digest` package
+    /// - Python: Requires `xxhash` package (pip install xxhash)
     fn hash_object(&mut self, object_name: &str) -> Result<String>;
 
     /// Save a constant object to content-addressed storage
