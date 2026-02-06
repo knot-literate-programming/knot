@@ -1,3 +1,13 @@
+//! Code Chunk Processing
+//!
+//! This module orchestrates the lifecycle of a code chunk during compilation:
+//! 1. Resolve chunk options with global defaults.
+//! 2. Calculate chunk hash (including code, options, dependencies, and constants).
+//! 3. Check cache for previous results.
+//! 4. Execute code via the appropriate language executor if not cached.
+//! 5. Save results to cache if enabled.
+//! 6. Format the output using the Typst backend.
+
 use crate::executors::{GraphicsOptions, ExecutorManager};
 use crate::cache::{Cache, hash_dependencies};
 use crate::executors::ExecutionResult;

@@ -48,7 +48,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
 use std::thread;
 
-pub const BOUNDARY: &str = "---KNOT_BOUNDARY---";
+pub const BOUNDARY: &str = crate::defaults::Defaults::BOUNDARY_MARKER;
 
 // The wrapper script runs an infinite loop reading commands from stdin.
 // It uses a simple protocol:
@@ -87,9 +87,9 @@ def main():
                 traceback.print_exc(file=sys.stderr)
             
             # Flush streams and print boundary
-            sys.stdout.write("---KNOT_BOUNDARY---\n")
+            sys.stdout.write("---KNOT_CHUNK_BOUNDARY---\n")
             sys.stdout.flush()
-            sys.stderr.write("---KNOT_BOUNDARY---\n")
+            sys.stderr.write("---KNOT_CHUNK_BOUNDARY---\n")
             sys.stderr.flush()
             
         except KeyboardInterrupt:

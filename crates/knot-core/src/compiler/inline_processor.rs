@@ -1,3 +1,11 @@
+//! Inline Expression Processing
+//!
+//! This module handles the execution of inline expressions (e.g., `r 1 + 1`).
+//! Inline expressions are simpler than chunks:
+//! - No rich output (plots/dataframes) - only text results are supported.
+//! - Cached using a separate mechanism in the Cache module.
+//! - Results are formatted based on the expression's return value.
+
 use crate::cache::Cache;
 use crate::executors::ExecutorManager;
 use crate::parser::InlineExpr;

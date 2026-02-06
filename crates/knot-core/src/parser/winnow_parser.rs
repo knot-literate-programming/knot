@@ -1,3 +1,28 @@
+//! Winnow-based Parser for Knot Documents
+//!
+//! This module implements the main parser for .knot files using the `winnow`
+//! parser combinator library.
+//!
+//! # Grammar
+//!
+//! A knot document consists of three main elements:
+//! 1. **Code chunks**: Blocks delimited by triple backticks (e.g., ` ```{r} ... ``` `).
+//! 2. **Inline expressions**: Small code snippets wrapped in backticks (e.g., `` `r 1+1` ``).
+//! 3. **Typst content**: Verbatim content that is not processed by knot.
+//!
+//! # Parser Strategy
+//!
+//! The parser works in a single pass to build an Abstract Syntax Tree (AST):
+//! - It scans the input for special markers (backticks).
+//! - It uses combinators to distinguish between chunks, inline expressions, and plain text.
+//! - It tracks byte positions and line/column numbers for accurate error reporting and LSP support.
+//!
+//! # Error Handling
+//!
+//! When parsing fails (e.g., unclosed chunks, invalid options), the parser collects
+//! errors and includes them in the AST nodes, allowing the compilation to continue
+//! while reporting issues to the user.
+
 use super::ast::{Chunk, Document, InlineExpr, InlineOptions, Position, Range};
 use super::options::parse_options;
 use winnow::Parser;

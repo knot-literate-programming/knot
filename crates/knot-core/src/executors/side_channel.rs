@@ -56,10 +56,15 @@ impl SideChannel {
     /// Setup environment variable for language runtime to write to
     ///
     /// # Safety
-    /// This is safe because:
-    /// - We own the SideChannel instance (single-threaded context)
-    /// - The env var is only read by child processes we spawn
-    /// - No concurrent env var modifications in our architecture
+    ///
+    /// This method uses `unsafe { std::env::set_var() }` which is not thread-safe.
+    /// It MUST be called in a single-threaded context (e.g., before spawning
+    /// executor threads). In the current architecture, this is guaranteed because
+    /// the compiler runs chunks sequentially in a single thread.
+    ///
+    /// # Panics
+    ///
+    /// May panic if called concurrently with other environment modifications.
     pub fn setup_env(&self) -> Result<()> {
         unsafe {
             std::env::set_var("KNOT_METADATA_FILE", &self.metadata_file);
