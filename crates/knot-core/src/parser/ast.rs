@@ -1,6 +1,6 @@
+use anyhow::Result;
 use serde::Serialize;
 use std::path::PathBuf;
-use anyhow::Result;
 
 // NOTE : Ces structures sont basées sur la section 3.5 du document de référence.
 // La section 11.4 mentionne que les positions sont cruciales pour un futur LSP.
@@ -90,17 +90,26 @@ impl ChunkOptions {
         ResolvedChunkOptions {
             eval: self.eval.unwrap_or(crate::defaults::Defaults::CHUNK_EVAL),
             echo: self.echo.unwrap_or(crate::defaults::Defaults::CHUNK_ECHO),
-            output: self.output.unwrap_or(crate::defaults::Defaults::CHUNK_OUTPUT),
+            output: self
+                .output
+                .unwrap_or(crate::defaults::Defaults::CHUNK_OUTPUT),
             cache: self.cache.unwrap_or(crate::defaults::Defaults::CHUNK_CACHE),
 
             label: self.label.clone(),
             caption: self.caption.clone(),
             depends: self.depends.clone(),
 
-            fig_width: self.fig_width.unwrap_or(crate::defaults::Defaults::FIG_WIDTH),
-            fig_height: self.fig_height.unwrap_or(crate::defaults::Defaults::FIG_HEIGHT),
+            fig_width: self
+                .fig_width
+                .unwrap_or(crate::defaults::Defaults::FIG_WIDTH),
+            fig_height: self
+                .fig_height
+                .unwrap_or(crate::defaults::Defaults::FIG_HEIGHT),
             dpi: self.dpi.unwrap_or(crate::defaults::Defaults::DPI),
-            fig_format: self.fig_format.clone().unwrap_or_else(|| crate::defaults::Defaults::FIG_FORMAT.to_string()),
+            fig_format: self
+                .fig_format
+                .clone()
+                .unwrap_or_else(|| crate::defaults::Defaults::FIG_FORMAT.to_string()),
             fig_alt: self.fig_alt.clone(),
 
             constant: self.constant.clone(),
@@ -138,8 +147,8 @@ pub struct Chunk {
     pub code: String,
     pub options: ChunkOptions,
     pub errors: Vec<String>,
-    pub range: Range,       // Position du chunk entier (de ```{r}} à ```)
-    pub code_range: Range,  // Position du code seul à l'intérieur
+    pub range: Range,      // Position du chunk entier (de ```{r}} à ```)
+    pub code_range: Range, // Position du code seul à l'intérieur
     pub start_byte: usize,
     pub end_byte: usize,
     pub code_start_byte: usize,
@@ -149,9 +158,9 @@ pub struct Chunk {
 /// Options for inline expressions
 #[derive(Debug, Clone, PartialEq)]
 pub struct InlineOptions {
-    pub echo: bool,   // Show the inline code (default: false)
-    pub eval: bool,   // Evaluate the code (default: true)
-    pub output: bool, // Show the result in the document (default: true)
+    pub echo: bool,          // Show the inline code (default: false)
+    pub eval: bool,          // Evaluate the code (default: true)
+    pub output: bool,        // Show the result in the document (default: true)
     pub digits: Option<u32>, // Number of digits for numeric formatting
 }
 
@@ -169,10 +178,10 @@ impl Default for InlineOptions {
 /// Inline expression (e.g., `{r} nrow(df)` or `{r echo=false} x`)
 #[derive(Debug, Clone)]
 pub struct InlineExpr {
-    pub language: String,  // "r", "python", etc.
-    pub code: String,      // The expression to evaluate
-    pub start: usize,      // Byte offset in source
-    pub end: usize,        // Byte offset in source (exclusive)
+    pub language: String, // "r", "python", etc.
+    pub code: String,     // The expression to evaluate
+    pub start: usize,     // Byte offset in source
+    pub end: usize,       // Byte offset in source (exclusive)
     pub code_start_byte: usize,
     pub code_end_byte: usize,
     pub options: InlineOptions,
@@ -192,7 +201,7 @@ impl Document {
         let doc = super::winnow_parser::parse_document(&source);
         if !doc.errors.is_empty() {
             // For now, we still return Ok but the document contains errors.
-            // This is good for LSP. 
+            // This is good for LSP.
             // In the future, the compiler might want to check doc.errors.
         }
         Ok(doc)

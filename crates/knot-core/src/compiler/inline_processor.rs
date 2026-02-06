@@ -18,30 +18,37 @@ pub fn process_inline_expr(
     cache: &mut Cache,
     previous_hash: &str,
 ) -> Result<(String, String)> {
-    let inline_hash = cache.get_inline_expr_hash(
-        &inline_expr.code,
-        &inline_expr.options,
-        previous_hash,
-    );
+    let inline_hash =
+        cache.get_inline_expr_hash(&inline_expr.code, &inline_expr.options, previous_hash);
 
     // If eval=false, skip execution
     if !inline_expr.options.eval {
-        info!("  ⊗ `{{{}}} eval=false {}` [skipped]", inline_expr.language, inline_expr.code);
+        info!(
+            "  ⊗ `{{{}}} eval=false {}` [skipped]",
+            inline_expr.language, inline_expr.code
+        );
         return Ok((String::new(), inline_hash));
     }
 
     // Check cache
     if cache.has_cached_inline_result(&inline_hash) {
-        info!("  ✓ `{{{}}} {}` [cached]", inline_expr.language, inline_expr.code);
+        info!(
+            "  ✓ `{{{}}} {}` [cached]",
+            inline_expr.language, inline_expr.code
+        );
         let cached_result = cache.get_cached_inline_result(&inline_hash)?;
         return Ok((cached_result, inline_hash));
     }
 
     // Execute the inline expression
-    info!("  ⚙️ `{{{}}} {}` [executing]", inline_expr.language, inline_expr.code);
-    
+    info!(
+        "  ⚙️ `{{{}}} {}` [executing]",
+        inline_expr.language, inline_expr.code
+    );
+
     // Get the executor for the specific language of the inline expression
-    let result = executor_manager.get_executor(&inline_expr.language)?
+    let result = executor_manager
+        .get_executor(&inline_expr.language)?
         .execute_inline(&inline_expr.code)
         .context(format!(
             "Failed to execute inline expression: `{{{}}} {}`",
@@ -93,7 +100,13 @@ mod tests {
 
     #[test]
     fn test_process_inline_eval_false_no_executor() {
-        let inline = create_inline_expr("x <- 42", crate::parser::InlineOptions { eval: false, ..Default::default() });
+        let inline = create_inline_expr(
+            "x <- 42",
+            crate::parser::InlineOptions {
+                eval: false,
+                ..Default::default()
+            },
+        );
         let (_temp_dir_cache, mut cache) = setup_test_cache();
         let (_temp_dir_mgr, mut manager) = setup_test_manager();
 
@@ -136,14 +149,35 @@ mod tests {
     #[test]
     fn test_process_inline_hash_changes_with_options() {
         let inline_default = create_inline_expr("x <- 1", crate::parser::InlineOptions::default());
-        let inline_eval_false = create_inline_expr("x <- 1", crate::parser::InlineOptions { eval: false, ..Default::default() });
-        let inline_output_false = create_inline_expr("x <- 1", crate::parser::InlineOptions { output: false, ..Default::default() });
+        let inline_eval_false = create_inline_expr(
+            "x <- 1",
+            crate::parser::InlineOptions {
+                eval: false,
+                ..Default::default()
+            },
+        );
+        let inline_output_false = create_inline_expr(
+            "x <- 1",
+            crate::parser::InlineOptions {
+                output: false,
+                ..Default::default()
+            },
+        );
 
         let (_temp_dir, cache) = setup_test_cache();
 
-        let hash1 = cache.get_inline_expr_hash(&inline_default.code, &inline_default.options, "prev_hash");
-        let hash2 = cache.get_inline_expr_hash(&inline_eval_false.code, &inline_eval_false.options, "prev_hash");
-        let hash3 = cache.get_inline_expr_hash(&inline_output_false.code, &inline_output_false.options, "prev_hash");
+        let hash1 =
+            cache.get_inline_expr_hash(&inline_default.code, &inline_default.options, "prev_hash");
+        let hash2 = cache.get_inline_expr_hash(
+            &inline_eval_false.code,
+            &inline_eval_false.options,
+            "prev_hash",
+        );
+        let hash3 = cache.get_inline_expr_hash(
+            &inline_output_false.code,
+            &inline_output_false.options,
+            "prev_hash",
+        );
 
         // Different options should produce different hash
         assert_ne!(hash1, hash2);
@@ -166,10 +200,16 @@ mod tests {
     #[test]
     fn test_inline_eval_false_produces_empty_output() {
         // This test documents the behavior: eval=false produces empty string
-        let inline = create_inline_expr("x <- 42", crate::parser::InlineOptions { eval: false, ..Default::default() });
+        let inline = create_inline_expr(
+            "x <- 42",
+            crate::parser::InlineOptions {
+                eval: false,
+                ..Default::default()
+            },
+        );
 
         // The code in process_inline_expr returns String::new() when eval=false
-        assert_eq!(inline.options.eval, false);
+        assert!(!inline.options.eval);
     }
 
     #[test]
@@ -178,9 +218,9 @@ mod tests {
 
         assert_eq!(inline.language, "r");
         assert_eq!(inline.code, "mean(1:10)");
-        assert_eq!(inline.options.echo, false);
-        assert_eq!(inline.options.eval, true);
-        assert_eq!(inline.options.output, true);
+        assert!(!inline.options.echo);
+        assert!(inline.options.eval);
+        assert!(inline.options.output);
         assert_eq!(inline.options.digits, None);
         assert_eq!(inline.start, 0);
         assert_eq!(inline.end, "mean(1:10)".len());
@@ -188,13 +228,21 @@ mod tests {
 
     #[test]
     fn test_inline_expr_with_options_structure() {
-        let inline = create_inline_expr("library(dplyr)", crate::parser::InlineOptions { eval: false, echo: true, output: false, digits: Some(3) });
+        let inline = create_inline_expr(
+            "library(dplyr)",
+            crate::parser::InlineOptions {
+                eval: false,
+                echo: true,
+                output: false,
+                digits: Some(3),
+            },
+        );
 
         assert_eq!(inline.language, "r");
         assert_eq!(inline.code, "library(dplyr)");
-        assert_eq!(inline.options.eval, false);
-        assert_eq!(inline.options.echo, true);
-        assert_eq!(inline.options.output, false);
+        assert!(!inline.options.eval);
+        assert!(inline.options.echo);
+        assert!(!inline.options.output);
         assert_eq!(inline.options.digits, Some(3));
     }
 

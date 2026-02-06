@@ -8,12 +8,12 @@
 //! 5. Save results to cache if enabled.
 //! 6. Format the output using the Typst backend.
 
-use crate::executors::{GraphicsOptions, ExecutorManager};
-use crate::cache::{Cache, hash_dependencies};
-use crate::executors::ExecutionResult;
-use crate::parser::Chunk;
-use crate::config::ChunkDefaults;
 use crate::backend::{Backend, TypstBackend};
+use crate::cache::{Cache, hash_dependencies};
+use crate::config::ChunkDefaults;
+use crate::executors::ExecutionResult;
+use crate::executors::{ExecutorManager, GraphicsOptions};
+use crate::parser::Chunk;
 use anyhow::Result;
 use log::info;
 use sha2::{Digest, Sha256};
@@ -36,7 +36,8 @@ pub fn process_chunk(
         .unwrap_or_else(|| format!("chunk-{}", chunk.start_byte));
 
     let deps_hash = hash_dependencies(&chunk_options.depends)?;
-    let constants_hash = get_constants_hash(executor_manager, &chunk.language, &chunk_options.constant)?;
+    let constants_hash =
+        get_constants_hash(executor_manager, &chunk.language, &chunk_options.constant)?;
 
     let chunk_hash = cache.get_chunk_hash(
         &chunk.code,
@@ -64,7 +65,7 @@ pub fn process_chunk(
 
         let exec = executor_manager.get_executor(&chunk.language)?;
         let result = exec.execute(&chunk.code, &graphics_opts)?;
-        
+
         if resolved_options.cache {
             cache.save_result(
                 chunk.start_byte, // Use start_byte as unique ID for now
@@ -87,7 +88,7 @@ pub fn process_chunk(
 fn get_constants_hash(
     executor_manager: &mut ExecutorManager,
     lang: &str,
-    constants: &[String]
+    constants: &[String],
 ) -> Result<String> {
     if constants.is_empty() {
         return Ok(String::new());
@@ -100,7 +101,7 @@ fn get_constants_hash(
             Ok(hash) => {
                 combined_hash.update(var.as_bytes());
                 combined_hash.update(hash.as_bytes());
-            },
+            }
             Err(e) => {
                 // If we can't hash a constant, it implies it doesn't exist or is invalid.
                 // We force invalidation by adding a random component.
@@ -178,8 +179,14 @@ mod tests {
         let (_temp_dir_cache, mut cache) = setup_test_cache();
         let (_temp_dir_mgr, mut manager) = setup_test_manager();
 
-        let (output, _hash) = process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &ChunkDefaults::default())
-            .unwrap();
+        let (output, _hash) = process_chunk(
+            &chunk,
+            &mut manager,
+            &mut cache,
+            "prev_hash",
+            &ChunkDefaults::default(),
+        )
+        .unwrap();
 
         // With eval=false, should produce output but not execute
         assert!(output.contains("#code-chunk("));
@@ -192,8 +199,14 @@ mod tests {
         let (_temp_dir_cache, mut cache) = setup_test_cache();
         let (_temp_dir_mgr, mut manager) = setup_test_manager();
 
-        let (_output, _hash) = process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &ChunkDefaults::default())
-            .unwrap();
+        let (_output, _hash) = process_chunk(
+            &chunk,
+            &mut manager,
+            &mut cache,
+            "prev_hash",
+            &ChunkDefaults::default(),
+        )
+        .unwrap();
     }
 
     #[test]
@@ -202,8 +215,14 @@ mod tests {
         let (_temp_dir_cache, mut cache) = setup_test_cache();
         let (_temp_dir_mgr, mut manager) = setup_test_manager();
 
-        let (output, _hash) = process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &ChunkDefaults::default())
-            .unwrap();
+        let (output, _hash) = process_chunk(
+            &chunk,
+            &mut manager,
+            &mut cache,
+            "prev_hash",
+            &ChunkDefaults::default(),
+        )
+        .unwrap();
 
         // With name, should include it in output
         assert!(output.contains("my-chunk"));
@@ -216,12 +235,24 @@ mod tests {
         let (_temp_dir_cache, mut cache) = setup_test_cache();
         let (_temp_dir_mgr, mut manager) = setup_test_manager();
 
-        let (_output1, hash1) = process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &ChunkDefaults::default())
-            .unwrap();
+        let (_output1, hash1) = process_chunk(
+            &chunk,
+            &mut manager,
+            &mut cache,
+            "prev_hash",
+            &ChunkDefaults::default(),
+        )
+        .unwrap();
 
         // Process same chunk again with same previous_hash
-        let (_output2, hash2) = process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &ChunkDefaults::default())
-            .unwrap();
+        let (_output2, hash2) = process_chunk(
+            &chunk,
+            &mut manager,
+            &mut cache,
+            "prev_hash",
+            &ChunkDefaults::default(),
+        )
+        .unwrap();
 
         // Should produce same hash
         assert_eq!(hash1, hash2);
@@ -235,10 +266,22 @@ mod tests {
         let (_temp_dir_cache, mut cache) = setup_test_cache();
         let (_temp_dir_mgr, mut manager) = setup_test_manager();
 
-        let (_output1, hash1) = process_chunk(&chunk1, &mut manager, &mut cache, "prev_hash", &ChunkDefaults::default())
-            .unwrap();
-        let (_output2, hash2) = process_chunk(&chunk2, &mut manager, &mut cache, "prev_hash", &ChunkDefaults::default())
-            .unwrap();
+        let (_output1, hash1) = process_chunk(
+            &chunk1,
+            &mut manager,
+            &mut cache,
+            "prev_hash",
+            &ChunkDefaults::default(),
+        )
+        .unwrap();
+        let (_output2, hash2) = process_chunk(
+            &chunk2,
+            &mut manager,
+            &mut cache,
+            "prev_hash",
+            &ChunkDefaults::default(),
+        )
+        .unwrap();
 
         // Different code should produce different hash
         assert_ne!(hash1, hash2);
@@ -250,10 +293,22 @@ mod tests {
         let (_temp_dir_cache, mut cache) = setup_test_cache();
         let (_temp_dir_mgr, mut manager) = setup_test_manager();
 
-        let (_output1, hash1) = process_chunk(&chunk, &mut manager, &mut cache, "prev_hash_1", &ChunkDefaults::default())
-            .unwrap();
-        let (_output2, hash2) = process_chunk(&chunk, &mut manager, &mut cache, "prev_hash_2", &ChunkDefaults::default())
-            .unwrap();
+        let (_output1, hash1) = process_chunk(
+            &chunk,
+            &mut manager,
+            &mut cache,
+            "prev_hash_1",
+            &ChunkDefaults::default(),
+        )
+        .unwrap();
+        let (_output2, hash2) = process_chunk(
+            &chunk,
+            &mut manager,
+            &mut cache,
+            "prev_hash_2",
+            &ChunkDefaults::default(),
+        )
+        .unwrap();
 
         // Different previous_hash should produce different hash
         assert_ne!(hash1, hash2);
@@ -265,11 +320,22 @@ mod tests {
         let (_temp_dir_cache, mut cache) = setup_test_cache();
         let (_temp_dir_mgr, mut manager) = setup_test_manager();
 
-        let result = process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &ChunkDefaults::default());
+        let result = process_chunk(
+            &chunk,
+            &mut manager,
+            &mut cache,
+            "prev_hash",
+            &ChunkDefaults::default(),
+        );
 
         // Should fail with unsupported language
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Unsupported language"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Unsupported language")
+        );
     }
 
     #[test]
@@ -293,16 +359,28 @@ mod tests {
         let (_temp_dir_cache, mut cache) = setup_test_cache();
         let (_temp_dir_mgr, mut manager) = setup_test_manager();
 
-        let (_output, hash) = process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &ChunkDefaults::default())
-            .unwrap();
+        let (_output, hash) = process_chunk(
+            &chunk,
+            &mut manager,
+            &mut cache,
+            "prev_hash",
+            &ChunkDefaults::default(),
+        )
+        .unwrap();
 
         // Hash should incorporate dependencies
         assert!(!hash.is_empty());
 
         // Changing dependencies should change hash
         chunk.options.depends = vec![dep1.clone(), dep3.clone()];
-        let (_output2, hash2) = process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &ChunkDefaults::default())
-            .unwrap();
+        let (_output2, hash2) = process_chunk(
+            &chunk,
+            &mut manager,
+            &mut cache,
+            "prev_hash",
+            &ChunkDefaults::default(),
+        )
+        .unwrap();
 
         assert_ne!(hash, hash2);
     }
@@ -313,8 +391,14 @@ mod tests {
         let (_temp_dir_cache, mut cache) = setup_test_cache();
         let (_temp_dir_mgr, mut manager) = setup_test_manager();
 
-        let (output, _hash) = process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &ChunkDefaults::default())
-            .unwrap();
+        let (output, _hash) = process_chunk(
+            &chunk,
+            &mut manager,
+            &mut cache,
+            "prev_hash",
+            &ChunkDefaults::default(),
+        )
+        .unwrap();
 
         // Should handle empty code gracefully
         assert!(output.contains("#code-chunk("));
@@ -326,8 +410,14 @@ mod tests {
         let (_temp_dir_cache, mut cache) = setup_test_cache();
         let (_temp_dir_mgr, mut manager) = setup_test_manager();
 
-        let (output, _hash) = process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &ChunkDefaults::default())
-            .unwrap();
+        let (output, _hash) = process_chunk(
+            &chunk,
+            &mut manager,
+            &mut cache,
+            "prev_hash",
+            &ChunkDefaults::default(),
+        )
+        .unwrap();
 
         // Output should indicate language
         assert!(output.contains("lang: \"r\""));

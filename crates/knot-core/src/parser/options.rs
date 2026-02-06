@@ -54,10 +54,7 @@ pub fn parse_options(options_block: &str) -> (ChunkOptions, Vec<String>) {
                 "label" => options.label = Some(value.to_string()),
                 "caption" => options.caption = Some(value.to_string()),
                 "depends" => {
-                    options.depends = value
-                        .split(',')
-                        .map(|s| PathBuf::from(s.trim()))
-                        .collect();
+                    options.depends = value.split(',').map(|s| PathBuf::from(s.trim())).collect();
                 }
                 "constant" => {
                     options.constant = value

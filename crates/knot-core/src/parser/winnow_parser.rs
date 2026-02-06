@@ -25,13 +25,13 @@
 
 use super::ast::{Chunk, Document, InlineExpr, InlineOptions, Position, Range};
 use super::options::parse_options;
-use winnow::Parser;
-use winnow::token::{take_until, take_while, take};
-use winnow::ascii::{space0, space1, line_ending};
-use winnow::combinator::{opt, peek, separated, alt};
-use winnow::stream::Offset;
 use winnow::ModalResult;
+use winnow::Parser;
+use winnow::ascii::{line_ending, space0, space1};
+use winnow::combinator::{alt, opt, peek, separated};
 use winnow::error::ContextError;
+use winnow::stream::Offset;
+use winnow::token::{take, take_until, take_while};
 
 // Type alias for our input type. Simple &str!
 type Input<'a> = &'a str;
@@ -42,12 +42,12 @@ pub fn parse_document(source: &str) -> Document {
 
     let mut chunks = Vec::new();
     let mut errors = Vec::new();
-    
+
     // 1. Extract Chunks
     while !input.is_empty() {
         // We try to parse a chunk
         let start_input = input; // Snapshot before parsing attempt
-        
+
         // If we see ```{, we try to parse a chunk
         if input.starts_with("```{") {
             match parse_chunk_internal.parse_next(&mut input) {
@@ -55,7 +55,7 @@ pub fn parse_document(source: &str) -> Document {
                     // Calculation of absolute offsets
                     let chunk_start_offset = Offset::offset_from(&start_input, &original_source);
                     let chunk_end_offset = Offset::offset_from(&input, &original_source);
-                    
+
                     let code_start_offset = Offset::offset_from(&code_slice, &original_source);
                     let code_end_offset = code_start_offset + code_slice.len();
 
@@ -63,19 +63,27 @@ pub fn parse_document(source: &str) -> Document {
                     chunk.end_byte = chunk_end_offset;
                     chunk.code_start_byte = code_start_offset;
                     chunk.code_end_byte = code_end_offset;
-                    
+
                     chunk.range.start = offset_to_position(original_source, chunk_start_offset);
                     chunk.range.end = offset_to_position(original_source, chunk_end_offset);
-                    
+
                     chunk.code_range.start = offset_to_position(original_source, code_start_offset);
                     chunk.code_range.end = offset_to_position(original_source, code_end_offset);
-                    
+
                     chunks.push(chunk);
                 }
                 Err(err) => {
-                    let pos = offset_to_position(original_source, Offset::offset_from(&start_input, &original_source));
-                    errors.push(format!("Malformed or unclosed code chunk at line {}, column {}: {}", pos.line + 1, pos.column + 1, err));
-                    
+                    let pos = offset_to_position(
+                        original_source,
+                        Offset::offset_from(&start_input, &original_source),
+                    );
+                    errors.push(format!(
+                        "Malformed or unclosed code chunk at line {}, column {}: {}",
+                        pos.line + 1,
+                        pos.column + 1,
+                        err
+                    ));
+
                     // Consume the opening to avoid infinite loop
                     let _ = take::<_, _, ContextError>(4usize).parse_next(&mut input);
                 }
@@ -112,10 +120,10 @@ fn parse_chunk_internal<'i>(input: &mut Input<'i>) -> ModalResult<(Chunk, &'i st
     let _ = "```".parse_next(input)?;
     let _ = "{".parse_next(input)?;
     let _ = space0.parse_next(input)?;
-    
-    let lang = take_while(1.., |c: char| c.is_alphanumeric() || c == '_' ).parse_next(input)?;
+
+    let lang = take_while(1.., |c: char| c.is_alphanumeric() || c == '_').parse_next(input)?;
     let _ = space0.parse_next(input)?;
-    
+
     // Name
     let name_str = take_until(0.., "}").parse_next(input)?;
     let name = if name_str.trim().is_empty() {
@@ -123,18 +131,27 @@ fn parse_chunk_internal<'i>(input: &mut Input<'i>) -> ModalResult<(Chunk, &'i st
     } else {
         Some(name_str.trim().to_string())
     };
-    
+
     let _ = "}".parse_next(input)?;
     let _ = line_ending.parse_next(input)?;
 
     // Options
     let mut options_str = String::new();
-    while let Ok(line) = peek::<_, _, ContextError, _>(take_until(0.., "
-")).parse_next(input) {
+    while let Ok(line) = peek::<_, _, ContextError, _>(take_until(
+        0..,
+        "
+",
+    ))
+    .parse_next(input)
+    {
         let trimmed = line.trim();
         if trimmed.starts_with("#|") {
-            let full_line = take_until(1.., "
-").parse_next(input)?;
+            let full_line = take_until(
+                1..,
+                "
+",
+            )
+            .parse_next(input)?;
             let _ = line_ending.parse_next(input)?;
             options_str.push_str(full_line);
             options_str.push('\n');
@@ -142,12 +159,12 @@ fn parse_chunk_internal<'i>(input: &mut Input<'i>) -> ModalResult<(Chunk, &'i st
             break;
         }
     }
-    
+
     let (options, errors) = parse_options(&options_str);
 
     // Body
     let code_slice = take_until(0.., "```").parse_next(input)?;
-    
+
     let _ = "```".parse_next(input)?;
 
     let chunk = Chunk {
@@ -158,8 +175,8 @@ fn parse_chunk_internal<'i>(input: &mut Input<'i>) -> ModalResult<(Chunk, &'i st
         errors,
         range: Range::default(),
         code_range: Range::default(),
-        start_byte: 0, // patched later
-        end_byte: 0,   // patched later
+        start_byte: 0,      // patched later
+        end_byte: 0,        // patched later
         code_start_byte: 0, // patched later
         code_end_byte: 0,   // patched later
     };
@@ -172,7 +189,7 @@ fn offset_to_position(source: &str, offset: usize) -> Position {
     let mut column = 0;
     // Be careful not to go out of bounds
     let safe_offset = offset.min(source.len());
-    
+
     for (i, c) in source.char_indices() {
         if i >= safe_offset {
             break;
@@ -197,11 +214,11 @@ fn extract_inline_exprs_winnow(source: &str, chunks: &[Chunk]) -> anyhow::Result
         match take_until::<_, _, ContextError>(0.., "`").parse_next(&mut input) {
             Ok(_) => {
                 let backtick_offset = Offset::offset_from(&input, &original_source); // input is at '`'
-                
+
                 // Check escape
                 if backtick_offset > 0 && original_source.as_bytes()[backtick_offset - 1] == b'\\' {
-                     let _ = take::<_, _, ContextError>(1usize).parse_next(&mut input);
-                     continue;
+                    let _ = take::<_, _, ContextError>(1usize).parse_next(&mut input);
+                    continue;
                 }
 
                 let expr_start_input = input;
@@ -211,9 +228,9 @@ fn extract_inline_exprs_winnow(source: &str, chunks: &[Chunk]) -> anyhow::Result
                         exprs.push(expr);
                     }
                 } else {
-                     // Not a knot inline expr (maybe just raw code `foo`), consume backtick
-                     input = expr_start_input; // reset
-                     let _ = take::<_, _, ContextError>(1usize).parse_next(&mut input);
+                    // Not a knot inline expr (maybe just raw code `foo`), consume backtick
+                    input = expr_start_input; // reset
+                    let _ = take::<_, _, ContextError>(1usize).parse_next(&mut input);
                 }
             }
             Err(_) => break,
@@ -222,13 +239,15 @@ fn extract_inline_exprs_winnow(source: &str, chunks: &[Chunk]) -> anyhow::Result
     Ok(exprs)
 }
 
-fn parse_inline_expr<'a>(original_source: &'a str) -> impl FnMut(&mut &'a str) -> ModalResult<InlineExpr> {
+fn parse_inline_expr<'a>(
+    original_source: &'a str,
+) -> impl FnMut(&mut &'a str) -> ModalResult<InlineExpr> {
     move |input: &mut &'a str| {
         let start_input = *input;
         let _ = "`".parse_next(input)?;
         let _ = "{".parse_next(input)?;
 
-        let lang = take_while(1.., |c: char| c.is_alphanumeric() || c == '_' ).parse_next(input)?;
+        let lang = take_while(1.., |c: char| c.is_alphanumeric() || c == '_').parse_next(input)?;
 
         // Parse options: everything between lang and }
         let options_str = take_until(0.., "}").parse_next(input)?;
@@ -274,7 +293,7 @@ fn parse_inline_options(options_str: &str) -> (InlineOptions, Vec<String>) {
 
     // Handle initial comma if present (e.g., "{r, echo=false}")
     if input.starts_with(',') {
-        input = &input[1..].trim();
+        input = input[1..].trim();
     }
 
     if let Ok(pairs) = parse_kv_pairs.parse_next(&mut input) {
@@ -283,12 +302,10 @@ fn parse_inline_options(options_str: &str) -> (InlineOptions, Vec<String>) {
                 "echo" => options.echo = value == "true",
                 "eval" => options.eval = value == "true",
                 "output" => options.output = value == "true",
-                "digits" => {
-                    match value.parse::<u32>() {
-                        Ok(n) => options.digits = Some(n),
-                        Err(e) => errors.push(format!("Option 'digits': {}", e)),
-                    }
-                }
+                "digits" => match value.parse::<u32>() {
+                    Ok(n) => options.digits = Some(n),
+                    Err(e) => errors.push(format!("Option 'digits': {}", e)),
+                },
                 _ => {
                     errors.push(format!("Unknown option: '{}'", key));
                 }
@@ -301,19 +318,23 @@ fn parse_inline_options(options_str: &str) -> (InlineOptions, Vec<String>) {
 
 fn parse_kv_pairs<'a>(input: &mut &'a str) -> ModalResult<Vec<(&'a str, &'a str)>> {
     fn parse_kv<'a>(input: &mut &'a str) -> ModalResult<(&'a str, &'a str)> {
-        let key = take_while(1.., |c: char| c.is_alphanumeric() || c == '_' || c == '-').parse_next(input)?;
+        let key = take_while(1.., |c: char| c.is_alphanumeric() || c == '_' || c == '-')
+            .parse_next(input)?;
         let _ = space0.parse_next(input)?;
         let _ = "=".parse_next(input)?;
         let _ = space0.parse_next(input)?;
-        let value = take_while(1.., |c: char| !c.is_whitespace() && c != ',' && c != '}').parse_next(input)?;
+        let value = take_while(1.., |c: char| !c.is_whitespace() && c != ',' && c != '}')
+            .parse_next(input)?;
         Ok((key, value))
     }
 
     let _ = space0.parse_next(input)?;
-    separated(0.., parse_kv, alt((
-        (space0, ",", space0).map(|_| ()),
-        space1.map(|_| ())
-    ))).parse_next(input)
+    separated(
+        0..,
+        parse_kv,
+        alt(((space0, ",", space0).map(|_| ()), space1.map(|_| ()))),
+    )
+    .parse_next(input)
 }
 
 fn is_inside_chunk(pos: usize, chunks: &[Chunk]) -> bool {
@@ -386,7 +407,7 @@ du texte entre
         assert_eq!(doc.chunks[1].language, "python");
         assert_eq!(doc.chunks[1].name, Some("plot-stuff".to_string()));
     }
-    
+
     #[test]
     fn test_no_chunks() {
         let content = "Juste du texte, pas de chunks ici.";
@@ -512,8 +533,8 @@ More text below."###;
         assert_eq!(doc.inline_exprs.len(), 1);
         let inline = &doc.inline_exprs[0];
         assert_eq!(inline.code, "mean(1:10)");
-        assert_eq!(inline.options.echo, false); // default
-        assert_eq!(inline.options.eval, true);  // default
+        assert!(!inline.options.echo); // default
+        assert!(inline.options.eval); // default
         assert_eq!(inline.options.digits, None); // default
     }
 
@@ -524,8 +545,8 @@ More text below."###;
         assert_eq!(doc.inline_exprs.len(), 1);
         let inline = &doc.inline_exprs[0];
         assert_eq!(inline.code, "x");
-        assert_eq!(inline.options.echo, true);
-        assert_eq!(inline.options.eval, true);  // default
+        assert!(inline.options.echo);
+        assert!(inline.options.eval); // default
         assert_eq!(inline.options.digits, None); // default
     }
 
@@ -536,8 +557,8 @@ More text below."###;
         assert_eq!(doc.inline_exprs.len(), 1);
         let inline = &doc.inline_exprs[0];
         assert_eq!(inline.code, "pi");
-        assert_eq!(inline.options.echo, true);
-        assert_eq!(inline.options.eval, false);
+        assert!(inline.options.echo);
+        assert!(!inline.options.eval);
         assert_eq!(inline.options.digits, Some(3));
     }
 
@@ -549,8 +570,8 @@ More text below."###;
         assert_eq!(doc.inline_exprs.len(), 1);
         let inline = &doc.inline_exprs[0];
         assert_eq!(inline.code, "sqrt(2)");
-        assert_eq!(inline.options.echo, false);
-        assert_eq!(inline.options.eval, true);
+        assert!(!inline.options.echo);
+        assert!(inline.options.eval);
     }
 
     #[test]
@@ -561,8 +582,8 @@ More text below."###;
         assert_eq!(doc.inline_exprs.len(), 1);
         let inline = &doc.inline_exprs[0];
         assert_eq!(inline.code, "sqrt(2)");
-        assert_eq!(inline.options.echo, false);
-        assert_eq!(inline.options.eval, true);
+        assert!(!inline.options.echo);
+        assert!(inline.options.eval);
     }
 
     #[test]
@@ -572,8 +593,8 @@ More text below."###;
         let doc = Document::parse(content.to_string()).unwrap();
         assert_eq!(doc.inline_exprs.len(), 1);
         let inline = &doc.inline_exprs[0];
-        assert_eq!(inline.options.echo, true);
-        assert_eq!(inline.options.eval, true);  // default
+        assert!(inline.options.echo);
+        assert!(inline.options.eval); // default
         assert_eq!(inline.errors.len(), 1);
         assert!(inline.errors[0].contains("Unknown option: 'unknown'"));
     }
@@ -597,7 +618,7 @@ More text below."###;
         assert_eq!(doc.inline_exprs.len(), 1);
         let inline = &doc.inline_exprs[0];
         assert_eq!(inline.code, "dangerous_code()");
-        assert_eq!(inline.options.eval, false);
+        assert!(!inline.options.eval);
     }
 
     #[test]
@@ -617,7 +638,7 @@ More text below."###;
 
         // First inline: defaults
         assert_eq!(doc.inline_exprs[0].code, "x");
-        assert_eq!(doc.inline_exprs[0].options.eval, true);
+        assert!(doc.inline_exprs[0].options.eval);
         assert_eq!(doc.inline_exprs[0].options.digits, None);
 
         // Second inline: digits=2
@@ -626,6 +647,6 @@ More text below."###;
 
         // Third inline: eval=false
         assert_eq!(doc.inline_exprs[2].code, "z");
-        assert_eq!(doc.inline_exprs[2].options.eval, false);
+        assert!(!doc.inline_exprs[2].options.eval);
     }
 }

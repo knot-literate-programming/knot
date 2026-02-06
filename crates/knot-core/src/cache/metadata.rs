@@ -37,9 +37,9 @@ pub struct InlineCacheEntry {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ConstantObjectInfo {
-    pub hash: String,                  // xxHash64 of the object content
-    pub size_bytes: u64,               // Size in bytes
-    pub language: String,              // "r", "python", "julia"
-    pub created_in_chunk: String,      // Chunk name or index
-    pub created_at: String,            // Timestamp (RFC3339)
+    pub hash: String,             // xxHash64 of the object content
+    pub size_bytes: u64,          // Size in bytes
+    pub language: String,         // "r", "python", "julia"
+    pub created_in_chunk: String, // Chunk name or index
+    pub created_at: String,       // Timestamp (RFC3339)
 }

@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 pub struct Config {
     #[serde(default)]
     pub document: DocumentConfig,
@@ -111,21 +111,9 @@ impl Config {
     }
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            document: DocumentConfig::default(),
-            helpers: HelpersConfig::default(),
-            defaults: ChunkDefaults::default(),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-
 
     #[test]
     fn test_defaults_section() {

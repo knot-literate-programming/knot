@@ -6,16 +6,16 @@
 // - Dependency tracking (file mtime/size)
 // - Persistent metadata (metadata.json)
 
-mod metadata;
 mod hashing;
+mod metadata;
 mod storage;
 
-pub use metadata::{CacheMetadata, ChunkCacheEntry, ConstantObjectInfo, InlineCacheEntry};
 pub use hashing::hash_dependencies;
+pub use metadata::{CacheMetadata, ChunkCacheEntry, ConstantObjectInfo, InlineCacheEntry};
 
 use crate::executors::ExecutionResult;
 use crate::parser::ChunkOptions;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chrono::Utc;
 use std::fs;
 use std::path::PathBuf;
@@ -48,7 +48,13 @@ impl Cache {
         dependencies_hash: &str,
         constants_hash: &str,
     ) -> String {
-        hashing::get_chunk_hash(code, options, previous_hash, dependencies_hash, constants_hash)
+        hashing::get_chunk_hash(
+            code,
+            options,
+            previous_hash,
+            dependencies_hash,
+            constants_hash,
+        )
     }
 
     /// Computes hash for an inline expression (using sequential chaining)
@@ -154,7 +160,8 @@ impl Cache {
     /// * `node_hash` - The hash of the chunk or inline expression
     /// * `extension` - The file extension (e.g., "RData", "pkl")
     pub fn get_snapshot_path(&self, node_hash: &str, extension: &str) -> PathBuf {
-        self.cache_dir.join(format!("snapshot_{}.{}", node_hash, extension))
+        self.cache_dir
+            .join(format!("snapshot_{}.{}", node_hash, extension))
     }
 
     /// Check if a snapshot exists for a given hash and extension
@@ -214,18 +221,26 @@ mod tests {
         };
 
         let deps_hash1 = hash_dependencies(&opts.depends).unwrap();
-        let hash1 = Cache::new(cache_dir.clone())
-            .unwrap()
-            .get_chunk_hash("read.csv('data.csv')", &opts, "", &deps_hash1, "");
+        let hash1 = Cache::new(cache_dir.clone()).unwrap().get_chunk_hash(
+            "read.csv('data.csv')",
+            &opts,
+            "",
+            &deps_hash1,
+            "",
+        );
 
         // Modifier fichier
         thread::sleep(Duration::from_millis(10));
         fs::write(&tmp_file, "a,b\n3,4").unwrap();
 
         let deps_hash2 = hash_dependencies(&opts.depends).unwrap();
-        let hash2 = Cache::new(cache_dir)
-            .unwrap()
-            .get_chunk_hash("read.csv('data.csv')", &opts, "", &deps_hash2, "");
+        let hash2 = Cache::new(cache_dir).unwrap().get_chunk_hash(
+            "read.csv('data.csv')",
+            &opts,
+            "",
+            &deps_hash2,
+            "",
+        );
 
         assert_ne!(deps_hash1, deps_hash2);
         assert_ne!(hash1, hash2);

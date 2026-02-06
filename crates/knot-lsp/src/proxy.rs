@@ -9,7 +9,6 @@
 
 use anyhow::{Context, Result};
 use serde_json::Value;
-use tower_lsp::lsp_types::Url;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -18,6 +17,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{mpsc, oneshot, Mutex};
+use tower_lsp::lsp_types::Url;
 
 /// A proxy to a tinymist LSP subprocess
 pub struct TinymistProxy {
@@ -47,7 +47,10 @@ impl TinymistProxy {
     /// # Returns
     /// * `Ok((proxy, notification_receiver))` - Proxy for sending requests + Receiver for notifications
     /// * `Err(_)` - Failed to spawn or initialize
-    pub async fn spawn(root_uri: Option<Url>, path_override: Option<PathBuf>) -> Result<(Self, mpsc::Receiver<Value>)> {
+    pub async fn spawn(
+        root_uri: Option<Url>,
+        path_override: Option<PathBuf>,
+    ) -> Result<(Self, mpsc::Receiver<Value>)> {
         // Try to find tinymist
         let tinymist_path = if let Some(path) = path_override {
             if path.exists() {
@@ -81,7 +84,9 @@ impl TinymistProxy {
         // Spawn background task to read from tinymist
         let pending_requests_clone = pending_requests.clone();
         tokio::spawn(async move {
-            if let Err(e) = Self::read_loop(stdout_reader, pending_requests_clone, notification_tx).await {
+            if let Err(e) =
+                Self::read_loop(stdout_reader, pending_requests_clone, notification_tx).await
+            {
                 eprintln!("Tinymist read loop error: {}", e);
             }
         });
@@ -111,7 +116,8 @@ impl TinymistProxy {
         // Wait for process to exit
         if let Some(mut child) = self.child.take() {
             // Wait with a timeout to avoid hanging forever
-            let _ = tokio::time::timeout(std::time::Duration::from_millis(1000), child.wait()).await;
+            let _ =
+                tokio::time::timeout(std::time::Duration::from_millis(1000), child.wait()).await;
         }
 
         Ok(())
@@ -157,9 +163,10 @@ impl TinymistProxy {
             // 2. Read Content
             let mut content_bytes = vec![0u8; content_length];
             reader.read_exact(&mut content_bytes).await?;
-            
+
             let content = String::from_utf8(content_bytes).context("Invalid UTF-8 in message")?;
-            let message: Value = serde_json::from_str(&content).context("Invalid JSON in message")?;
+            let message: Value =
+                serde_json::from_str(&content).context("Invalid JSON in message")?;
 
             // 3. Dispatch Message
             if let Some(id) = message.get("id") {
@@ -175,7 +182,10 @@ impl TinymistProxy {
                         if let Some(sender) = map.remove(&id_val) {
                             // Determine if it's a success or error response
                             if message.get("error").is_some() {
-                                let _ = sender.send(Err(anyhow::anyhow!("LSP Error: {:?}", message["error"])));
+                                let _ = sender.send(Err(anyhow::anyhow!(
+                                    "LSP Error: {:?}",
+                                    message["error"]
+                                )));
                             } else {
                                 let _ = sender.send(Ok(message));
                             }
@@ -222,7 +232,8 @@ impl TinymistProxy {
         }
 
         // Send initialized notification
-        self.send_notification("initialized", serde_json::json!({})).await?;
+        self.send_notification("initialized", serde_json::json!({}))
+            .await?;
 
         Ok(())
     }

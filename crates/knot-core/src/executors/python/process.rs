@@ -140,7 +140,7 @@ impl PythonProcess {
 
     pub fn execute_code(&mut self, code: &str) -> Result<()> {
         let stdin = self.stdin.as_mut().context("Stdin not available")?;
-        
+
         // Write code followed by our custom delimiter
         writeln!(stdin, "{}", code)?;
         writeln!(stdin, "END_EXEC")?;
@@ -149,8 +149,14 @@ impl PythonProcess {
     }
 
     pub fn read_until_boundary(&mut self) -> Result<(String, String)> {
-        let stdout = self.stdout.as_mut().context("Python stdout not available")?;
-        let stderr = self.stderr.as_mut().context("Python stderr not available")?;
+        let stdout = self
+            .stdout
+            .as_mut()
+            .context("Python stdout not available")?;
+        let stderr = self
+            .stderr
+            .as_mut()
+            .context("Python stderr not available")?;
 
         let (stdout_output, stderr_output) = thread::scope(|s| {
             let stdout_handle = s.spawn(move || {
@@ -159,9 +165,13 @@ impl PythonProcess {
                 loop {
                     line_buffer.clear();
                     let bytes_read = stdout.read_line(&mut line_buffer).unwrap_or(0);
-                    if bytes_read == 0 { break; }
-                    
-                    if line_buffer.trim() == BOUNDARY { break; }
+                    if bytes_read == 0 {
+                        break;
+                    }
+
+                    if line_buffer.trim() == BOUNDARY {
+                        break;
+                    }
                     output.push_str(&line_buffer);
                 }
                 output
@@ -173,9 +183,13 @@ impl PythonProcess {
                 loop {
                     line_buffer.clear();
                     let bytes_read = stderr.read_line(&mut line_buffer).unwrap_or(0);
-                    if bytes_read == 0 { break; }
-                    
-                    if line_buffer.trim() == BOUNDARY { break; }
+                    if bytes_read == 0 {
+                        break;
+                    }
+
+                    if line_buffer.trim() == BOUNDARY {
+                        break;
+                    }
                     output.push_str(&line_buffer);
                 }
                 output
@@ -207,7 +221,7 @@ mod tests {
 
         let (stdout, _) = process.read_until_boundary().unwrap();
         assert_eq!(stdout.trim(), "hello");
-        
+
         process.terminate();
     }
 
@@ -222,7 +236,7 @@ mod tests {
         process.execute_code("print(x)").unwrap();
         let (stdout, _) = process.read_until_boundary().unwrap();
         assert_eq!(stdout.trim(), "42");
-        
+
         process.terminate();
     }
 }

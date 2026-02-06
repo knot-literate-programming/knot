@@ -7,15 +7,22 @@
 // Uses side-channel (via KNOT_METADATA_FILE) for robust communication.
 // If no metadata is provided, stdout text is used as fallback.
 
+use super::{BOUNDARY, RExecutor, formatters, process::RProcess};
 use crate::executors::path_utils::escape_path_for_code;
-use super::{formatters, process::RProcess, RExecutor, BOUNDARY};
-use crate::executors::{ExecutionResult, GraphicsOptions, LanguageExecutor, OutputMetadata, SideChannel};
+use crate::executors::{
+    ExecutionResult, GraphicsOptions, LanguageExecutor, OutputMetadata, SideChannel,
+};
 use anyhow::{Context, Result};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
 /// Executes a code chunk in the persistent R process
-pub fn execute(process: &mut RProcess, cache_dir: &Path, code: &str, graphics: &GraphicsOptions) -> Result<ExecutionResult> {
+pub fn execute(
+    process: &mut RProcess,
+    cache_dir: &Path,
+    code: &str,
+    graphics: &GraphicsOptions,
+) -> Result<ExecutionResult> {
     // Create side-channel for this chunk
     let channel = SideChannel::new()?;
     channel.setup_env()?;
@@ -89,10 +96,14 @@ pub fn execute_inline(executor: &mut RExecutor, code: &str) -> Result<String> {
     let output = match result {
         ExecutionResult::Text(text) => text,
         ExecutionResult::DataFrame(_) => {
-            anyhow::bail!("DataFrames are not supported in inline expressions. Use typst(df) in a chunk instead.")
+            anyhow::bail!(
+                "DataFrames are not supported in inline expressions. Use typst(df) in a chunk instead."
+            )
         }
         ExecutionResult::Plot(_) => {
-            anyhow::bail!("Plots are not supported in inline expressions. Use typst(gg) in a chunk instead.")
+            anyhow::bail!(
+                "Plots are not supported in inline expressions. Use typst(gg) in a chunk instead."
+            )
         }
         ExecutionResult::TextAndPlot { .. } | ExecutionResult::DataFrameAndPlot { .. } => {
             anyhow::bail!("Complex outputs are not supported in inline expressions.")
@@ -217,7 +228,10 @@ pub fn load_session(process: &mut RProcess, snapshot_file: &Path) -> Result<()> 
     // First, reload packages if the packages file exists
     writeln!(stdin, "if (file.exists(\"{}\")) {{", packages_file)?;
     writeln!(stdin, "  pkgs <- readRDS(\"{}\")", packages_file)?;
-    writeln!(stdin, "  invisible(lapply(pkgs, library, character.only = TRUE))")?;
+    writeln!(
+        stdin,
+        "  invisible(lapply(pkgs, library, character.only = TRUE))"
+    )?;
     writeln!(stdin, "}}")?;
 
     // Then load the objects with envir = .GlobalEnv to load into global environment
@@ -264,5 +278,3 @@ pub fn query(process: &mut RProcess, code: &str) -> Result<String> {
 
     Ok(stdout_output)
 }
-
-

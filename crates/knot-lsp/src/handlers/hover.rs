@@ -38,13 +38,19 @@ pub async fn handle_hover(state: &ServerState, params: HoverParams) -> Result<Op
                 content.push_str(&format!("- **Language**: `{}`\n", chunk.language));
 
                 // Format Option<bool> values - show "default" if not set
-                let eval_display = chunk.options.eval
+                let eval_display = chunk
+                    .options
+                    .eval
                     .map(|v| v.to_string())
                     .unwrap_or_else(|| "default".to_string());
-                let echo_display = chunk.options.echo
+                let echo_display = chunk
+                    .options
+                    .echo
                     .map(|v| v.to_string())
                     .unwrap_or_else(|| "default".to_string());
-                let cache_display = chunk.options.cache
+                let cache_display = chunk
+                    .options
+                    .cache
                     .map(|v| v.to_string())
                     .unwrap_or_else(|| "default".to_string());
 
@@ -136,20 +142,20 @@ fn get_r_token_at_pos(text: &str, pos: Position) -> Option<String> {
     if line_idx >= lines.len() {
         return None;
     }
-    
+
     let line = lines[line_idx];
     let col = pos.character as usize;
     if col > line.len() {
         return None;
     }
-    
+
     // Find the word boundaries around the cursor
     // We want to capture [a-zA-Z0-9_.$:]+
-    
+
     let chars: Vec<char> = line.chars().collect();
     let mut start = col;
     let mut end = col;
-    
+
     // Scan backwards
     while start > 0 {
         let c = chars[start - 1];
@@ -159,7 +165,7 @@ fn get_r_token_at_pos(text: &str, pos: Position) -> Option<String> {
             break;
         }
     }
-    
+
     // Scan forwards
     while end < chars.len() {
         let c = chars[end];
@@ -169,11 +175,11 @@ fn get_r_token_at_pos(text: &str, pos: Position) -> Option<String> {
             break;
         }
     }
-    
+
     if start == end {
         return None;
     }
-    
+
     Some(line[start..end].to_string())
 }
 
@@ -237,9 +243,9 @@ async fn get_r_help(state: &ServerState, uri: &Url, token: &str) -> Option<Hover
 
 /// Sync with cache if the snapshot has changed (e.g., from knot watch)
 async fn sync_cache_if_needed(state: &ServerState, uri: &Url) {
+    use knot_core::cache::Cache;
     use knot_core::config::Config;
     use knot_core::get_cache_dir;
-    use knot_core::cache::Cache;
     use std::path::Path;
 
     let path = match uri.to_file_path() {
@@ -258,7 +264,10 @@ async fn sync_cache_if_needed(state: &ServerState, uri: &Url) {
 
     if let Ok(cache) = Cache::new(cache_dir.clone()) {
         // Find the last chunk that was executed in R
-        let last_r_chunk = cache.metadata.chunks.iter()
+        let last_r_chunk = cache
+            .metadata
+            .chunks
+            .iter()
             .filter(|c| c.language == "r" && cache.has_snapshot(&c.hash, "RData"))
             .max_by_key(|c| c.index);
 
@@ -288,7 +297,11 @@ async fn sync_cache_if_needed(state: &ServerState, uri: &Url) {
                     };
 
                     if success {
-                        state.loaded_snapshot_hash.write().await.insert(uri.clone(), snapshot_hash.clone());
+                        state
+                            .loaded_snapshot_hash
+                            .write()
+                            .await
+                            .insert(uri.clone(), snapshot_hash.clone());
                     }
                 }
             }
@@ -299,8 +312,8 @@ async fn sync_cache_if_needed(state: &ServerState, uri: &Url) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::ServerState;
     use crate::position_mapper::PositionMapper;
+    use crate::state::ServerState;
 
     async fn create_test_state(uri: &str, text: &str) -> (ServerState, Url) {
         let state = ServerState::new();

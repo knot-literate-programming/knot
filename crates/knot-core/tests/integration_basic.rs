@@ -131,6 +131,16 @@ data <- read_csv("data.csv")
 
     assert_eq!(doc.chunks.len(), 1);
     assert_eq!(doc.chunks[0].options.depends.len(), 2);
-    assert!(doc.chunks[0].options.depends.contains(&PathBuf::from("data.csv")));
-    assert!(doc.chunks[0].options.depends.contains(&PathBuf::from("script.R")));
+    assert!(
+        doc.chunks[0]
+            .options
+            .depends
+            .contains(&PathBuf::from("data.csv"))
+    );
+    assert!(
+        doc.chunks[0]
+            .options
+            .depends
+            .contains(&PathBuf::from("script.R"))
+    );
 }

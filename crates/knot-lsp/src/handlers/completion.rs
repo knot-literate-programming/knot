@@ -1,9 +1,12 @@
+use crate::position_mapper::PositionMapper;
+use crate::state::ServerState;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
-use crate::state::ServerState;
-use crate::position_mapper::PositionMapper;
 
-pub async fn handle_completion(state: &ServerState, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+pub async fn handle_completion(
+    state: &ServerState,
+    params: CompletionParams,
+) -> Result<Option<CompletionResponse>> {
     let uri = &params.text_document_position.text_document.uri;
     let pos = params.text_document_position.position;
 
@@ -22,11 +25,11 @@ pub async fn handle_completion(state: &ServerState, params: CompletionParams) ->
         // Knot (R chunk) Completion
         let lines: Vec<&str> = text.lines().collect();
         let line_idx = pos.line as usize;
-        
+
         if line_idx < lines.len() {
             let line_text = lines[line_idx];
             let trimmed = line_text.trim_start();
-            
+
             // If we are on a line starting with #| suggest chunk options
             if trimmed.starts_with("#|") {
                 let options = vec![
@@ -39,15 +42,16 @@ pub async fn handle_completion(state: &ServerState, params: CompletionParams) ->
                     ("dpi", "DPI for the figure"),
                 ];
 
-                let items = options.into_iter().map(|(name, detail)| {
-                    CompletionItem {
+                let items = options
+                    .into_iter()
+                    .map(|(name, detail)| CompletionItem {
                         label: name.to_string(),
                         kind: Some(CompletionItemKind::FIELD),
                         detail: Some(detail.to_string()),
                         insert_text: Some(format!("{}: ", name)),
                         ..Default::default()
-                    }
-                }).collect();
+                    })
+                    .collect();
 
                 return Ok(Some(CompletionResponse::Array(items)));
             } else {
@@ -71,14 +75,19 @@ pub async fn handle_completion(state: &ServerState, params: CompletionParams) ->
                     }
                 }
 
-                match proxy.send_request("textDocument/completion", typ_params).await {
+                match proxy
+                    .send_request("textDocument/completion", typ_params)
+                    .await
+                {
                     Ok(response) => {
                         if let Some(result) = response.get("result") {
                             if result.is_null() {
                                 return Ok(None);
                             }
-                            
-                            if let Ok(mut completion) = serde_json::from_value::<CompletionResponse>(result.clone()) {
+
+                            if let Ok(mut completion) =
+                                serde_json::from_value::<CompletionResponse>(result.clone())
+                            {
                                 // Map ranges in items back if present
                                 match &mut completion {
                                     CompletionResponse::Array(items) => {
@@ -113,18 +122,23 @@ fn map_completion_item(item: &mut CompletionItem, mapper: &PositionMapper) {
             CompletionTextEdit::Edit(text_edit) => {
                 if let (Some(start), Some(end)) = (
                     mapper.typ_to_knot_position(text_edit.range.start),
-                    mapper.typ_to_knot_position(text_edit.range.end)
+                    mapper.typ_to_knot_position(text_edit.range.end),
                 ) {
                     text_edit.range.start = start;
                     text_edit.range.end = end;
                 }
             }
             CompletionTextEdit::InsertAndReplace(iar) => {
-                if let (Some(insert_start), Some(insert_end), Some(replace_start), Some(replace_end)) = (
+                if let (
+                    Some(insert_start),
+                    Some(insert_end),
+                    Some(replace_start),
+                    Some(replace_end),
+                ) = (
                     mapper.typ_to_knot_position(iar.insert.start),
                     mapper.typ_to_knot_position(iar.insert.end),
                     mapper.typ_to_knot_position(iar.replace.start),
-                    mapper.typ_to_knot_position(iar.replace.end)
+                    mapper.typ_to_knot_position(iar.replace.end),
                 ) {
                     iar.insert.start = insert_start;
                     iar.insert.end = insert_end;
@@ -134,12 +148,12 @@ fn map_completion_item(item: &mut CompletionItem, mapper: &PositionMapper) {
             }
         }
     }
-    
+
     if let Some(additional_edits) = &mut item.additional_text_edits {
         for edit in additional_edits {
             if let (Some(start), Some(end)) = (
                 mapper.typ_to_knot_position(edit.range.start),
-                mapper.typ_to_knot_position(edit.range.end)
+                mapper.typ_to_knot_position(edit.range.end),
             ) {
                 edit.range.start = start;
                 edit.range.end = end;
@@ -154,18 +168,18 @@ fn get_r_token_at_pos(text: &str, pos: Position) -> Option<String> {
     if line_idx >= lines.len() {
         return None;
     }
-    
+
     let line = lines[line_idx];
     let col = pos.character as usize;
     if col > line.len() {
         return None;
     }
-    
+
     // Scan backwards from col to find token start
     let prefix = &line[..col];
     let chars: Vec<char> = prefix.chars().collect();
     let mut start = chars.len();
-    
+
     while start > 0 {
         let c = chars[start - 1];
         // R identifiers can contain alphanumeric, _, ., and we also want to handle $, : for future
@@ -175,15 +189,19 @@ fn get_r_token_at_pos(text: &str, pos: Position) -> Option<String> {
             break;
         }
     }
-    
+
     if start == chars.len() {
         return None;
     }
-    
+
     Some(prefix.chars().skip(start).collect())
 }
 
-async fn get_r_completion(state: &ServerState, uri: &Url, token: &str) -> Option<CompletionResponse> {
+async fn get_r_completion(
+    state: &ServerState,
+    uri: &Url,
+    token: &str,
+) -> Option<CompletionResponse> {
     // Sync with cache if snapshot has changed (e.g., knot watch updated it)
     sync_cache_if_needed(state, uri).await;
 
@@ -193,7 +211,7 @@ async fn get_r_completion(state: &ServerState, uri: &Url, token: &str) -> Option
         if let Some(manager) = managers.get_mut(uri) {
             // Try to get R executor
             if let Ok(executor) = manager.get_executor("r") {
-                 // Check if this is a $ completion (e.g., df$col)
+                // Check if this is a $ completion (e.g., df$col)
                 let code = if let Some(dollar_pos) = token.rfind('$') {
                     // Extract object name before $ and prefix after $
                     let obj_name = &token[..dollar_pos];
@@ -256,7 +274,8 @@ async fn get_r_completion(state: &ServerState, uri: &Url, token: &str) -> Option
             CompletionItemKind::FUNCTION // Function icon
         };
 
-        let items: Vec<CompletionItem> = output.lines()
+        let items: Vec<CompletionItem> = output
+            .lines()
             .filter(|l| !l.trim().is_empty())
             .map(|name| CompletionItem {
                 label: name.trim().to_string(),
@@ -274,9 +293,9 @@ async fn get_r_completion(state: &ServerState, uri: &Url, token: &str) -> Option
 
 /// Sync with cache if the snapshot has changed (e.g., from knot watch)
 async fn sync_cache_if_needed(state: &ServerState, uri: &Url) {
+    use knot_core::cache::Cache;
     use knot_core::config::Config;
     use knot_core::get_cache_dir;
-    use knot_core::cache::Cache;
     use std::path::Path;
 
     let path = match uri.to_file_path() {
@@ -295,7 +314,10 @@ async fn sync_cache_if_needed(state: &ServerState, uri: &Url) {
 
     if let Ok(cache) = Cache::new(cache_dir.clone()) {
         // Find the last chunk that was executed in R
-        let last_r_chunk = cache.metadata.chunks.iter()
+        let last_r_chunk = cache
+            .metadata
+            .chunks
+            .iter()
             .filter(|c| c.language == "r" && cache.has_snapshot(&c.hash, "RData"))
             .max_by_key(|c| c.index);
 
@@ -325,7 +347,11 @@ async fn sync_cache_if_needed(state: &ServerState, uri: &Url) {
                     };
 
                     if success {
-                        state.loaded_snapshot_hash.write().await.insert(uri.clone(), snapshot_hash.clone());
+                        state
+                            .loaded_snapshot_hash
+                            .write()
+                            .await
+                            .insert(uri.clone(), snapshot_hash.clone());
                     }
                 }
             }
@@ -336,8 +362,8 @@ async fn sync_cache_if_needed(state: &ServerState, uri: &Url) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::ServerState;
     use crate::position_mapper::PositionMapper;
+    use crate::state::ServerState;
 
     async fn create_test_state(uri: &str, text: &str) -> (ServerState, Url) {
         let state = ServerState::new();
@@ -495,7 +521,11 @@ Regular text here.
         if let Some(CompletionResponse::Array(items)) = result {
             // Check each option has proper metadata
             for item in items {
-                assert!(item.detail.is_some(), "Option {} should have detail", item.label);
+                assert!(
+                    item.detail.is_some(),
+                    "Option {} should have detail",
+                    item.label
+                );
                 assert_eq!(item.kind, Some(CompletionItemKind::FIELD));
                 assert!(item.insert_text.is_some());
                 assert!(item.insert_text.as_ref().unwrap().ends_with(": "));

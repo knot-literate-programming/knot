@@ -78,15 +78,15 @@ impl SideChannel {
             return Ok(vec![]);
         }
 
-        let content = std::fs::read_to_string(&self.metadata_file)
-            .context("Failed to read metadata file")?;
+        let content =
+            std::fs::read_to_string(&self.metadata_file).context("Failed to read metadata file")?;
 
         if content.trim().is_empty() {
             return Ok(vec![]);
         }
 
-        let metadata: Vec<OutputMetadata> = serde_json::from_str(&content)
-            .context("Failed to parse metadata JSON")?;
+        let metadata: Vec<OutputMetadata> =
+            serde_json::from_str(&content).context("Failed to parse metadata JSON")?;
 
         Ok(metadata)
     }
@@ -121,7 +121,12 @@ mod tests {
     #[test]
     fn test_create_side_channel() {
         let channel = SideChannel::new().unwrap();
-        assert!(channel.metadata_file.to_string_lossy().contains("knot_meta_"));
+        assert!(
+            channel
+                .metadata_file
+                .to_string_lossy()
+                .contains("knot_meta_")
+        );
     }
 
     #[test]

@@ -9,10 +9,10 @@
 // Note: These tests use set_current_dir() which is not thread-safe.
 // Run with: cargo test -- --test-threads=1
 
+use pathdiff;
 use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
-use pathdiff;
 
 /// Helper to create a test project structure
 fn setup_test_project() -> (TempDir, PathBuf) {
@@ -103,9 +103,18 @@ fn test_successful_build_with_includes() {
     assert!(result.is_ok(), "Build should succeed: {:?}", result.err());
 
     // Verify that generated files exist
-    assert!(project_root.join(".main.typ").exists(), "Main .typ file should be generated");
-    assert!(project_root.join("chapters/.01-intro.typ").exists(), "Chapter 01 .typ should be generated");
-    assert!(project_root.join("chapters/.02-results.typ").exists(), "Chapter 02 .typ should be generated");
+    assert!(
+        project_root.join(".main.typ").exists(),
+        "Main .typ file should be generated"
+    );
+    assert!(
+        project_root.join("chapters/.01-intro.typ").exists(),
+        "Chapter 01 .typ should be generated"
+    );
+    assert!(
+        project_root.join("chapters/.02-results.typ").exists(),
+        "Chapter 02 .typ should be generated"
+    );
 
     // Verify that includes were injected
     let main_typ_content = fs::read_to_string(project_root.join(".main.typ")).unwrap();
@@ -148,7 +157,10 @@ This is the end.
     let _ = std::env::set_current_dir(original_dir);
 
     // Check that build failed with appropriate error
-    assert!(result.is_err(), "Build should fail when placeholder is missing");
+    assert!(
+        result.is_err(),
+        "Build should fail when placeholder is missing"
+    );
     let error_msg = result.unwrap_err().to_string();
     assert!(
         error_msg.contains("/* KNOT-INJECT-CHAPTERS */"),
@@ -170,7 +182,8 @@ fn test_error_when_included_file_outside_project() {
     let relative_outside = pathdiff::diff_paths(&outside_file, &project_root).unwrap();
 
     // Create a knot.toml with a path traversal attempt
-    let malicious_knot_toml = format!(r#"
+    let malicious_knot_toml = format!(
+        r#"
 [document]
 main = "main.knot"
 includes = [
@@ -179,7 +192,9 @@ includes = [
 
 [helpers]
 typst = "lib/knot.typ"
-"#, relative_outside.display());
+"#,
+        relative_outside.display()
+    );
     fs::write(project_root.join("knot.toml"), malicious_knot_toml).unwrap();
 
     // Change to project directory
@@ -193,7 +208,10 @@ typst = "lib/knot.typ"
     let _ = std::env::set_current_dir(original_dir);
 
     // Check that build failed with security error
-    assert!(result.is_err(), "Build should fail for files outside project root");
+    assert!(
+        result.is_err(),
+        "Build should fail for files outside project root"
+    );
     let error_msg = result.unwrap_err().to_string();
     assert!(
         error_msg.contains("Security") || error_msg.contains("outside project root"),
@@ -229,12 +247,17 @@ x <- 1 + 1
     // Check that build failed
     // Note: The error might come from parsing, R execution, or Typst compilation
     // The key is that invalid content causes a build failure
-    assert!(result.is_err(), "Build should fail when included file has errors");
+    assert!(
+        result.is_err(),
+        "Build should fail when included file has errors"
+    );
     let error_msg = result.unwrap_err().to_string();
 
     // Verify error is informative (mentions either the file or "Failed to compile")
     assert!(
-        error_msg.contains("01-intro") || error_msg.contains("Failed to compile") || error_msg.contains("parse"),
+        error_msg.contains("01-intro")
+            || error_msg.contains("Failed to compile")
+            || error_msg.contains("parse"),
         "Error should provide context about the failure: {}",
         error_msg
     );
@@ -268,7 +291,10 @@ typst = "lib/knot.typ"
     let _ = std::env::set_current_dir(original_dir);
 
     // Check that build failed with file not found error
-    assert!(result.is_err(), "Build should fail when included file doesn't exist");
+    assert!(
+        result.is_err(),
+        "Build should fail when included file doesn't exist"
+    );
     let error_msg = result.unwrap_err().to_string();
     assert!(
         error_msg.contains("nonexistent.knot") || error_msg.contains("not found"),

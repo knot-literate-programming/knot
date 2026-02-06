@@ -1,5 +1,5 @@
-use std::path::{Path, PathBuf};
 use anyhow::Result;
+use std::path::{Path, PathBuf};
 
 /// Resolve a binary path by checking PATH and common installation directories
 pub fn resolve_binary(name: &str) -> Result<PathBuf> {
@@ -31,14 +31,19 @@ pub fn resolve_binary(name: &str) -> Result<PathBuf> {
         if path.exists() && path.is_file() {
             return Ok(path);
         }
-        
+
         // Special case for tinymist and air in VS Code extensions
         if (name == "tinymist" || name == "air") && cfg!(target_os = "macos") {
-            let extensions_dir = Path::new(&shellexpand::tilde("~/.vscode/extensions").to_string()).to_path_buf();
+            let extensions_dir =
+                Path::new(&shellexpand::tilde("~/.vscode/extensions").to_string()).to_path_buf();
             if extensions_dir.exists() {
                 if let Ok(entries) = std::fs::read_dir(extensions_dir) {
-                    let prefix = if name == "tinymist" { "myriad-dreamin.tinymist-" } else { "posit.air-" };
-                    
+                    let prefix = if name == "tinymist" {
+                        "myriad-dreamin.tinymist-"
+                    } else {
+                        "posit.air-"
+                    };
+
                     for entry in entries.flatten() {
                         let dirname = entry.file_name().to_string_lossy().to_string();
                         if dirname.starts_with(prefix) {
@@ -48,7 +53,11 @@ pub fn resolve_binary(name: &str) -> Result<PathBuf> {
                                 // Try common air subpaths
                                 let p1 = entry.path().join("bin").join("air");
                                 let p2 = entry.path().join("bundled").join("bin").join("air");
-                                if p2.exists() { p2 } else { p1 }
+                                if p2.exists() {
+                                    p2
+                                } else {
+                                    p1
+                                }
                             };
 
                             if candidate.exists() && candidate.is_file() {

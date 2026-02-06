@@ -39,7 +39,9 @@ pub fn resolve_graphics_options(
         width: chunk_opts.fig_width.unwrap_or(defaults.fig_width),
         height: chunk_opts.fig_height.unwrap_or(defaults.fig_height),
         dpi: chunk_opts.dpi.unwrap_or(defaults.dpi),
-        format: chunk_opts.fig_format.clone()
+        format: chunk_opts
+            .fig_format
+            .clone()
             .unwrap_or_else(|| defaults.format.clone()),
     }
 }
@@ -63,11 +65,13 @@ mod tests {
 
     #[test]
     fn test_chunk_overrides_defaults() {
-        let mut chunk_opts = ChunkOptions::default();
-        chunk_opts.fig_width = Some(10.0);
-        chunk_opts.fig_height = Some(8.0);
-        chunk_opts.dpi = Some(600);
-        chunk_opts.fig_format = Some("png".to_string());
+        let chunk_opts = ChunkOptions {
+            fig_width: Some(10.0),
+            fig_height: Some(8.0),
+            dpi: Some(600),
+            fig_format: Some("png".to_string()),
+            ..Default::default()
+        };
 
         let defaults = GraphicsDefaults::default();
 
@@ -81,18 +85,20 @@ mod tests {
 
     #[test]
     fn test_partial_chunk_options() {
-        let mut chunk_opts = ChunkOptions::default();
-        chunk_opts.fig_width = Some(10.0);
-        chunk_opts.dpi = Some(450);
+        let chunk_opts = ChunkOptions {
+            fig_width: Some(10.0),
+            dpi: Some(450),
+            ..Default::default()
+        };
         // fig_height and format will use defaults
 
         let defaults = GraphicsDefaults::default();
 
         let resolved = resolve_graphics_options(&chunk_opts, &defaults);
 
-        assert_eq!(resolved.width, 10.0);   // From chunk
-        assert_eq!(resolved.height, 5.0);   // From defaults
-        assert_eq!(resolved.dpi, 450);      // From chunk
+        assert_eq!(resolved.width, 10.0); // From chunk
+        assert_eq!(resolved.height, 5.0); // From defaults
+        assert_eq!(resolved.dpi, 450); // From chunk
         assert_eq!(resolved.format, "svg"); // From defaults
     }
 }

@@ -33,11 +33,12 @@ impl AirFormatter {
 
     /// Find the air executable in PATH or common installation locations
     fn find_air() -> Result<PathBuf> {
-        crate::path_resolver::resolve_binary("air")
-            .map_err(|_| anyhow::anyhow!(
+        crate::path_resolver::resolve_binary("air").map_err(|_| {
+            anyhow::anyhow!(
                 "Air formatter not found. Install from: https://posit-dev.github.io/air/\n\
                  Or specify custom path via 'knot.formatter.air.path' setting"
-            ))
+            )
+        })
     }
 
     /// Format R code using Air

@@ -1,6 +1,6 @@
 // Run with: cargo test --test integration_inline -- --ignored
 
-use knot_core::{Document, Compiler};
+use knot_core::{Compiler, Document};
 use std::fs;
 
 #[test]
@@ -27,7 +27,10 @@ print(y)
     let mut compiler1 = Compiler::new(&test_file).expect("Failed to create compiler1");
     let result1 = compiler1.compile(&doc1).expect("Failed to compile doc1");
 
-    assert!(!result1.contains("x <- 15"), "Should not contain the inline code");
+    assert!(
+        !result1.contains("x <- 15"),
+        "Should not contain the inline code"
+    );
     assert!(result1.contains("The value is 15"));
     assert!(result1.contains("30")); // from the print(y) chunk
 
@@ -35,7 +38,10 @@ print(y)
     let doc2 = Document::parse(source.to_string()).expect("Failed to parse doc2");
     let mut compiler2 = Compiler::new(&test_file).expect("Failed to create compiler2");
     let result2 = compiler2.compile(&doc2).expect("Failed to compile doc2");
-    assert_eq!(result1, result2, "Second pass should produce identical, cached result");
+    assert_eq!(
+        result1, result2,
+        "Second pass should produce identical, cached result"
+    );
 
     // Third pass: modify the first inline expression
     let modified_source = r#"

@@ -22,16 +22,16 @@ pub fn build_project() -> Result<()> {
     info!("🔨 Building project...");
 
     // Step 1: Find project root by searching for knot.toml
-    let current_dir = std::env::current_dir()
-        .context("Failed to get current directory")?;
+    let current_dir = std::env::current_dir().context("Failed to get current directory")?;
     let (config, project_root) = Config::find_and_load(&current_dir)?;
 
     // Step 2: Get main file from knot.toml
-    let main_file_name = config.document.main
-        .ok_or_else(|| anyhow::anyhow!(
+    let main_file_name = config.document.main.ok_or_else(|| {
+        anyhow::anyhow!(
             "No 'main' file specified in knot.toml.\n\
              Add: [document]\n     main = \"main.knot\""
-        ))?;
+        )
+    })?;
 
     let main_file = project_root.join(&main_file_name);
 
@@ -61,9 +61,11 @@ pub fn build_project() -> Result<()> {
             let include_path = project_root.join(include_name);
 
             // Security: Validate that included file is within project root
-            let canonical_include = include_path.canonicalize()
+            let canonical_include = include_path
+                .canonicalize()
                 .with_context(|| format!("Included file not found: {:?}", include_name))?;
-            let canonical_root = project_root.canonicalize()
+            let canonical_root = project_root
+                .canonicalize()
                 .context("Failed to canonicalize project root")?;
 
             if !canonical_include.starts_with(&canonical_root) {
@@ -79,11 +81,14 @@ pub fn build_project() -> Result<()> {
                 .with_context(|| format!("Failed to compile included file: {}", include_name))?;
 
             // Add include directive using relative path from project root
-            let relative_path = pathdiff::diff_paths(&compiled_path, &project_root)
-                .ok_or_else(|| anyhow::anyhow!(
-                    "Failed to compute relative path from {:?} to {:?}",
-                    project_root, compiled_path
-                ))?;
+            let relative_path =
+                pathdiff::diff_paths(&compiled_path, &project_root).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Failed to compute relative path from {:?} to {:?}",
+                        project_root,
+                        compiled_path
+                    )
+                })?;
 
             generated_includes.push_str(&format!("#include \"{}\"\n", relative_path.display()));
         }
@@ -156,8 +161,7 @@ pub fn build_project() -> Result<()> {
 /// - Returns the path to the generated .typ file
 pub fn compile_file(file: &PathBuf, output_path: Option<&PathBuf>) -> Result<PathBuf> {
     info!("📄 Compiling {:?}...", file);
-    let source =
-        fs::read_to_string(file).context(format!("Failed to read file: {:?}", file))?;
+    let source = fs::read_to_string(file).context(format!("Failed to read file: {:?}", file))?;
 
     let doc = Document::parse(source).context("Failed to parse document")?;
     info!("✓ Parsed {} chunk(s)", doc.chunks.len());
@@ -196,7 +200,8 @@ fn fix_paths_in_typst(source: &str, typ_file: &PathBuf) -> Result<String> {
     use std::path::Path;
 
     // Create _knot_r_files directory next to the .typ file
-    let typ_dir = typ_file.parent()
+    let typ_dir = typ_file
+        .parent()
         .context("Failed to get parent directory of .typ file")?;
     let local_files_dir = typ_dir.join(Defaults::R_FILES_DIR);
     fs::create_dir_all(&local_files_dir)?;

@@ -6,7 +6,7 @@
 // - File dependencies (path + mtime + size)
 
 use crate::parser::ChunkOptions;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::PathBuf;
@@ -42,10 +42,16 @@ pub fn get_chunk_hash(
 /// - Code content
 /// - Options (echo, eval, output, digits)
 /// - Previous inline expression hash (for sequential invalidation)
-pub fn get_inline_expr_hash(code: &str, options: &crate::parser::InlineOptions, previous_hash: &str) -> String {
+pub fn get_inline_expr_hash(
+    code: &str,
+    options: &crate::parser::InlineOptions,
+    previous_hash: &str,
+) -> String {
     // Include options in hash to invalidate cache when options change
-    let options_str = format!("echo={},eval={},output={},digits={:?}",
-        options.echo, options.eval, options.output, options.digits);
+    let options_str = format!(
+        "echo={},eval={},output={},digits={:?}",
+        options.echo, options.eval, options.output, options.digits
+    );
     let inline_content = format!("{}|{}|{}", code, options_str, previous_hash);
 
     let mut hasher = Sha256::new();

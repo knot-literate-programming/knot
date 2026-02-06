@@ -1,12 +1,12 @@
+use crate::formatter::AirFormatter;
+use crate::position_mapper::PositionMapper;
+use crate::proxy::TinymistProxy;
+use knot_core::executors::ExecutorManager;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tower_lsp::lsp_types::{Diagnostic, Url};
-use std::path::PathBuf;
-use crate::position_mapper::PositionMapper;
-use crate::proxy::TinymistProxy;
-use crate::formatter::AirFormatter;
-use knot_core::executors::ExecutorManager;
 
 /// Centralized state for the Knot Language Server
 pub struct ServerState {

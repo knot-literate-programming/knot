@@ -25,12 +25,12 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
 use formatter::AirFormatter;
+use knot_core::executors::ExecutorManager;
 use position_mapper::PositionMapper;
 use proxy::TinymistProxy;
 use state::ServerState;
 use transform::transform_to_typst;
-use knot_core::executors::ExecutorManager;
- // Traits used for dynamic dispatch // Ensure traits are imported
+// Traits used for dynamic dispatch // Ensure traits are imported
 
 struct KnotLanguageServer {
     client: Client,
@@ -55,7 +55,8 @@ impl LanguageServer for KnotLanguageServer {
                 *self.state.air_path_override.write().await = Some(PathBuf::from(air_path));
             }
             if let Some(tinymist_path) = options.get("tinymistPath").and_then(|v| v.as_str()) {
-                *self.state.tinymist_path_override.write().await = Some(PathBuf::from(tinymist_path));
+                *self.state.tinymist_path_override.write().await =
+                    Some(PathBuf::from(tinymist_path));
             }
         }
 
@@ -97,16 +98,25 @@ impl LanguageServer for KnotLanguageServer {
         })
     }
 
-    async fn execute_command(&self, params: ExecuteCommandParams) -> Result<Option<serde_json::Value>> {
+    async fn execute_command(
+        &self,
+        params: ExecuteCommandParams,
+    ) -> Result<Option<serde_json::Value>> {
         if params.command == "knot.cleanProject" {
             // Get the file URI from arguments if present
             let start_path = if let Some(first) = params.arguments.first() {
                 if let Some(uri_str) = first.as_str() {
                     if let Ok(uri) = Url::parse(uri_str) {
                         uri.to_file_path().ok()
-                    } else { None }
-                } else { None }
-            } else { None };
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
 
             // Fallback to workspace root
             let root_path = if start_path.is_some() {
@@ -117,17 +127,31 @@ impl LanguageServer for KnotLanguageServer {
             };
 
             if let Some(path) = &root_path {
-                self.client.log_message(MessageType::INFO, format!("LSP: Cleaning project starting from {:?}", path)).await;
+                self.client
+                    .log_message(
+                        MessageType::INFO,
+                        format!("LSP: Cleaning project starting from {:?}", path),
+                    )
+                    .await;
             } else {
-                self.client.log_message(MessageType::INFO, "LSP: Cleaning project (unknown root)").await;
+                self.client
+                    .log_message(MessageType::INFO, "LSP: Cleaning project (unknown root)")
+                    .await;
             }
-            
+
             match knot_core::clean_project(root_path.as_deref()) {
                 Ok(_) => {
-                    self.client.show_message(MessageType::INFO, "Project cleaned successfully!").await;
+                    self.client
+                        .show_message(MessageType::INFO, "Project cleaned successfully!")
+                        .await;
                 }
                 Err(e) => {
-                    self.client.show_message(MessageType::ERROR, format!("Failed to clean project: {}", e)).await;
+                    self.client
+                        .show_message(
+                            MessageType::ERROR,
+                            format!("Failed to clean project: {}", e),
+                        )
+                        .await;
                 }
             }
         }
@@ -146,11 +170,21 @@ impl LanguageServer for KnotLanguageServer {
         // Initialize Air formatter if not already done (with possible override)
         match AirFormatter::new(air_override) {
             Ok(f) => {
-                self.client.log_message(MessageType::INFO, format!("Air formatter initialized at: {:?}", f.path())).await;
+                self.client
+                    .log_message(
+                        MessageType::INFO,
+                        format!("Air formatter initialized at: {:?}", f.path()),
+                    )
+                    .await;
                 *self.state.formatter.write().await = Some(f);
             }
             Err(e) => {
-                self.client.log_message(MessageType::WARNING, format!("Air formatter not available: {}", e)).await;
+                self.client
+                    .log_message(
+                        MessageType::WARNING,
+                        format!("Air formatter not available: {}", e),
+                    )
+                    .await;
             }
         }
 
@@ -172,10 +206,14 @@ impl LanguageServer for KnotLanguageServer {
                         if let Some(method) = msg.get("method").and_then(|m| m.as_str()) {
                             if method == "textDocument/publishDiagnostics" {
                                 if let Some(params) = msg.get("params") {
-                                    if let Ok(diag_params) = serde_json::from_value::<PublishDiagnosticsParams>(params.clone()) {
+                                    if let Ok(diag_params) =
+                                        serde_json::from_value::<PublishDiagnosticsParams>(
+                                            params.clone(),
+                                        )
+                                    {
                                         // Retrieve mapper and knot diagnostics
                                         let uri = diag_params.uri.clone();
-                                        
+
                                         // Get cached knot diagnostics
                                         let mut merged_diagnostics = {
                                             let cache = knot_diagnostics_cache.read().await;
@@ -185,8 +223,12 @@ impl LanguageServer for KnotLanguageServer {
                                         // Map tinymist diagnostics
                                         if let Some(mapper) = mappers.read().await.get(&uri) {
                                             for mut diag in diag_params.diagnostics {
-                                                if let Some(start) = mapper.typ_to_knot_position(diag.range.start) {
-                                                    if let Some(end) = mapper.typ_to_knot_position(diag.range.end) {
+                                                if let Some(start) =
+                                                    mapper.typ_to_knot_position(diag.range.start)
+                                                {
+                                                    if let Some(end) =
+                                                        mapper.typ_to_knot_position(diag.range.end)
+                                                    {
                                                         diag.range.start = start;
                                                         diag.range.end = end;
                                                         diag.source = Some("typst".to_string());
@@ -197,7 +239,9 @@ impl LanguageServer for KnotLanguageServer {
                                         }
 
                                         // Publish merged diagnostics
-                                        client.publish_diagnostics(uri, merged_diagnostics, None).await;
+                                        client
+                                            .publish_diagnostics(uri, merged_diagnostics, None)
+                                            .await;
                                     }
                                 }
                             }
@@ -209,7 +253,10 @@ impl LanguageServer for KnotLanguageServer {
                 self.client
                     .log_message(
                         MessageType::WARNING,
-                        format!("Failed to spawn tinymist: {}. Typst features will be limited.", e),
+                        format!(
+                            "Failed to spawn tinymist: {}. Typst features will be limited.",
+                            e
+                        ),
                     )
                     .await;
             }
@@ -229,20 +276,30 @@ impl LanguageServer for KnotLanguageServer {
         let text = params.text_document.text.clone();
 
         // Store document text
-        self.state.documents.write().await.insert(uri.clone(), text.clone());
+        self.state
+            .documents
+            .write()
+            .await
+            .insert(uri.clone(), text.clone());
 
         // Initialize ExecutorManager for this document
         {
             let mut managers = self.state.executors.write().await;
             if !managers.contains_key(&uri) {
                 // Create a temp dir for this LSP session
-                let temp_dir = std::env::temp_dir().join(format!("knot_lsp_{}", uuid::Uuid::new_v4()));
-                
+                let temp_dir =
+                    std::env::temp_dir().join(format!("knot_lsp_{}", uuid::Uuid::new_v4()));
+
                 // Initialize ExecutorManager
                 // Helper scripts are embedded in the binary and loaded automatically
                 let manager = ExecutorManager::new(temp_dir);
                 managers.insert(uri.clone(), manager);
-                self.client.log_message(MessageType::INFO, "Initialized executor manager for document").await;
+                self.client
+                    .log_message(
+                        MessageType::INFO,
+                        "Initialized executor manager for document",
+                    )
+                    .await;
             }
         }
 
@@ -260,7 +317,11 @@ impl LanguageServer for KnotLanguageServer {
             let text = change.text.clone();
 
             // Update stored document text
-            self.state.documents.write().await.insert(uri.clone(), text.clone());
+            self.state
+                .documents
+                .write()
+                .await
+                .insert(uri.clone(), text.clone());
 
             self.on_change(uri, text).await;
         }
@@ -270,10 +331,12 @@ impl LanguageServer for KnotLanguageServer {
         let uri = params.text_document.uri;
         self.state.documents.write().await.remove(&uri);
         self.state.mappers.write().await.remove(&uri);
-        
+
         // Remove and drop executors (terminates processes)
         if let Some(_manager) = self.state.executors.write().await.remove(&uri) {
-            self.client.log_message(MessageType::INFO, "Closed execution session for document").await;
+            self.client
+                .log_message(MessageType::INFO, "Closed execution session for document")
+                .await;
         }
     }
 
@@ -283,15 +346,13 @@ impl LanguageServer for KnotLanguageServer {
     ) -> Result<DocumentDiagnosticReportResult> {
         // We handle diagnostics via push (publishDiagnostics)
         Ok(DocumentDiagnosticReportResult::Report(
-            DocumentDiagnosticReport::Full(
-                RelatedFullDocumentDiagnosticReport {
-                    related_documents: None,
-                    full_document_diagnostic_report: FullDocumentDiagnosticReport {
-                        result_id: None,
-                        items: vec![],
-                    },
+            DocumentDiagnosticReport::Full(RelatedFullDocumentDiagnosticReport {
+                related_documents: None,
+                full_document_diagnostic_report: FullDocumentDiagnosticReport {
+                    result_id: None,
+                    items: vec![],
                 },
-            ),
+            }),
         ))
     }
 
@@ -338,7 +399,8 @@ impl KnotLanguageServer {
         let knot_diagnostics = diagnostics::get_diagnostics(&text);
 
         // 2. Cache knot diagnostics
-        self.state.knot_diagnostics_cache
+        self.state
+            .knot_diagnostics_cache
             .write()
             .await
             .insert(uri.clone(), knot_diagnostics.clone());
@@ -364,7 +426,7 @@ impl KnotLanguageServer {
         if let Some(proxy) = tinymist_guard.as_mut() {
             let mut opened_map = self.state.opened_in_tinymist.write().await;
             let mut versions_map = self.state.document_versions.write().await;
-            
+
             let is_opened = *opened_map.get(&uri).unwrap_or(&false);
             let version = *versions_map.get(&uri).unwrap_or(&0) + 1;
             versions_map.insert(uri.clone(), version);
@@ -398,7 +460,12 @@ impl KnotLanguageServer {
 
             // Send notification
             if let Err(e) = proxy.send_notification(method, params).await {
-                self.client.log_message(MessageType::ERROR, format!("Failed to send to tinymist: {}", e)).await;
+                self.client
+                    .log_message(
+                        MessageType::ERROR,
+                        format!("Failed to send to tinymist: {}", e),
+                    )
+                    .await;
             } else if !is_opened {
                 opened_map.insert(uri, true);
             }
@@ -406,9 +473,9 @@ impl KnotLanguageServer {
     }
 
     async fn sync_with_cache(&self, uri: &Url) {
+        use knot_core::cache::Cache;
         use knot_core::config::Config;
         use knot_core::get_cache_dir;
-        use knot_core::cache::Cache;
 
         let path = match uri.to_file_path() {
             Ok(p) => p,
@@ -428,7 +495,10 @@ impl KnotLanguageServer {
         // 2. Load metadata to find the latest snapshot for R
         if let Ok(cache) = Cache::new(cache_dir.clone()) {
             // Find the last chunk that was executed in R
-            let last_r_chunk = cache.metadata.chunks.iter()
+            let last_r_chunk = cache
+                .metadata
+                .chunks
+                .iter()
                 .filter(|c| {
                     // Check if chunk is R AND snapshot exists with .RData extension
                     c.language == "r" && cache.has_snapshot(&c.hash, "RData")
@@ -465,12 +535,21 @@ impl KnotLanguageServer {
                         match result {
                             Ok(true) => {
                                 // 5. Update the loaded hash
-                                self.state.loaded_snapshot_hash.write().await.insert(uri.clone(), snapshot_hash.clone());
+                                self.state
+                                    .loaded_snapshot_hash
+                                    .write()
+                                    .await
+                                    .insert(uri.clone(), snapshot_hash.clone());
                                 self.client.log_message(MessageType::INFO, format!("Synced R session with snapshot for chunk {} (hash: {})", last_chunk.index, &snapshot_hash[..8])).await;
                             }
                             Ok(false) => {}
                             Err(e) => {
-                                self.client.log_message(MessageType::WARNING, format!("Failed to load R snapshot: {}", e)).await;
+                                self.client
+                                    .log_message(
+                                        MessageType::WARNING,
+                                        format!("Failed to load R snapshot: {}", e),
+                                    )
+                                    .await;
                             }
                         }
                     }
@@ -483,23 +562,17 @@ impl KnotLanguageServer {
 #[tokio::main]
 
 async fn main() {
-
     let stdin = tokio::io::stdin();
 
     let stdout = tokio::io::stdout();
 
-
-
     let (service, socket) = LspService::new(|client| KnotLanguageServer {
-
         client,
 
         state: ServerState::new(),
 
         root_uri: Arc::new(RwLock::new(None)),
-
     });
 
     Server::new(stdin, stdout, socket).serve(service).await;
-
 }

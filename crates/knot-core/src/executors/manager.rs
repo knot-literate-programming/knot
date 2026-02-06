@@ -42,10 +42,10 @@
 //!     Ok(())
 //! }
 
+use crate::executors::{KnotExecutor, LanguageExecutor, python::PythonExecutor, r::RExecutor};
+use anyhow::Result;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use anyhow::Result;
-use crate::executors::{KnotExecutor, LanguageExecutor, r::RExecutor, python::PythonExecutor};
 
 pub struct ExecutorManager {
     executors: HashMap<String, Box<dyn KnotExecutor>>,
@@ -81,7 +81,10 @@ impl ExecutorManager {
 
         match self.executors.get_mut(lang) {
             Some(executor) => Ok(executor.as_mut()),
-            None => anyhow::bail!("Failed to retrieve executor for language '{}' after initialization", lang),
+            None => anyhow::bail!(
+                "Failed to retrieve executor for language '{}' after initialization",
+                lang
+            ),
         }
     }
 
@@ -100,8 +103,8 @@ impl ExecutorManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use crate::executors::GraphicsOptions;
+    use tempfile::TempDir;
 
     fn setup_manager() -> (TempDir, ExecutorManager) {
         let temp_dir = TempDir::new().unwrap();

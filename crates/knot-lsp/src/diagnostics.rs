@@ -20,8 +20,14 @@ pub fn get_diagnostics(text: &str) -> Vec<Diagnostic> {
             for error in doc.errors {
                 diagnostics.push(Diagnostic {
                     range: Range {
-                        start: Position { line: 0, character: 0 },
-                        end: Position { line: 0, character: 1 },
+                        start: Position {
+                            line: 0,
+                            character: 0,
+                        },
+                        end: Position {
+                            line: 0,
+                            character: 1,
+                        },
                     },
                     severity: Some(DiagnosticSeverity::ERROR),
                     source: Some("knot".to_string()),
@@ -82,8 +88,14 @@ pub fn get_diagnostics(text: &str) -> Vec<Diagnostic> {
             // Parsing error - create diagnostic at the beginning
             diagnostics.push(Diagnostic {
                 range: Range {
-                    start: Position { line: 0, character: 0 },
-                    end: Position { line: 0, character: 1 },
+                    start: Position {
+                        line: 0,
+                        character: 0,
+                    },
+                    end: Position {
+                        line: 0,
+                        character: 1,
+                    },
                 },
                 severity: Some(DiagnosticSeverity::ERROR),
                 source: Some("knot".to_string()),
@@ -100,7 +112,7 @@ pub fn get_diagnostics(text: &str) -> Vec<Diagnostic> {
 fn byte_offset_to_line_col(text: &str, offset: usize) -> (usize, usize) {
     let mut line = 0;
     let mut col = 0;
-    
+
     for (idx, ch) in text.char_indices() {
         if idx >= offset {
             break;

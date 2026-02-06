@@ -1,11 +1,11 @@
 // Position mapping between .knot and .typ placeholder documents
 //
-// Since we now use padding (preserving spaces and newlines), 
+// Since we now use padding (preserving spaces and newlines),
 // positions are identical between .knot and .typ documents.
 // This mapper remains useful to identify if a position is within a masked region.
 
-use tower_lsp::lsp_types::Position;
 use knot_core::parser::Document;
+use tower_lsp::lsp_types::Position;
 
 /// Maps positions between .knot and .typ documents
 #[derive(Debug, Clone)]
@@ -117,12 +117,9 @@ mod tests {
 
     use crate::transform::transform_to_typst;
 
-
-
     #[test]
 
     fn test_mapper_identity() {
-
         let knot = r#"Line 0
 
 ```{r}
@@ -133,68 +130,71 @@ chunk code
 
 Line 4"#;
 
-
-
         let typ = transform_to_typst(knot);
 
         let mapper = PositionMapper::new(knot, &typ);
 
-
-
         // Position 4:0 should be exactly 4:0 in both
 
-        let pos = Position { line: 4, character: 0 };
+        let pos = Position {
+            line: 4,
+            character: 0,
+        };
 
         assert_eq!(mapper.knot_to_typ_position(pos), Some(pos));
 
         assert_eq!(mapper.typ_to_knot_position(pos), Some(pos));
-
     }
-
-
 
     #[test]
 
     fn test_is_position_in_chunk() {
-
         let knot = "Text `{r} 1+1` end";
 
         let typ = transform_to_typst(knot);
 
         let mapper = PositionMapper::new(knot, &typ);
 
-
-
         // Outside
 
-        assert!(!mapper.is_position_in_chunk(Position { line: 0, character: 0 }));
+        assert!(!mapper.is_position_in_chunk(Position {
+            line: 0,
+            character: 0
+        }));
 
-        assert!(!mapper.is_position_in_chunk(Position { line: 0, character: 4 }));
-
-        
+        assert!(!mapper.is_position_in_chunk(Position {
+            line: 0,
+            character: 4
+        }));
 
         // Inside `{r} 1+1` (starts at 5, ends at 14)
 
-        assert!(mapper.is_position_in_chunk(Position { line: 0, character: 5 }));
+        assert!(mapper.is_position_in_chunk(Position {
+            line: 0,
+            character: 5
+        }));
 
-        assert!(mapper.is_position_in_chunk(Position { line: 0, character: 10 }));
+        assert!(mapper.is_position_in_chunk(Position {
+            line: 0,
+            character: 10
+        }));
 
-        assert!(mapper.is_position_in_chunk(Position { line: 0, character: 13 }));
-
-        
+        assert!(mapper.is_position_in_chunk(Position {
+            line: 0,
+            character: 13
+        }));
 
         // After
 
-        assert!(!mapper.is_position_in_chunk(Position { line: 0, character: 14 }));
-
+        assert!(!mapper.is_position_in_chunk(Position {
+            line: 0,
+            character: 14
+        }));
     }
-
-
 
     #[test]
 
     fn test_position_with_emoji() {
-
         // '😀' is 2 UTF-16 units.
 
         let knot = "😀 `{r} 1+1` end";
@@ -203,28 +203,28 @@ Line 4"#;
 
         let mapper = PositionMapper::new(knot, &typ);
 
-
-
-
-
         // '😀' is at col 0 (2 UTF-16 units)
 
         // ' ' is at col 2
 
         // '`' (start of inline) is at col 3
 
+        assert!(!mapper.is_position_in_chunk(Position {
+            line: 0,
+            character: 0
+        }));
 
-
-        assert!(!mapper.is_position_in_chunk(Position { line: 0, character: 0 }));
-
-        assert!(!mapper.is_position_in_chunk(Position { line: 0, character: 2 }));
-
-
+        assert!(!mapper.is_position_in_chunk(Position {
+            line: 0,
+            character: 2
+        }));
 
         // Inside inline expr (starts at char 3)
 
-        assert!(mapper.is_position_in_chunk(Position { line: 0, character: 3 }));
-
+        assert!(mapper.is_position_in_chunk(Position {
+            line: 0,
+            character: 3
+        }));
     }
 
     #[test]
@@ -239,26 +239,61 @@ x <- 1
         let mapper = PositionMapper::new(knot, &typ);
 
         // Opening fence (line 0): should be detected as fence
-        assert!(mapper.is_position_on_fence(Position { line: 0, character: 0 }));
-        assert!(mapper.is_position_on_fence(Position { line: 0, character: 5 }));
-        assert!(mapper.is_position_on_fence(Position { line: 0, character: 10 }));
+        assert!(mapper.is_position_on_fence(Position {
+            line: 0,
+            character: 0
+        }));
+        assert!(mapper.is_position_on_fence(Position {
+            line: 0,
+            character: 5
+        }));
+        assert!(mapper.is_position_on_fence(Position {
+            line: 0,
+            character: 10
+        }));
 
         // Option line (line 1): NOT a fence
-        assert!(!mapper.is_position_on_fence(Position { line: 1, character: 0 }));
-        assert!(!mapper.is_position_on_fence(Position { line: 1, character: 5 }));
+        assert!(!mapper.is_position_on_fence(Position {
+            line: 1,
+            character: 0
+        }));
+        assert!(!mapper.is_position_on_fence(Position {
+            line: 1,
+            character: 5
+        }));
 
         // Code line (line 2): NOT a fence
-        assert!(!mapper.is_position_on_fence(Position { line: 2, character: 0 }));
+        assert!(!mapper.is_position_on_fence(Position {
+            line: 2,
+            character: 0
+        }));
 
         // Closing fence (line 3): should be detected as fence
-        assert!(mapper.is_position_on_fence(Position { line: 3, character: 0 }));
-        assert!(mapper.is_position_on_fence(Position { line: 3, character: 2 }));
+        assert!(mapper.is_position_on_fence(Position {
+            line: 3,
+            character: 0
+        }));
+        assert!(mapper.is_position_on_fence(Position {
+            line: 3,
+            character: 2
+        }));
 
         // All positions in chunk (including fences) should return true for is_position_in_chunk
-        assert!(mapper.is_position_in_chunk(Position { line: 0, character: 0 }));
-        assert!(mapper.is_position_in_chunk(Position { line: 1, character: 0 }));
-        assert!(mapper.is_position_in_chunk(Position { line: 2, character: 0 }));
-        assert!(mapper.is_position_in_chunk(Position { line: 3, character: 0 }));
+        assert!(mapper.is_position_in_chunk(Position {
+            line: 0,
+            character: 0
+        }));
+        assert!(mapper.is_position_in_chunk(Position {
+            line: 1,
+            character: 0
+        }));
+        assert!(mapper.is_position_in_chunk(Position {
+            line: 2,
+            character: 0
+        }));
+        assert!(mapper.is_position_in_chunk(Position {
+            line: 3,
+            character: 0
+        }));
     }
-
 }

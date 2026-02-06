@@ -1,12 +1,23 @@
-use crate::parser::{Chunk, ResolvedChunkOptions};
 use crate::executors::ExecutionResult;
+use crate::parser::{Chunk, ResolvedChunkOptions};
 
 pub trait Backend {
     /// Formats a processed chunk into the target document syntax.
-    fn format_chunk(&self, chunk: &Chunk, resolved_options: &ResolvedChunkOptions, result: &ExecutionResult) -> String;
+    fn format_chunk(
+        &self,
+        chunk: &Chunk,
+        resolved_options: &ResolvedChunkOptions,
+        result: &ExecutionResult,
+    ) -> String;
 }
 
 pub struct TypstBackend;
+
+impl Default for TypstBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl TypstBackend {
     pub fn new() -> Self {
@@ -15,7 +26,12 @@ impl TypstBackend {
 }
 
 impl Backend for TypstBackend {
-    fn format_chunk(&self, chunk: &Chunk, resolved_options: &ResolvedChunkOptions, result: &ExecutionResult) -> String {
+    fn format_chunk(
+        &self,
+        chunk: &Chunk,
+        resolved_options: &ResolvedChunkOptions,
+        result: &ExecutionResult,
+    ) -> String {
         let mut args = vec![];
         args.push(format!("lang: \"{}\"", chunk.language));
         if let Some(name) = &chunk.name {
@@ -23,7 +39,7 @@ impl Backend for TypstBackend {
         } else {
             // Only pass caption to code-chunk if there is no name wrapper (no figure)
             if let Some(caption) = &chunk.options.caption {
-                 args.push(format!("caption: {}", caption));
+                args.push(format!("caption: {}", caption));
             }
         }
 
@@ -31,7 +47,9 @@ impl Backend for TypstBackend {
 
         // Include errors as a special argument to code-chunk (if any)
         if !chunk.errors.is_empty() {
-            let error_list = chunk.errors.iter()
+            let error_list = chunk
+                .errors
+                .iter()
                 .map(|e| format!("\"{}\"", e.replace('\"', "\\\"")))
                 .collect::<Vec<_>>()
                 .join(", ");
@@ -51,18 +69,18 @@ impl Backend for TypstBackend {
                     format!("[```\n{}```]", text.trim())
                 }
                 ExecutionResult::Plot(path) => {
-                    let abs_plot = path.canonicalize() 
-                        .unwrap_or_else(|_| path.clone());
+                    let abs_plot = path.canonicalize().unwrap_or_else(|_| path.clone());
                     format!("[#image(\"{}\")]", abs_plot.to_string_lossy())
                 }
                 ExecutionResult::DataFrame(csv_path) => {
-                    let abs_csv = csv_path.canonicalize() 
-                        .unwrap_or_else(|_| csv_path.clone());
-                    format!("[#{{ let data = csv(\"{}\"); table(columns: data.first().len(), ..data.flatten()) }}]", abs_csv.to_string_lossy())
+                    let abs_csv = csv_path.canonicalize().unwrap_or_else(|_| csv_path.clone());
+                    format!(
+                        "[#{{ let data = csv(\"{}\"); table(columns: data.first().len(), ..data.flatten()) }}]",
+                        abs_csv.to_string_lossy()
+                    )
                 }
                 ExecutionResult::TextAndPlot { text, plot } => {
-                    let abs_plot = plot.canonicalize() 
-                        .unwrap_or_else(|_| plot.clone());
+                    let abs_plot = plot.canonicalize().unwrap_or_else(|_| plot.clone());
                     format!(
                         "[#image(\"{}\")\n```\n{}```]",
                         abs_plot.to_string_lossy(),
@@ -71,11 +89,9 @@ impl Backend for TypstBackend {
                 }
                 ExecutionResult::DataFrameAndPlot { dataframe, plot } => {
                     let abs_csv = dataframe
-                        .canonicalize() 
+                        .canonicalize()
                         .unwrap_or_else(|_| dataframe.clone());
-                    let abs_plot = plot
-                        .canonicalize() 
-                        .unwrap_or_else(|_| plot.clone());
+                    let abs_plot = plot.canonicalize().unwrap_or_else(|_| plot.clone());
                     format!(
                         "[#{{ let data = csv(\"{}\"); table(columns: data.first().len(), ..data.flatten()) }}\n#image(\"{}\")]",
                         abs_csv.to_string_lossy(),
@@ -103,10 +119,13 @@ impl Backend for TypstBackend {
                 }
 
                 let figure_call_start = format!("#figure({})", figure_named_args.join(", "));
-                
+
                 chunk_output_final.push_str(&figure_call_start);
-                chunk_output_final.push_str(&format!("[{}]
-", code_chunk_call));
+                chunk_output_final.push_str(&format!(
+                    "[{}]
+",
+                    code_chunk_call
+                ));
                 // Add label
                 chunk_output_final.push_str(&format!(" <{}>", name.trim()));
             } else {
@@ -115,7 +134,7 @@ impl Backend for TypstBackend {
         } else {
             chunk_output_final.push_str(&code_chunk_call);
         }
-        
+
         chunk_output_final
     }
 }
@@ -123,7 +142,7 @@ impl Backend for TypstBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::{ChunkOptions, Chunk, Range, Position};
+    use crate::parser::{Chunk, ChunkOptions, Position, Range};
     use std::path::PathBuf;
 
     fn create_test_chunk(
@@ -179,7 +198,9 @@ mod tests {
 
         let output = backend.format_chunk(&chunk, &resolved, &result);
 
-        assert!(output.contains("errors: (\"Unknown option: 'foo'\", \"Invalid value for 'eval'\")"));
+        assert!(
+            output.contains("errors: (\"Unknown option: 'foo'\", \"Invalid value for 'eval'\")")
+        );
     }
 
     #[test]

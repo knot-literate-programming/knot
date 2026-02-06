@@ -150,7 +150,11 @@ z = 3
 
         assert!(symbols[0].detail.as_ref().unwrap().contains("Language: r"));
         assert!(symbols[1].detail.as_ref().unwrap().contains("Language: r"));
-        assert!(symbols[2].detail.as_ref().unwrap().contains("Language: python"));
+        assert!(symbols[2]
+            .detail
+            .as_ref()
+            .unwrap()
+            .contains("Language: python"));
     }
 
     #[test]

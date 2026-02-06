@@ -1,9 +1,12 @@
-use tower_lsp::jsonrpc::Result;
-use tower_lsp::lsp_types::*;
 use crate::state::ServerState;
 use knot_core::Document;
+use tower_lsp::jsonrpc::Result;
+use tower_lsp::lsp_types::*;
 
-pub async fn handle_formatting(state: &ServerState, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
+pub async fn handle_formatting(
+    state: &ServerState,
+    params: DocumentFormattingParams,
+) -> Result<Option<Vec<TextEdit>>> {
     let uri = &params.text_document.uri;
 
     // 1. Get document text and formatter
@@ -61,9 +64,9 @@ pub async fn handle_formatting(state: &ServerState, params: DocumentFormattingPa
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::ServerState;
-    use crate::position_mapper::PositionMapper;
     use crate::formatter::AirFormatter;
+    use crate::position_mapper::PositionMapper;
+    use crate::state::ServerState;
 
     async fn create_test_state(uri: &str, text: &str, with_formatter: bool) -> (ServerState, Url) {
         let state = ServerState::new();

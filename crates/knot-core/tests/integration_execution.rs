@@ -12,7 +12,7 @@
 // Note: These tests are ignored by default.
 // Run with: cargo test --test integration_execution -- --ignored
 
-use knot_core::executors::{r::RExecutor, LanguageExecutor, ExecutionResult, GraphicsOptions};
+use knot_core::executors::{ExecutionResult, GraphicsOptions, LanguageExecutor, r::RExecutor};
 use std::fs;
 use tempfile::TempDir;
 
@@ -30,8 +30,7 @@ fn setup_executor() -> (TempDir, RExecutor) {
     let cache_dir = temp_dir.path().join(".knot_cache");
     fs::create_dir_all(&cache_dir).unwrap();
 
-    let mut executor = RExecutor::new(cache_dir)
-        .expect("Failed to create R executor");
+    let mut executor = RExecutor::new(cache_dir).expect("Failed to create R executor");
     executor.initialize().expect("Failed to initialize R");
 
     (temp_dir, executor)
@@ -44,11 +43,17 @@ fn test_simple_r_execution() {
     let graphics = default_graphics();
 
     let code = "x <- 1 + 1\nprint(x)";
-    let result = executor.execute(code, &graphics).expect("Failed to execute R code");
+    let result = executor
+        .execute(code, &graphics)
+        .expect("Failed to execute R code");
 
     match result {
         ExecutionResult::Text(output) => {
-            assert!(output.contains("2"), "Output should contain '2', got: {}", output);
+            assert!(
+                output.contains("2"),
+                "Output should contain '2', got: {}",
+                output
+            );
         }
         _ => panic!("Expected Text result, got: {:?}", result),
     }
@@ -65,8 +70,11 @@ fn test_r_error_handling() {
 
     assert!(result.is_err(), "Should return error for R error");
     let err_msg = result.unwrap_err().to_string();
-    assert!(err_msg.contains("error") || err_msg.contains("Error") || err_msg.contains("Erreur"),
-            "Error message should mention 'error', got: {}", err_msg);
+    assert!(
+        err_msg.contains("error") || err_msg.contains("Error") || err_msg.contains("Erreur"),
+        "Error message should mention 'error', got: {}",
+        err_msg
+    );
 }
 
 #[test]
@@ -80,7 +88,9 @@ typst(df)
 "#;
     let graphics = default_graphics();
 
-    let result = executor.execute(code, &graphics).expect("Failed to execute");
+    let result = executor
+        .execute(code, &graphics)
+        .expect("Failed to execute");
 
     match result {
         ExecutionResult::DataFrame(path) => {
@@ -88,8 +98,11 @@ typst(df)
             let content = fs::read_to_string(&path).expect("Failed to read CSV");
             // CSV format from write.csv includes column names
             // Format: "",x,y or "x","y" depending on row.names setting
-            assert!(content.contains("x") && content.contains("y"),
-                    "CSV should contain column data, got: {}", content);
+            assert!(
+                content.contains("x") && content.contains("y"),
+                "CSV should contain column data, got: {}",
+                content
+            );
         }
         _ => panic!("Expected DataFrame result, got: {:?}", result),
     }
@@ -108,15 +121,23 @@ typst(gg)
 "#;
     let graphics = default_graphics();
 
-    let result = executor.execute(code, &graphics).expect("Failed to execute");
+    let result = executor
+        .execute(code, &graphics)
+        .expect("Failed to execute");
 
     match result {
         ExecutionResult::Plot(path) => {
             assert!(path.exists(), "Plot file should exist");
-            assert!(path.extension().unwrap() == "svg", "Default format should be SVG");
+            assert!(
+                path.extension().unwrap() == "svg",
+                "Default format should be SVG"
+            );
 
             let metadata = fs::metadata(&path).expect("Failed to get metadata");
-            assert!(metadata.len() > 100, "Plot file should have reasonable size");
+            assert!(
+                metadata.len() > 100,
+                "Plot file should have reasonable size"
+            );
         }
         _ => panic!("Expected Plot result, got: {:?}", result),
     }
@@ -138,7 +159,9 @@ typst(gg)
 "#;
     let graphics = default_graphics();
 
-    let result = executor.execute(code, &graphics).expect("Failed to execute");
+    let result = executor
+        .execute(code, &graphics)
+        .expect("Failed to execute");
 
     match result {
         ExecutionResult::DataFrameAndPlot { dataframe, plot } => {
@@ -146,8 +169,11 @@ typst(gg)
             assert!(plot.exists(), "Plot should exist");
 
             let csv_content = fs::read_to_string(&dataframe).expect("Failed to read CSV");
-            assert!(csv_content.contains("x") && csv_content.contains("y"),
-                    "CSV should contain data, got: {}", csv_content);
+            assert!(
+                csv_content.contains("x") && csv_content.contains("y"),
+                "CSV should contain data, got: {}",
+                csv_content
+            );
         }
         _ => panic!("Expected DataFrameAndPlot result, got: {:?}", result),
     }
@@ -160,14 +186,21 @@ fn test_r_session_persistence() {
     let graphics = default_graphics();
 
     // Set a variable in first execution
-    executor.execute("x <- 42", &graphics).expect("Failed to set variable");
+    executor
+        .execute("x <- 42", &graphics)
+        .expect("Failed to set variable");
 
     // Use the variable in second execution
-    let result = executor.execute("print(x)", &graphics).expect("Failed to use variable");
+    let result = executor
+        .execute("print(x)", &graphics)
+        .expect("Failed to use variable");
 
     match result {
         ExecutionResult::Text(output) => {
-            assert!(output.contains("42"), "Variable should persist across executions");
+            assert!(
+                output.contains("42"),
+                "Variable should persist across executions"
+            );
         }
         _ => panic!("Expected Text result"),
     }
@@ -185,5 +218,8 @@ fn test_r_warning_not_error() {
     let result = executor.execute(code, &graphics);
 
     // Should succeed (warnings are logged, not errors)
-    assert!(result.is_ok(), "Warnings should not cause execution failure");
+    assert!(
+        result.is_ok(),
+        "Warnings should not cause execution failure"
+    );
 }

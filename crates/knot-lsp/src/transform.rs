@@ -23,9 +23,11 @@ pub fn transform_to_typst(knot_content: &str) -> String {
     // 3. Reconstruct the content
     let mut output = String::with_capacity(knot_content.len());
     let mut last_pos = 0;
-    
+
     for (start, end) in ranges_to_mask {
-        if start < last_pos { continue; }
+        if start < last_pos {
+            continue;
+        }
         output.push_str(&knot_content[last_pos..start]);
 
         let mask_content = &knot_content[start..end];
@@ -57,7 +59,7 @@ mod tests {
     fn test_transform_simple_inline() {
         let input = "Text `{r} 1+1` end";
         let expected_typ = "Text           end";
-        
+
         assert_eq!(transform_to_typst(input), expected_typ);
     }
 
@@ -70,7 +72,7 @@ y <- 2
 ```
 End"###;
         let output_typ = transform_to_typst(input);
-        
+
         assert_eq!(input.lines().count(), output_typ.lines().count());
     }
 
@@ -78,7 +80,10 @@ End"###;
     fn test_transform_preserves_unicode_columns() {
         let input = "A `{r} 'é'` B";
         let output_typ = transform_to_typst(input);
-        
-        assert_eq!(input.encode_utf16().count(), output_typ.encode_utf16().count());
+
+        assert_eq!(
+            input.encode_utf16().count(),
+            output_typ.encode_utf16().count()
+        );
     }
 }

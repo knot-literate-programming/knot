@@ -7,11 +7,13 @@
 // - file_manager: Cache file operations (save CSV, copy plots)
 // - formatters: Inline expression output formatting
 
-mod process;
 mod execution;
 mod formatters;
+mod process;
 
-use super::{ConstantObjectHandler, ExecutionResult, GraphicsOptions, LanguageExecutor, KnotExecutor};
+use super::{
+    ConstantObjectHandler, ExecutionResult, GraphicsOptions, KnotExecutor, LanguageExecutor,
+};
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
@@ -59,8 +61,8 @@ impl RExecutor {
     ///
     /// # Arguments
     /// * `snapshot_file` - Path where the .RData snapshot will be saved
-    ///                     (packages will be saved to snapshot_packages.rds)
-    pub fn save_session(&mut self, snapshot_file: &PathBuf) -> Result<()> {
+    ///   (packages will be saved to snapshot_packages.rds)
+    pub fn save_session(&mut self, snapshot_file: &Path) -> Result<()> {
         execution::save_session(&mut self.process, snapshot_file)
     }
 
@@ -73,8 +75,8 @@ impl RExecutor {
     ///
     /// # Arguments
     /// * `snapshot_file` - Path to the .RData snapshot to load
-    ///                     (will also load snapshot_packages.rds if it exists)
-    pub fn load_session(&mut self, snapshot_file: &PathBuf) -> Result<()> {
+    ///   (will also load snapshot_packages.rds if it exists)
+    pub fn load_session(&mut self, snapshot_file: &Path) -> Result<()> {
         execution::load_session(&mut self.process, snapshot_file)
     }
 
@@ -123,7 +125,9 @@ use super::path_utils::escape_path_for_code;
 impl ConstantObjectHandler for RExecutor {
     fn hash_object(&mut self, object_name: &str) -> Result<String> {
         // Use environment variable to avoid code injection in the R script
-        unsafe { std::env::set_var("KNOT_OBJECT_NAME", object_name); }
+        unsafe {
+            std::env::set_var("KNOT_OBJECT_NAME", object_name);
+        }
 
         // Use digest package with xxhash64 algorithm for fast hashing
         let code = r#"
@@ -143,7 +147,9 @@ cat(digest::digest(get(Sys.getenv("KNOT_OBJECT_NAME")), algo = "xxhash64"))
         let path_str = escape_path_for_code(&object_path);
 
         // Use environment variable to avoid code injection in the R script
-        unsafe { std::env::set_var("KNOT_OBJECT_NAME", object_name); }
+        unsafe {
+            std::env::set_var("KNOT_OBJECT_NAME", object_name);
+        }
 
         let code = format!(
             r#"saveRDS(get(Sys.getenv("KNOT_OBJECT_NAME")), file = "{}")"#,
@@ -151,7 +157,11 @@ cat(digest::digest(get(Sys.getenv("KNOT_OBJECT_NAME")), algo = "xxhash64"))
         );
         self.query(&code)?;
 
-        log::debug!("💾 Saved constant object '{}' to: {}", object_name, object_path.display());
+        log::debug!(
+            "💾 Saved constant object '{}' to: {}",
+            object_name,
+            object_path.display()
+        );
         Ok(())
     }
 
@@ -166,14 +176,19 @@ cat(digest::digest(get(Sys.getenv("KNOT_OBJECT_NAME")), algo = "xxhash64"))
                  Expected hash: {}\n\
                  Actual hash: {}\n\
                  File: {}",
-                object_name, hash, actual_hash, object_path.display()
+                object_name,
+                hash,
+                actual_hash,
+                object_path.display()
             );
         }
 
         let path_str = escape_path_for_code(&object_path);
 
         // Use environment variable to avoid code injection in the R script
-        unsafe { std::env::set_var("KNOT_OBJECT_NAME", object_name); }
+        unsafe {
+            std::env::set_var("KNOT_OBJECT_NAME", object_name);
+        }
 
         let code = format!(
             r#"assign(Sys.getenv("KNOT_OBJECT_NAME"), readRDS("{}"), envir = .GlobalEnv)"#,
@@ -181,13 +196,19 @@ cat(digest::digest(get(Sys.getenv("KNOT_OBJECT_NAME")), algo = "xxhash64"))
         );
         self.query(&code)?;
 
-        log::debug!("📥 Loaded constant object '{}' from: {}", object_name, object_path.display());
+        log::debug!(
+            "📥 Loaded constant object '{}' from: {}",
+            object_name,
+            object_path.display()
+        );
         Ok(())
     }
 
     fn remove_from_env(&mut self, object_name: &str) -> Result<()> {
         // Use environment variable to avoid code injection in the R script
-        unsafe { std::env::set_var("KNOT_OBJECT_NAME", object_name); }
+        unsafe {
+            std::env::set_var("KNOT_OBJECT_NAME", object_name);
+        }
 
         let code = r#"rm(list = Sys.getenv("KNOT_OBJECT_NAME"), envir = .GlobalEnv)"#;
         self.query(code)?;
@@ -228,7 +249,6 @@ impl Drop for RExecutor {
 mod tests {
     use super::*;
     use tempfile::TempDir;
-
 
     fn setup_executor() -> (TempDir, RExecutor) {
         let temp_dir = TempDir::new().unwrap();
@@ -292,7 +312,9 @@ mod tests {
         executor.execute("x <- 10", &default_graphics()).unwrap();
 
         // Second chunk uses variable from first
-        let result = executor.execute("y <- x * 2; y", &default_graphics()).unwrap();
+        let result = executor
+            .execute("y <- x * 2; y", &default_graphics())
+            .unwrap();
 
         match result {
             ExecutionResult::Text(output) => {

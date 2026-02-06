@@ -1,7 +1,7 @@
-use crate::executors::{ExecutorManager};
-use crate::parser::{Chunk, Document, InlineExpr};
-use crate::config::Config;
 use crate::cache::ConstantObjectInfo;
+use crate::config::Config;
+use crate::executors::ExecutorManager;
+use crate::parser::{Chunk, Document, InlineExpr};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -16,9 +16,9 @@ pub enum ExecutableNode<'a> {
 }
 
 use crate::cache::Cache;
-use crate::get_cache_dir;
-use crate::defaults::Defaults;
 use crate::compiler::snapshot_manager::SnapshotManager;
+use crate::defaults::Defaults;
+use crate::get_cache_dir;
 use anyhow::{Context, Result};
 use log::info;
 use std::path::PathBuf;
@@ -43,16 +43,22 @@ impl Compiler {
             .parent()
             .unwrap_or(Path::new("."))
             .canonicalize()
-            .unwrap_or_else(|_| knot_file_path.parent().unwrap_or(Path::new(".")).to_path_buf());
+            .unwrap_or_else(|_| {
+                knot_file_path
+                    .parent()
+                    .unwrap_or(Path::new("."))
+                    .to_path_buf()
+            });
 
         let (config, project_root) = Config::find_and_load(&start_dir)?;
 
         // Determine isolated cache directory for this file
-        let file_stem = knot_file_path.file_stem()
+        let file_stem = knot_file_path
+            .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("main");
         let cache_dir = get_cache_dir(&project_root, file_stem);
-        
+
         info!("📦 Cache directory: {}", cache_dir.display());
 
         let executor_manager = ExecutorManager::new(cache_dir.clone());
@@ -68,13 +74,13 @@ impl Compiler {
     /// Compiles a document by executing its code chunks and generating a new Typst source file.
     pub fn compile(&mut self, doc: &Document) -> Result<String> {
         let mut cache = Cache::new(self.cache_dir.clone())?;
-        
+
         // Tracks the hash of the last chunk for EACH language (for chaining)
         let mut last_hash_per_lang: HashMap<String, String> = HashMap::new();
-        
+
         // Manages snapshot loading/saving
         let mut snapshot_manager = SnapshotManager::new();
-        
+
         let mut typst_output = String::new();
         let mut last_pos = 0;
 
@@ -94,13 +100,22 @@ impl Compiler {
             ExecutableNode::InlineExpr(inline_expr) => inline_expr.start,
         });
 
-        info!("🔧 Processing {} executable nodes...", executable_nodes.len());
+        info!(
+            "🔧 Processing {} executable nodes...",
+            executable_nodes.len()
+        );
 
         // Phase 2: Iterate through sorted nodes, execute, and build output
         for node in executable_nodes {
             let (node_start, node_end, lang) = match node {
-                ExecutableNode::Chunk(chunk) => (chunk.start_byte, chunk.end_byte, chunk.language.as_str()),
-                ExecutableNode::InlineExpr(inline_expr) => (inline_expr.start, inline_expr.end, inline_expr.language.as_str()),
+                ExecutableNode::Chunk(chunk) => {
+                    (chunk.start_byte, chunk.end_byte, chunk.language.as_str())
+                }
+                ExecutableNode::InlineExpr(inline_expr) => (
+                    inline_expr.start,
+                    inline_expr.end,
+                    inline_expr.language.as_str(),
+                ),
             };
 
             // Get previous hash for this language (or empty string if first chunk)
@@ -113,21 +128,21 @@ impl Compiler {
 
             // --- PROACTIVE STATE RESTORATION ---
             snapshot_manager.restore_if_needed(
-                lang, 
-                &previous_hash, 
-                &mut self.executor_manager, 
-                &cache, 
-                &self.project_root
+                lang,
+                &previous_hash,
+                &mut self.executor_manager,
+                &cache,
+                &self.project_root,
             )?;
 
             let (result_str, node_hash) = match node {
                 ExecutableNode::Chunk(chunk) => {
                     let result = chunk_processor::process_chunk(
-                        chunk, 
-                        &mut self.executor_manager, 
-                        &mut cache, 
-                        &previous_hash, 
-                        &self.config.defaults
+                        chunk,
+                        &mut self.executor_manager,
+                        &mut cache,
+                        &previous_hash,
+                        &self.config.defaults,
                     )?;
 
                     // Handle constant objects declared in this chunk
@@ -138,20 +153,28 @@ impl Compiler {
 
                         for obj_name in &chunk.options.constant {
                             // 1. Hash the object
-                            let obj_hash = exec.hash_object(obj_name)
-                                .context(format!("Failed to hash constant object '{}'", obj_name))?;
+                            let obj_hash = exec.hash_object(obj_name).context(format!(
+                                "Failed to hash constant object '{}'",
+                                obj_name
+                            ))?;
 
                             // 2. Save to content-addressed storage
                             exec.save_constant(obj_name, &obj_hash, &cache_dir)
-                                .context(format!("Failed to save constant object '{}'", obj_name))?;
+                                .context(format!(
+                                    "Failed to save constant object '{}'",
+                                    obj_name
+                                ))?;
 
                             // 3. Get file size for metadata
                             let ext = exec.object_extension();
-                            let object_path = cache_dir.join("objects").join(format!("{}.{}", obj_hash, ext));
+                            let object_path = cache_dir
+                                .join("objects")
+                                .join(format!("{}.{}", obj_hash, ext));
                             let size_bytes = std::fs::metadata(&object_path)?.len();
 
                             // 4. Track for later verification
-                            constant_objects.insert(obj_name.clone(), (obj_hash.clone(), chunk_name.clone()));
+                            constant_objects
+                                .insert(obj_name.clone(), (obj_hash.clone(), chunk_name.clone()));
 
                             // 5. Add to cache metadata
                             cache.metadata.constant_objects.insert(
@@ -162,23 +185,26 @@ impl Compiler {
                                     language: chunk.language.clone(),
                                     created_in_chunk: chunk_name.clone(),
                                     created_at: chrono::Utc::now().to_rfc3339(),
-                                }
+                                },
                             );
 
-                            log::info!("🔒 Constant object '{}' ({}) declared in chunk '{}'", obj_name, chunk.language, chunk_name);
+                            log::info!(
+                                "🔒 Constant object '{}' ({}) declared in chunk '{}'",
+                                obj_name,
+                                chunk.language,
+                                chunk_name
+                            );
                         }
                     }
 
                     result
                 }
-                ExecutableNode::InlineExpr(inline_expr) => {
-                    inline_processor::process_inline_expr(
-                        inline_expr, 
-                        &mut self.executor_manager, 
-                        &mut cache, 
-                        &previous_hash
-                    )?
-                }
+                ExecutableNode::InlineExpr(inline_expr) => inline_processor::process_inline_expr(
+                    inline_expr,
+                    &mut self.executor_manager,
+                    &mut cache,
+                    &previous_hash,
+                )?,
             };
 
             // Update hash chain for this language
@@ -186,12 +212,12 @@ impl Compiler {
 
             // After execution (or cache hit), we update the snapshot state
             snapshot_manager.update_after_node(
-                lang, 
-                &node_hash, 
-                &previous_hash, 
-                &mut self.executor_manager, 
-                &cache, 
-                &self.project_root
+                lang,
+                &node_hash,
+                &previous_hash,
+                &mut self.executor_manager,
+                &cache,
+                &self.project_root,
             )?;
 
             typst_output.push_str(&result_str);
@@ -207,25 +233,32 @@ impl Compiler {
 
         // Final verification: Check that constant objects were not modified
         if !constant_objects.is_empty() {
-            info!("🔍 Verifying {} constant objects...", constant_objects.len());
+            info!(
+                "🔍 Verifying {} constant objects...",
+                constant_objects.len()
+            );
 
             for (obj_name, (initial_hash, chunk_name)) in &constant_objects {
                 let info = cache.metadata.constant_objects.get(obj_name).unwrap();
                 // Ensure executor is loaded with the right state to verify?
                 // Actually, for verification, we might need to be careful if we skipped chunks.
-                // But constant objects are by definition constant, so their hash should be verifyable 
+                // But constant objects are by definition constant, so their hash should be verifyable
                 // in ANY state where they exist.
                 // If we skipped the chunk that created them, they might not be loaded!
-                
+
                 // So we need to ensure they are loaded.
                 let exec = self.executor_manager.get_executor(&info.language)?;
                 let cache_dir = self.project_root.join(Defaults::CACHE_DIR_NAME);
-                
+
                 // Try to load the constant object just for verification (idempotent)
                 exec.load_constant(obj_name, &info.hash, &cache_dir)
-                    .context(format!("Failed to load constant '{}' for verification", obj_name))?;
-                
-                let final_hash = exec.hash_object(obj_name)
+                    .context(format!(
+                        "Failed to load constant '{}' for verification",
+                        obj_name
+                    ))?;
+
+                let final_hash = exec
+                    .hash_object(obj_name)
                     .context(format!("Failed to verify constant object '{}'", obj_name))?;
 
                 if &final_hash != initial_hash {
@@ -236,7 +269,11 @@ impl Compiler {
                          Final hash:   {}\n\n\
                          This violates the constant object contract. The object must remain immutable after creation.\n\
                          Output file NOT generated to preserve reproducibility.",
-                        obj_name, info.language, chunk_name, initial_hash, final_hash
+                        obj_name,
+                        info.language,
+                        chunk_name,
+                        initial_hash,
+                        final_hash
                     );
                 }
             }

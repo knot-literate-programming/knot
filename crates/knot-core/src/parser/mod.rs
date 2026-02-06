@@ -1,6 +1,6 @@
 //! Knot Document Parsing
 //!
-//! This module provides functionality for parsing `.knot` files, which are Typst 
+//! This module provides functionality for parsing `.knot` files, which are Typst
 //! documents containing embedded R or Python code chunks and inline expressions.
 //!
 //! # Architecture
@@ -22,6 +22,8 @@ mod ast;
 mod options;
 mod winnow_parser;
 
-pub use ast::{Chunk, ChunkOptions, Document, InlineExpr, InlineOptions, Position, Range, ResolvedChunkOptions};
+pub use ast::{
+    Chunk, ChunkOptions, Document, InlineExpr, InlineOptions, Position, Range, ResolvedChunkOptions,
+};
 pub use options::parse_options;
 pub use winnow_parser::parse_document;

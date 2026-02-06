@@ -48,7 +48,7 @@ impl RProcess {
         // Disable command echoing in the R session
         let mut stdin = child.stdin.take().context("Failed to open R stdin")?;
         writeln!(stdin, "options(echo = FALSE)")?;
-        
+
         // Load knot helper functions (stored in RProcess struct to keep it alive)
         let helper_script = crate::R_HELPER_SCRIPT;
         // Write to a temp file
@@ -58,7 +58,7 @@ impl RProcess {
 
         // Source the temp file
         writeln!(stdin, "source(\"{}\")", temp_path)?;
-        
+
         stdin.flush()?;
 
         self.stdin = Some(stdin);
@@ -116,10 +116,7 @@ impl RProcess {
                 output
             });
 
-            (
-                stdout_handle.join().unwrap(),
-                stderr_handle.join().unwrap(),
-            )
+            (stdout_handle.join().unwrap(), stderr_handle.join().unwrap())
         });
 
         Ok((stdout_output, stderr_output))

@@ -7,7 +7,7 @@
 
 use super::metadata::{CacheMetadata, ChunkCacheEntry};
 use crate::executors::ExecutionResult;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chrono::Utc;
 use log::warn;
 use std::fs;
@@ -55,17 +55,21 @@ pub fn save_metadata(cache_dir: &Path, metadata: &CacheMetadata) -> Result<()> {
     // Create temp file in the same directory to ensure atomic rename works
     let mut temp_file = NamedTempFile::new_in(cache_dir)?;
     temp_file.write_all(content.as_bytes())?;
-    
+
     // Atomically replace the old file
     temp_file.persist(metadata_path).map_err(|e| e.error)?;
-    
+
     Ok(())
 }
 
 /// Retrieves cached chunk result from disk
 ///
 /// Verifies that all referenced files exist before reconstructing the result
-pub fn get_cached_result(cache_dir: &Path, hash: &str, metadata: &CacheMetadata) -> Result<ExecutionResult> {
+pub fn get_cached_result(
+    cache_dir: &Path,
+    hash: &str,
+    metadata: &CacheMetadata,
+) -> Result<ExecutionResult> {
     let entry = metadata
         .chunks
         .iter()

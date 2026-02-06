@@ -53,6 +53,9 @@ mod tests {
     #[test]
     fn test_escape_path_with_double_quotes() {
         let path = Path::new(r#"C:\Users\"special"\file.txt"#);
-        assert_eq!(escape_path_for_code(path), r#"C:\\Users\\\"special\"\\file.txt"#);
+        assert_eq!(
+            escape_path_for_code(path),
+            r#"C:\\Users\\\"special\"\\file.txt"#
+        );
     }
 }

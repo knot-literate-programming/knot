@@ -1,6 +1,6 @@
 // Integration test for R session snapshots
 
-use knot_core::executors::{r::RExecutor, LanguageExecutor};
+use knot_core::executors::{LanguageExecutor, r::RExecutor};
 use tempfile::TempDir;
 
 #[test]
@@ -30,20 +30,29 @@ fn test_save_and_load_session() {
 
     // Verify variables are gone
     let result = executor.execute_inline("exists('x')").unwrap();
-    assert!(result.contains("FALSE"), "Variable x should not exist after rm");
+    assert!(
+        result.contains("FALSE"),
+        "Variable x should not exist after rm"
+    );
 
     // Load session
     executor.load_session(&snapshot_path).unwrap();
 
     // Verify variables are restored
     let result = executor.execute_inline("exists('x')").unwrap();
-    assert!(result.contains("TRUE"), "Variable x should exist after load");
+    assert!(
+        result.contains("TRUE"),
+        "Variable x should exist after load"
+    );
 
     let result = executor.execute_inline("x[1]").unwrap();
     assert!(result.contains("1"), "Variable x should have correct value");
 
     let result = executor.execute_inline("y[2]").unwrap();
-    assert!(result.contains("4"), "Variable y should have correct value (2^2 = 4)");
+    assert!(
+        result.contains("4"),
+        "Variable y should have correct value (2^2 = 4)"
+    );
 
     println!("✓ Session save/load works correctly");
 }

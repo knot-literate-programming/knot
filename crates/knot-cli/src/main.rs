@@ -1,10 +1,10 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use include_dir::{Dir, include_dir};
 use knot_cli::{build_project, compile_file};
 use log::info;
 use std::fs;
 use std::path::PathBuf;
-use include_dir::{include_dir, Dir};
 
 // Embed the minimal template and helper packages
 static MINIMAL_TEMPLATE: Dir = include_dir!("$CARGO_MANIFEST_DIR/../../templates/minimal");
@@ -75,28 +75,32 @@ fn main() -> Result<()> {
 fn init(project_name: &PathBuf) -> Result<()> {
     // Create project directory
     if project_name.exists() {
-        anyhow::bail!("Directory {:?} already exists. Choose a different name.", project_name);
+        anyhow::bail!(
+            "Directory {:?} already exists. Choose a different name.",
+            project_name
+        );
     }
 
-    fs::create_dir_all(&project_name)
-        .context(format!("Failed to create project directory: {:?}", project_name))?;
+    fs::create_dir_all(&project_name).context(format!(
+        "Failed to create project directory: {:?}",
+        project_name
+    ))?;
 
     println!("📁 Creating knot project: {:?}", project_name);
 
     // Extract minimal template files (knot.toml, main.knot)
-    MINIMAL_TEMPLATE.extract(&project_name)
+    MINIMAL_TEMPLATE
+        .extract(&project_name)
         .context("Failed to extract minimal template")?;
     println!("  ✓ Copied template files");
 
     // Create lib/ directory
     let lib_dir = project_name.join("lib");
-    fs::create_dir_all(&lib_dir)
-        .context("Failed to create lib/ directory")?;
+    fs::create_dir_all(&lib_dir).context("Failed to create lib/ directory")?;
 
     // Copy Typst helper (still needed - imported by user in .knot files)
     let typst_helper_path = lib_dir.join("knot.typ");
-    fs::write(&typst_helper_path, TYPST_HELPER)
-        .context("Failed to write lib/knot.typ")?;
+    fs::write(&typst_helper_path, TYPST_HELPER).context("Failed to write lib/knot.typ")?;
     println!("  ✓ Copied lib/knot.typ");
 
     // Note: R and Python helpers are now embedded in the binary and loaded
@@ -126,16 +130,16 @@ fn watch() -> Result<()> {
     info!("👀 Starting watch mode...");
 
     // Step 1: Find project root and load config
-    let current_dir = std::env::current_dir()
-        .context("Failed to get current directory")?;
+    let current_dir = std::env::current_dir().context("Failed to get current directory")?;
     let (config, project_root) = Config::find_and_load(&current_dir)?;
 
     // Step 2: Get main file from knot.toml
-    let main_file_name = config.document.main
-        .ok_or_else(|| anyhow::anyhow!(
+    let main_file_name = config.document.main.ok_or_else(|| {
+        anyhow::anyhow!(
             "No 'main' file specified in knot.toml.\n\
              Add: [document]\n     main = \"main.knot\""
-        ))?;
+        )
+    })?;
 
     let main_file = project_root.join(&main_file_name);
 
@@ -191,7 +195,9 @@ fn watch() -> Result<()> {
 
     // Step 5: Determine .typ output path for typst watch
     let typ_output_path = {
-        let stem = main_file.file_stem().unwrap_or(std::ffi::OsStr::new("main"));
+        let stem = main_file
+            .file_stem()
+            .unwrap_or(std::ffi::OsStr::new("main"));
         project_root.join(format!(".{}.typ", stem.to_string_lossy()))
     };
 
@@ -210,12 +216,14 @@ fn watch() -> Result<()> {
 
     let mut watcher = RecommendedWatcher::new(
         tx,
-        NotifyConfig::default().with_poll_interval(Duration::from_millis(100))
-    ).context("Failed to create file watcher")?;
+        NotifyConfig::default().with_poll_interval(Duration::from_millis(100)),
+    )
+    .context("Failed to create file watcher")?;
 
     // Watch the project root directory (simpler and more robust)
     // We'll filter events in the loop to only act on watched files
-    watcher.watch(&project_root, RecursiveMode::Recursive)
+    watcher
+        .watch(&project_root, RecursiveMode::Recursive)
         .with_context(|| format!("Failed to watch project directory: {:?}", project_root))?;
 
     log::info!("🔍 Watching directory: {}", project_root.display());
@@ -248,9 +256,9 @@ fn watch() -> Result<()> {
 
                 // Check if any watched file is affected
                 let affects_watched_file = event.paths.iter().any(|p| {
-                    watched_files.iter().any(|watched| {
-                        p.file_name() == watched.file_name()
-                    })
+                    watched_files
+                        .iter()
+                        .any(|watched| p.file_name() == watched.file_name())
                 });
 
                 if !affects_watched_file {
@@ -268,7 +276,8 @@ fn watch() -> Result<()> {
 
                 // Find which file changed
                 if let Some(path) = event.paths.first() {
-                    let changed_file = path.file_name()
+                    let changed_file = path
+                        .file_name()
                         .and_then(|n| n.to_str())
                         .unwrap_or("unknown");
 
@@ -374,7 +383,9 @@ fn install_vscode() -> Result<()> {
     let vsix_files: Vec<_> = fs::read_dir(&vscode_dir)?
         .filter_map(|entry| entry.ok())
         .filter(|entry| {
-            entry.path().extension()
+            entry
+                .path()
+                .extension()
                 .and_then(|ext| ext.to_str())
                 .map(|ext| ext == "vsix")
                 .unwrap_or(false)
