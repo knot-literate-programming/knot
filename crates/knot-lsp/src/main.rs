@@ -239,9 +239,8 @@ impl LanguageServer for KnotLanguageServer {
                 let temp_dir = std::env::temp_dir().join(format!("knot_lsp_{}", uuid::Uuid::new_v4()));
                 
                 // Initialize ExecutorManager
-                // Note: r_helper_path is None here, we might want to pass it if we can resolve it quickly
-                // For now LSP uses a simpler initialization
-                let manager = ExecutorManager::new(temp_dir, None);
+                // Helper scripts are embedded in the binary and loaded automatically
+                let manager = ExecutorManager::new(temp_dir);
                 managers.insert(uri.clone(), manager);
                 self.client.log_message(MessageType::INFO, "Initialized executor manager for document").await;
             }

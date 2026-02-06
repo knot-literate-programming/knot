@@ -93,9 +93,10 @@ my-project/
 ├── knot.toml           # Project configuration
 ├── main.knot           # Main document
 └── lib/
-    ├── knot.typ        # Typst helpers
-    └── knot.R          # R helpers (typst() function)
+    └── knot.typ        # Typst helpers (for rendering R/Python output)
 ```
+
+Note: R and Python helper scripts are embedded in the binary and loaded automatically.
 
 **Compile to PDF:**
 ```bash

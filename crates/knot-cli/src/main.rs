@@ -9,7 +9,6 @@ use include_dir::{include_dir, Dir};
 // Embed the minimal template and helper packages
 static MINIMAL_TEMPLATE: Dir = include_dir!("$CARGO_MANIFEST_DIR/../../templates/minimal");
 static TYPST_HELPER: &str = include_str!("../../../knot-typst-package/lib.typ");
-use knot_core::{R_HELPER_SCRIPT, PYTHON_HELPER_SCRIPT};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -94,23 +93,14 @@ fn init(project_name: &PathBuf) -> Result<()> {
     fs::create_dir_all(&lib_dir)
         .context("Failed to create lib/ directory")?;
 
-    // Copy Typst helper
+    // Copy Typst helper (still needed - imported by user in .knot files)
     let typst_helper_path = lib_dir.join("knot.typ");
     fs::write(&typst_helper_path, TYPST_HELPER)
         .context("Failed to write lib/knot.typ")?;
     println!("  ✓ Copied lib/knot.typ");
 
-    // Copy R helper
-    let r_helper_path = lib_dir.join("knot.R");
-    fs::write(&r_helper_path, R_HELPER_SCRIPT)
-        .context("Failed to write lib/knot.R")?;
-    println!("  ✓ Copied lib/knot.R");
-
-    // Copy Python helper
-    let py_helper_path = lib_dir.join("knot.py");
-    fs::write(&py_helper_path, PYTHON_HELPER_SCRIPT)
-        .context("Failed to write lib/knot.py")?;
-    println!("  ✓ Copied lib/knot.py");
+    // Note: R and Python helpers are now embedded in the binary and loaded
+    // directly by the executors, so we don't need to copy them to lib/
 
     println!("\n✅ Project created successfully!");
     println!("\nNext steps:");

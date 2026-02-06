@@ -29,8 +29,9 @@ impl RExecutor {
     ///
     /// # Arguments
     /// * `cache_dir` - Directory for caching R outputs
-    /// * `r_helper_path` - Optional path to R helper file (e.g., "lib/knot.R")
-    ///                     If None, will try to load the installed knot.r.package
+    ///
+    /// The R helper script is embedded in the binary and loaded automatically
+    /// during initialization.
     pub fn new(cache_dir: PathBuf) -> Result<Self> {
         std::fs::create_dir_all(&cache_dir)?;
         Ok(Self {

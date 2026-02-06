@@ -30,7 +30,6 @@ includes = [
 
 [helpers]
 typst = "lib/knot.typ"
-r = "lib/knot.R"
 "#;
     fs::write(project_root.join("knot.toml"), knot_toml).unwrap();
 
@@ -72,16 +71,15 @@ These are the results chapter with more content.
 "#;
     fs::write(project_root.join("chapters/02-results.knot"), chapter02).unwrap();
 
-    // Create lib directory and real helpers
+    // Create lib directory and Typst helper
     fs::create_dir(project_root.join("lib")).unwrap();
 
     // Use real Typst helper (embedded in the binary)
     let typst_helper = include_str!("../../../knot-typst-package/lib.typ");
     fs::write(project_root.join("lib/knot.typ"), typst_helper).unwrap();
 
-    // Use real R helper (embedded in the binary)
-    let r_helper = include_str!("../../../knot-r-package/R/typst.R");
-    fs::write(project_root.join("lib/knot.R"), r_helper).unwrap();
+    // Note: R and Python helpers are now embedded in the binary and loaded
+    // automatically by the executors, so we don't need to create them here.
 
     (temp_dir, project_root)
 }
@@ -181,7 +179,6 @@ includes = [
 
 [helpers]
 typst = "lib/knot.typ"
-r = "lib/knot.R"
 "#, relative_outside.display());
     fs::write(project_root.join("knot.toml"), malicious_knot_toml).unwrap();
 
@@ -257,7 +254,6 @@ includes = [
 
 [helpers]
 typst = "lib/knot.typ"
-r = "lib/knot.R"
 "#;
     fs::write(project_root.join("knot.toml"), knot_toml).unwrap();
 

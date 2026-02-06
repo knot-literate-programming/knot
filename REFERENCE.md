@@ -110,7 +110,7 @@ includes = [
 
 [helpers]
 typst = "lib/knot.typ"
-r = "lib/knot.R"
+# Note: R and Python helpers are now embedded in the binary
 
 [defaults]
 fig-width = 6.0
@@ -217,7 +217,8 @@ This avoids fragile stdout parsing and ensures robust communication.
 ### `knot init <name> [--project]`
 Initializes a new project.
 - Creates `knot.toml`, `main.knot`.
-- Vendors `lib/knot.typ` and `lib/knot.R` (ensuring reproducibility).
+- Vendors `lib/knot.typ` (Typst helpers for rendering R/Python output).
+- Note: R and Python helper scripts are embedded in the binary and loaded automatically.
 
 ### `knot compile <file>`
 Compiles a single `.knot` file to a hidden `.typ` file. Does not generate PDF by default (unless you run `typst compile` afterwards). Useful for debugging a specific chapter.

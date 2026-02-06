@@ -4,12 +4,11 @@
 main = "main.knot"
 
 [helpers]
-# Typst helper functions (for rendering R output)
+# Typst helper functions (for rendering R/Python output)
 typst = "lib/knot.typ"
 
-# R helper functions (typst() generic for DataFrames, plots, etc.)
-r = "lib/knot.R"
+# Note: R and Python helper scripts are now embedded in the binary
+# and loaded automatically by the executors.
 
-# Future: Use published packages instead of local copies
+# Future: Use published Typst package instead of local copy
 # typst = "@preview/knot"
-# r = "@cran/knot"
