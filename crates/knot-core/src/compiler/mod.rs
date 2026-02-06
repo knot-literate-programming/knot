@@ -7,6 +7,7 @@ use std::path::Path;
 
 pub mod chunk_processor;
 pub mod inline_processor;
+pub mod snapshot_manager;
 
 /// Represents a node in the document that can be executed.
 pub enum ExecutableNode<'a> {
@@ -17,6 +18,7 @@ pub enum ExecutableNode<'a> {
 use crate::cache::Cache;
 use crate::get_cache_dir;
 use crate::defaults::Defaults;
+use crate::compiler::snapshot_manager::SnapshotManager;
 use anyhow::{Context, Result};
 use log::info;
 use std::path::PathBuf;
@@ -70,8 +72,8 @@ impl Compiler {
         // Tracks the hash of the last chunk for EACH language (for chaining)
         let mut last_hash_per_lang: HashMap<String, String> = HashMap::new();
         
-        // Tracks the hash of the snapshot currently loaded in EACH executor (for restoration)
-        let mut loaded_snapshot_per_lang: HashMap<String, String> = HashMap::new();
+        // Manages snapshot loading/saving
+        let mut snapshot_manager = SnapshotManager::new();
         
         let mut typst_output = String::new();
         let mut last_pos = 0;
@@ -110,71 +112,13 @@ impl Compiler {
             }
 
             // --- PROACTIVE STATE RESTORATION ---
-            // If we are going to execute code (not purely cache hit check yet, but preparation),
-            // we must ensure the executor is in the state corresponding to `previous_hash`.
-            // Note: process_chunk does the cache check. If it's a hit, we don't need to restore.
-            // But process_chunk also calculates the current hash. We need to do this carefully.
-            
-            // Actually, we can defer restoration until inside process_chunk? No, because process_chunk
-            // handles execution. Ideally, we should check cache here, restore if needed, then execute.
-            // But compute_hash is inside process_chunk.
-            
-            // Strategy: We pass `previous_hash` to process_chunk.
-            // Inside process_chunk (conceptually), we compute current_hash.
-            // If cache miss, we execute.
-            // BUT before executing, we must be sure state is correct.
-            
-            // To do this cleanly without moving all hash logic out of process_chunk,
-            // we can trust that process_chunk will use the executor.
-            // We should ensure executor is ready BEFORE calling process_chunk IF we suspect execution might happen.
-            // But we don't know the current hash yet to check cache!
-            
-            // Let's modify process_chunk to return "NeedExecution(hash)" or "Cached(result, hash)".
-            // This is too much refactoring.
-            
-            // Simpler approach:
-            // We blindly trust that if the executor is not at `previous_hash`, we should try to load it.
-            // BUT `previous_hash` snapshot might not exist if the previous chunk was just executed in memory
-            // and we haven't saved it yet? No, we save snapshots after every execution.
-            
-            // Wait, if we just executed Chunk N, `previous_hash` for Chunk N+1 is Hash(N).
-            // `loaded_snapshot` is also Hash(N) because we just finished N.
-            // So for sequential execution, it matches.
-            
-            // If we skipped Chunk N (cache hit), `previous_hash` is Hash(N).
-            // But `loaded_snapshot` might be Hash(N-1) (or older).
-            // So we detect mismatch. We load Snapshot(N).
-            
-            if let Ok(exec) = self.executor_manager.get_executor(lang) {
-                let current_loaded = loaded_snapshot_per_lang.get(lang).cloned().unwrap_or_default();
-                
-                // If the executor is not in the state of the previous chunk, try to restore it
-                // Only if previous_hash is not empty (i.e., not the very first chunk)
-                if !previous_hash.is_empty() && current_loaded != previous_hash {
-                    let ext = exec.snapshot_extension();
-                    let snapshot_path = cache.get_snapshot_path(&previous_hash, ext);
-                    
-                    if snapshot_path.exists() {
-                        log::debug!("Restoring state for {} from {}", lang, &previous_hash[..8]);
-                        // We also need to restore constants
-                        let cache_dir = self.project_root.join(Defaults::CACHE_DIR_NAME);
-                        
-                        if let Err(e) = exec.load_session(&snapshot_path) {
-                             log::warn!("Failed to restore session: {}", e);
-                        } else {
-                             // Also restore constants
-                             for (obj_name, info) in &cache.metadata.constant_objects {
-                                if info.language == lang {
-                                    if let Err(e) = exec.load_constant(obj_name, &info.hash, &cache_dir) {
-                                        log::warn!("Failed to load constant {}: {}", obj_name, e);
-                                    }
-                                }
-                            }
-                            loaded_snapshot_per_lang.insert(lang.to_string(), previous_hash.clone());
-                        }
-                    }
-                }
-            }
+            snapshot_manager.restore_if_needed(
+                lang, 
+                &previous_hash, 
+                &mut self.executor_manager, 
+                &cache, 
+                &self.project_root
+            )?;
 
             let (result_str, node_hash) = match node {
                 ExecutableNode::Chunk(chunk) => {
@@ -240,60 +184,15 @@ impl Compiler {
             // Update hash chain for this language
             last_hash_per_lang.insert(lang.to_string(), node_hash.clone());
 
-            // After execution (or cache hit), we update the "loaded snapshot" state
-            // If it was a cache HIT, we didn't execute, so state is technically "previous_hash".
-            // BUT if we want to be ready for the NEXT chunk, we conceptually are at "node_hash".
-            // However, the executor is physically at "previous_hash" if we didn't run anything.
-            // If we DID run (cache miss), the executor is physically at "node_hash" (because we ran the code).
-            
-            // To unify: We always save the snapshot for "node_hash" if it doesn't exist.
-            // And we consider the executor to be at "node_hash".
-            
-            if let Ok(exec) = self.executor_manager.get_executor(lang) {
-                let ext = exec.snapshot_extension();
-                let snapshot_path = cache.get_snapshot_path(&node_hash, ext);
-                let snapshot_exists = cache.has_snapshot(&node_hash, ext);
-                let cache_dir = self.project_root.join(Defaults::CACHE_DIR_NAME);
-
-                if !snapshot_exists {
-                    // CASE 1: Cache Miss (Executed)
-                    // The executor has just run the code. It is in state `node_hash`.
-                    
-                    // Save the new snapshot
-                    for (obj_name, info) in &cache.metadata.constant_objects {
-                        if info.language == lang {
-                            exec.remove_from_env(obj_name)
-                                .context(format!("Failed to remove constant object '{}' from environment", obj_name))?;
-                        }
-                    }
-
-                    exec.save_session(&snapshot_path)
-                        .context(format!("Failed to save {} session snapshot for hash {}", lang, &node_hash[..8]))?;
-
-                    // Restore constant objects to environment
-                    for (obj_name, info) in &cache.metadata.constant_objects {
-                        if info.language == lang {
-                            exec.load_constant(obj_name, &info.hash, &cache_dir)
-                                .context(format!("Failed to restore constant object '{}' to environment", obj_name))?;
-                        }
-                    }
-
-                    log::debug!("💾 Saved lightweight snapshot for node {} (lang: {})", &node_hash[..8], lang);
-                    
-                    // Update tracked state
-                    loaded_snapshot_per_lang.insert(lang.to_string(), node_hash.clone());
-                    
-                } else {
-                    // CASE 2: Cache Hit (Skipped)
-                    // The executor did NOT run the code. It is still in state `previous_hash`.
-                    // We do NOT load the new snapshot `node_hash` immediately.
-                    // Why? Because if the next chunk is also a cache hit, we avoid loading intermediate snapshots!
-                    // We only load when needed (at the start of the loop, if we detect a mismatch).
-                    
-                    // So we do NOTHING here. `loaded_snapshot_per_lang` remains `previous_hash`.
-                    log::debug!("⚡ Chunk {} cached. Executor stays at state {}.", &node_hash[..8], &previous_hash[..8]);
-                }
-            }
+            // After execution (or cache hit), we update the snapshot state
+            snapshot_manager.update_after_node(
+                lang, 
+                &node_hash, 
+                &previous_hash, 
+                &mut self.executor_manager, 
+                &cache, 
+                &self.project_root
+            )?;
 
             typst_output.push_str(&result_str);
             last_pos = node_end;
