@@ -5,6 +5,7 @@ pub mod r;
 pub mod python;
 pub mod side_channel;
 pub mod manager;
+pub mod path_utils;
 
 pub use side_channel::{OutputMetadata, SideChannel};
 pub use manager::ExecutorManager;

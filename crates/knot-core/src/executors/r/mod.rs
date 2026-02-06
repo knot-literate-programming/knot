@@ -118,19 +118,21 @@ impl KnotExecutor for RExecutor {
     }
 }
 
+use super::path_utils::escape_path_for_code;
+
 impl ConstantObjectHandler for RExecutor {
     fn hash_object(&mut self, object_name: &str) -> Result<String> {
+        // Use environment variable to avoid code injection in the R script
+        unsafe { std::env::set_var("KNOT_OBJECT_NAME", object_name); }
+
         // Use digest package with xxhash64 algorithm for fast hashing
-        let code = format!(
-            r#"
-if (!requireNamespace("digest", quietly = TRUE)) {{
+        let code = r#"
+if (!requireNamespace("digest", quietly = TRUE)) {
     stop("Package 'digest' is required for constant objects. Install with: install.packages('digest')")
-}}
-cat(digest::digest({}, algo = "xxhash64"))
-"#,
-            object_name
-        );
-        self.query(&code)
+}
+cat(digest::digest(get(Sys.getenv("KNOT_OBJECT_NAME")), algo = "xxhash64"))
+"#;
+        self.query(code)
     }
 
     fn save_constant(&mut self, object_name: &str, hash: &str, cache_dir: &Path) -> Result<()> {
@@ -138,11 +140,14 @@ cat(digest::digest({}, algo = "xxhash64"))
         std::fs::create_dir_all(&objects_dir)?;
 
         let object_path = objects_dir.join(format!("{}.rds", hash));
-        let path_str = object_path.to_string_lossy().replace('\\', "\\\\");
+        let path_str = escape_path_for_code(&object_path);
+
+        // Use environment variable to avoid code injection in the R script
+        unsafe { std::env::set_var("KNOT_OBJECT_NAME", object_name); }
 
         let code = format!(
-            r#"saveRDS({}, file = "{}")"#,
-            object_name, path_str
+            r#"saveRDS(get(Sys.getenv("KNOT_OBJECT_NAME")), file = "{}")"#,
+            path_str
         );
         self.query(&code)?;
 
@@ -165,10 +170,14 @@ cat(digest::digest({}, algo = "xxhash64"))
             );
         }
 
-        let path_str = object_path.to_string_lossy().replace('\\', "\\\\");
+        let path_str = escape_path_for_code(&object_path);
+
+        // Use environment variable to avoid code injection in the R script
+        unsafe { std::env::set_var("KNOT_OBJECT_NAME", object_name); }
+
         let code = format!(
-            r#"{} <- readRDS("{}")"#,
-            object_name, path_str
+            r#"assign(Sys.getenv("KNOT_OBJECT_NAME"), readRDS("{}"), envir = .GlobalEnv)"#,
+            path_str
         );
         self.query(&code)?;
 
@@ -177,8 +186,11 @@ cat(digest::digest({}, algo = "xxhash64"))
     }
 
     fn remove_from_env(&mut self, object_name: &str) -> Result<()> {
-        let code = format!(r#"rm(list = "{}")"#, object_name);
-        self.query(&code)?;
+        // Use environment variable to avoid code injection in the R script
+        unsafe { std::env::set_var("KNOT_OBJECT_NAME", object_name); }
+
+        let code = r#"rm(list = Sys.getenv("KNOT_OBJECT_NAME"), envir = .GlobalEnv)"#;
+        self.query(code)?;
         log::debug!("🗑️  Removed '{}' from R environment", object_name);
         Ok(())
     }

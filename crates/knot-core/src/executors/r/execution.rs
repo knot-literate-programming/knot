@@ -7,6 +7,7 @@
 // Uses side-channel (via KNOT_METADATA_FILE) for robust communication.
 // If no metadata is provided, stdout text is used as fallback.
 
+use crate::executors::path_utils::escape_path_for_code;
 use super::{formatters, process::RProcess, RExecutor, BOUNDARY};
 use crate::executors::{ExecutionResult, GraphicsOptions, LanguageExecutor, OutputMetadata, SideChannel};
 use anyhow::{Context, Result};
@@ -26,8 +27,8 @@ pub fn execute(process: &mut RProcess, cache_dir: &Path, code: &str, graphics: &
 
     // Set environment variables in the R process
     // We must use Sys.setenv() because the child process environment is independent
-    let meta_file = channel.path().to_string_lossy().replace('\\', "\\\\");
-    let cache_dir_str = cache_dir.to_string_lossy().replace('\\', "\\\\");
+    let meta_file = escape_path_for_code(channel.path());
+    let cache_dir_str = escape_path_for_code(cache_dir);
     writeln!(stdin, "Sys.setenv(KNOT_METADATA_FILE = '{}')", meta_file)?;
     writeln!(stdin, "Sys.setenv(KNOT_FIG_WIDTH = '{}')", graphics.width)?;
     writeln!(stdin, "Sys.setenv(KNOT_FIG_HEIGHT = '{}')", graphics.height)?;
@@ -165,18 +166,11 @@ pub fn save_session(process: &mut RProcess, snapshot_file: &Path) -> Result<()> 
         .context("R process stdin is not available")?;
 
     // Convert path to string, escaping backslashes for Windows
-    let path_str = snapshot_file
-        .to_str()
-        .context("Invalid path for snapshot file")?
-        .replace('\\', "\\\\");
+    let path_str = escape_path_for_code(snapshot_file);
 
     // Derive packages file path (snapshot.RData -> snapshot_packages.rds)
-    let packages_path = snapshot_file
-        .with_extension("")
-        .to_str()
-        .context("Invalid path for packages file")?
-        .replace('\\', "\\\\");
-    let packages_file = format!("{}_packages.rds", packages_path);
+    let packages_path_buf = snapshot_file.with_extension("");
+    let packages_file = format!("{}_packages.rds", escape_path_for_code(&packages_path_buf));
 
     // Execute save.image() to save objects
     writeln!(stdin, "save.image(file = \"{}\")", path_str)?;
@@ -214,18 +208,11 @@ pub fn load_session(process: &mut RProcess, snapshot_file: &Path) -> Result<()> 
         .context("R process stdin is not available")?;
 
     // Convert path to string, escaping backslashes for Windows
-    let path_str = snapshot_file
-        .to_str()
-        .context("Invalid path for snapshot file")?
-        .replace('\\', "\\\\");
+    let path_str = escape_path_for_code(snapshot_file);
 
     // Derive packages file path (snapshot.RData -> snapshot_packages.rds)
-    let packages_path = snapshot_file
-        .with_extension("")
-        .to_str()
-        .context("Invalid path for packages file")?
-        .replace('\\', "\\\\");
-    let packages_file = format!("{}_packages.rds", packages_path);
+    let packages_path_buf = snapshot_file.with_extension("");
+    let packages_file = format!("{}_packages.rds", escape_path_for_code(&packages_path_buf));
 
     // First, reload packages if the packages file exists
     writeln!(stdin, "if (file.exists(\"{}\")) {{", packages_file)?;
