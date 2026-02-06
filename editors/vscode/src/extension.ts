@@ -18,6 +18,7 @@ import {
     LanguageClientOptions,
     ServerOptions,
     TransportKind,
+    ExecuteCommandRequest,
 } from 'vscode-languageclient/node';
 
 let client: LanguageClient | undefined;
@@ -199,12 +200,14 @@ export async function activate(context: ExtensionContext) {
 
             outputChannel.appendLine(`Executing Clean Project command for ${targetUri}...`);
             try {
-                await client.sendRequest('workspace/executeCommand', {
+                const result = await client.sendRequest(ExecuteCommandRequest.type, {
                     command: 'knot.cleanProject',
                     arguments: [targetUri]
                 });
+                outputChannel.appendLine(`Clean command completed. Result: ${JSON.stringify(result)}`);
             } catch (error) {
                 outputChannel.appendLine(`Error during clean: ${error}`);
+                window.showErrorMessage(`Failed to clean project: ${error}`);
             }
         })
     );
