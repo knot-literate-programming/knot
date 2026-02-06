@@ -1,10 +1,7 @@
 #import "lib/knot.typ": *
 
-#show: doc => {
-  set page(paper: "a4", margin: 2cm)
-  set text(font: "Linux Libertine", size: 11pt)
-  doc
-}
+#set page(paper: "a4", margin: 2cm)
+#set text(font: "Linux Libertine", size: 11pt)
 
 = Knot Demonstration
 
