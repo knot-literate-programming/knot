@@ -40,7 +40,6 @@ Knot also supports Python seamlessly, including DataFrames and plots.
 ```{python analysis}
 #| echo: true
 import pandas as pd
-from knot import typst, current_plot
 import matplotlib.pyplot as plt
 
 df = pd.DataFrame({

@@ -92,7 +92,6 @@ def typst(obj: Any, **kwargs) -> Any:
 
     Examples:
         >>> import pandas as pd
-        >>> from knot import typst
         >>>
         >>> # DataFrame
         >>> df = pd.DataFrame({'x': [1, 2, 3], 'y': [4, 5, 6]})
@@ -148,7 +147,6 @@ def current_plot():
 
     Examples:
         >>> import matplotlib.pyplot as plt
-        >>> from knot import typst, current_plot
         >>>
         >>> plt.plot([1, 2, 3], [1, 4, 9])
         >>> plt.title("My Plot")
