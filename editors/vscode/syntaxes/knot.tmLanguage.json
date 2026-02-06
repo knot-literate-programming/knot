@@ -7,7 +7,13 @@
       "include": "#r-code-chunk"
     },
     {
+      "include": "#python-code-chunk"
+    },
+    {
       "include": "#r-inline"
+    },
+    {
+      "include": "#python-inline"
     },
     {
       "include": "#typst-markup"
@@ -47,6 +53,42 @@
         },
         {
           "include": "source.r"
+        }
+      ]
+    },
+    "python-code-chunk": {
+      "name": "meta.embedded.block.python",
+      "contentName": "source.python",
+      "begin": "^(```)(\\{)(python)(?:\\s+([^\\s}]+))?\\s*(\\})",
+      "end": "^(```)",
+      "beginCaptures": {
+        "1": {
+          "name": "punctuation.definition.code-fence.begin.knot"
+        },
+        "2": {
+          "name": "punctuation.definition.chunk-options.begin.knot"
+        },
+        "3": {
+          "name": "entity.name.function.chunk-language.knot"
+        },
+        "5": {
+          "name": "variable.parameter.chunk-name.knot"
+        },
+        "6": {
+          "name": "punctuation.definition.chunk-options.end.knot"
+        }
+      },
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.definition.code-fence.end.knot"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#chunk-options"
+        },
+        {
+          "include": "source.python"
         }
       ]
     },
@@ -102,6 +144,39 @@
       "patterns": [
         {
           "include": "source.r"
+        }
+      ]
+    },
+    "python-inline": {
+      "name": "meta.embedded.inline.python",
+      "contentName": "source.python",
+      "begin": "(`)(\\{)(python)(?:\\s*([^{}]+))?(\\})",
+      "end": "(`)",
+      "beginCaptures": {
+        "1": {
+          "name": "punctuation.definition.inline-python.begin.knot"
+        },
+        "2": {
+          "name": "punctuation.definition.inline-python.bracket.begin.knot"
+        },
+        "3": {
+          "name": "keyword.control.inline-python.knot"
+        },
+        "4": {
+          "name": "variable.parameter.inline-options.knot"
+        },
+        "5": {
+          "name": "punctuation.definition.inline-python.bracket.end.knot"
+        }
+      },
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.definition.inline-python.end.knot"
+        }
+      },
+      "patterns": [
+        {
+          "include": "source.python"
         }
       ]
     },

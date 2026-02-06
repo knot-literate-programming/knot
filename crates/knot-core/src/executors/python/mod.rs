@@ -64,6 +64,7 @@ use std::path::{Path, PathBuf};
 
 use crate::executors::{
     ConstantObjectHandler, ExecutionResult, GraphicsOptions, KnotExecutor, LanguageExecutor,
+    OutputMetadata, SideChannel,
 };
 use process::PythonProcess;
 
@@ -94,7 +95,30 @@ impl LanguageExecutor for PythonExecutor {
         Ok(())
     }
 
-    fn execute(&mut self, code: &str, _graphics: &GraphicsOptions) -> Result<ExecutionResult> {
+    fn execute(&mut self, code: &str, graphics: &GraphicsOptions) -> Result<ExecutionResult> {
+        // Create side-channel for this chunk
+        let channel = SideChannel::new()?;
+        channel.setup_env()?;
+
+        // Set environment variables in the Python process
+        let meta_file = escape_path_for_code(channel.path());
+        let cache_dir_str = escape_path_for_code(&self.cache_dir);
+
+        let setup_code = format!(
+            "import os\n\
+             os.environ['KNOT_METADATA_FILE'] = '{}'\n\
+             os.environ['KNOT_CACHE_DIR'] = '{}'\n\
+             os.environ['KNOT_FIG_WIDTH'] = '{}'\n\
+             os.environ['KNOT_FIG_HEIGHT'] = '{}'\n\
+             os.environ['KNOT_FIG_DPI'] = '{}'\n\
+             os.environ['KNOT_FIG_FORMAT'] = '{}'",
+            meta_file, cache_dir_str, graphics.width, graphics.height, graphics.dpi, graphics.format
+        );
+
+        self.process.execute_code(&setup_code)?;
+        let _ = self.process.read_until_boundary()?;
+
+        // Execute the actual code
         self.process.execute_code(code)?;
         let (stdout, stderr) = self.process.read_until_boundary()?;
 
@@ -117,7 +141,9 @@ impl LanguageExecutor for PythonExecutor {
             );
         }
 
-        Ok(ExecutionResult::Text(stdout))
+        // Read metadata from side-channel
+        let metadata = channel.read_metadata()?;
+        self.metadata_to_execution_result(metadata, &stdout)
     }
 
     fn execute_inline(&mut self, code: &str) -> Result<String> {
@@ -156,6 +182,55 @@ impl LanguageExecutor for PythonExecutor {
         match result {
             ExecutionResult::Text(t) => Ok(t.trim().to_string()),
             _ => anyhow::bail!("Internal Error: Query returned unexpected non-text result"),
+        }
+    }
+}
+
+impl PythonExecutor {
+    /// Convert side-channel metadata to ExecutionResult
+    fn metadata_to_execution_result(
+        &self,
+        metadata: Vec<OutputMetadata>,
+        stdout_text: &str,
+    ) -> Result<ExecutionResult> {
+        let mut text_content = String::new();
+        let mut plot_path: Option<PathBuf> = None;
+        let mut dataframe_path: Option<PathBuf> = None;
+
+        for item in metadata {
+            match item {
+                OutputMetadata::Text { content } => {
+                    if !text_content.is_empty() {
+                        text_content.push('\n');
+                    }
+                    text_content.push_str(&content);
+                }
+                OutputMetadata::Plot { path, .. } => {
+                    plot_path = Some(path);
+                }
+                OutputMetadata::DataFrame { path } => {
+                    dataframe_path = Some(path);
+                }
+            }
+        }
+
+        if text_content.is_empty() && !stdout_text.trim().is_empty() {
+            text_content = stdout_text.to_string();
+        }
+
+        match (text_content.is_empty(), dataframe_path, plot_path) {
+            (false, None, None) => Ok(ExecutionResult::Text(text_content)),
+            (_, Some(df), None) => Ok(ExecutionResult::DataFrame(df)),
+            (false, None, Some(plot)) => Ok(ExecutionResult::TextAndPlot {
+                text: text_content,
+                plot,
+            }),
+            (_, None, Some(plot)) => Ok(ExecutionResult::Plot(plot)),
+            (_, Some(df), Some(plot)) => Ok(ExecutionResult::DataFrameAndPlot {
+                dataframe: df,
+                plot,
+            }),
+            (true, None, None) => Ok(ExecutionResult::Text(String::new())),
         }
     }
 }
