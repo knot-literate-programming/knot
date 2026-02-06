@@ -1,0 +1,153 @@
+#import "@preview/cetz:0.3.2"
+
+= Python Plots Test
+
+This document tests the Python plotting capabilities with the knot package.
+
+== Test 1: DataFrame
+
+```{python}
+import pandas as pd
+
+# Create a simple DataFrame
+df = pd.DataFrame({
+    'Name': ['Alice', 'Bob', 'Charlie', 'David'],
+    'Age': [25, 30, 35, 28],
+    'Score': [85.5, 92.0, 78.5, 88.0]
+})
+
+# Display using typst (automatically imported)
+typst(df)
+```
+
+== Test 2: Matplotlib - pyplot style
+
+Using `current_plot()` to capture the current figure:
+
+```{python}
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Create some data
+x = np.linspace(0, 10, 100)
+y = np.sin(x)
+
+# Plot using pyplot style
+plt.figure(figsize=(8, 5))
+plt.plot(x, y, 'b-', linewidth=2, label='sin(x)')
+plt.plot(x, np.cos(x), 'r--', linewidth=2, label='cos(x)')
+plt.xlabel('X axis')
+plt.ylabel('Y axis')
+plt.title('Trigonometric Functions')
+plt.legend()
+plt.grid(True, alpha=0.3)
+
+# Capture and render current figure
+typst(current_plot())
+```
+
+== Test 3: Matplotlib - OOP style
+
+Using explicit Figure object:
+
+```{python}
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Create figure explicitly
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
+
+# Left plot
+x = np.linspace(0, 2*np.pi, 50)
+ax1.plot(x, np.sin(x), 'bo-')
+ax1.set_title('Sine Wave')
+ax1.set_xlabel('x')
+ax1.set_ylabel('sin(x)')
+ax1.grid(True)
+
+# Right plot
+ax2.scatter(np.random.randn(50), np.random.randn(50),
+            alpha=0.5, c=np.random.rand(50), cmap='viridis')
+ax2.set_title('Random Scatter')
+ax2.set_xlabel('X')
+ax2.set_ylabel('Y')
+
+# Render the figure
+typst(fig)
+```
+
+== Test 4: Multiple DataFrames
+
+```{python}
+import pandas as pd
+import numpy as np
+
+# First DataFrame
+df1 = pd.DataFrame({
+    'Category': ['A', 'B', 'C'],
+    'Value': [10, 20, 15]
+})
+
+print("First DataFrame:")
+typst(df1)
+```
+
+And another one:
+
+```{python}
+import pandas as pd
+
+# Second DataFrame (variables persist across chunks)
+df2 = pd.DataFrame({
+    'Month': ['Jan', 'Feb', 'Mar', 'Apr'],
+    'Sales': [100, 150, 120, 180]
+})
+
+print("Second DataFrame:")
+typst(df2)
+```
+
+== Test 5: Variable Persistence
+
+Testing that variables persist across chunks:
+
+```{python}
+# Define variable in first chunk
+my_value = 42
+print(f"Defined: my_value = {my_value}")
+```
+
+```{python}
+# Use it in second chunk
+print(f"my_value from previous chunk: {my_value}")
+result = my_value * 2
+print(f"Result: {result}")
+```
+
+== Test 6: Bar Chart
+
+```{python}
+import matplotlib.pyplot as plt
+
+categories = ['Category A', 'Category B', 'Category C', 'Category D']
+values = [23, 45, 56, 78]
+colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A']
+
+plt.figure(figsize=(8, 5))
+plt.bar(categories, values, color=colors, alpha=0.8, edgecolor='black')
+plt.ylabel('Values')
+plt.title('Bar Chart Example')
+plt.xticks(rotation=15)
+plt.grid(axis='y', alpha=0.3)
+
+typst(current_plot())
+```
+
+== Summary
+
+All tests completed! The following features work:
+- DataFrames rendered via `typst(df)`
+- Matplotlib plots with `current_plot()` (pyplot style)
+- Matplotlib plots with explicit Figure (OOP style)
+- Variable persistence across chunks
+- Automatic import of knot functions

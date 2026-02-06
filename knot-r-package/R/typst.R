@@ -249,3 +249,41 @@ typst.recordedplot <- function(x, width = NULL, height = NULL, dpi = NULL, forma
 
   invisible(x)
 }
+
+
+#' Get the current plot
+#'
+#' Captures the current base R graphics plot using recordPlot().
+#' This is a convenience wrapper for use with typst(), providing
+#' a consistent interface with the Python knot.current_plot() function.
+#'
+#' The function checks if there is an active graphics device before
+#' attempting to record the plot. If no device is active, it will
+#' stop with an error message.
+#'
+#' @return A recordedplot object representing the current plot
+#'
+#' @examples
+#' \dontrun{
+#' # In a knot chunk:
+#' plot(1:10, type = "l")
+#' lines(1:10 * 2, col = "red")
+#' points(5, 10, pch = 19)
+#' typst(current_plot())  # Captures and renders the plot
+#' }
+#'
+#' @seealso \code{\link{recordPlot}} for the underlying R function
+#' @export
+current_plot <- function() {
+  # Check if there's an active plot device
+  # dev.cur() returns 1 for the null device (no graphics)
+  if (grDevices::dev.cur() == 1) {
+    stop(
+      "No active graphics device. Create a plot first.\n",
+      "Example: plot(1:10)"
+    )
+  }
+
+  # Capture and return the current plot
+  grDevices::recordPlot()
+}

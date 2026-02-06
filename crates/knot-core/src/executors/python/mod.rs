@@ -69,7 +69,27 @@ impl PythonExecutor {
 
 impl LanguageExecutor for PythonExecutor {
     fn initialize(&mut self) -> Result<()> {
-        self.process.initialize()
+        self.process.initialize()?;
+
+        // Add knot-python-package to sys.path and import automatically
+        // This allows users to use typst() and current_plot() without explicit imports
+        let knot_package_path = get_knot_python_package_path()?;
+        let setup_code = format!(
+            r#"
+import sys
+sys.path.insert(0, r'{}')
+
+# Automatically import knot functions (like R does)
+# This makes typst() and current_plot() available globally
+from knot import *
+"#,
+            knot_package_path.display()
+        );
+
+        self.query(&setup_code)?;
+        log::info!("✓ Loaded knot Python package from: {}", knot_package_path.display());
+
+        Ok(())
     }
 
     fn execute(&mut self, code: &str, _graphics: &GraphicsOptions) -> Result<ExecutionResult> {
@@ -213,6 +233,71 @@ impl Drop for PythonExecutor {
     fn drop(&mut self) {
         self.process.terminate();
     }
+}
+
+/// Get the path to the knot-python-package directory
+///
+/// Searches in the following locations (in order):
+/// 1. KNOT_PYTHON_PACKAGE_PATH environment variable
+/// 2. Relative to the current executable (../../knot-python-package)
+/// 3. Relative to workspace root
+fn get_knot_python_package_path() -> Result<PathBuf> {
+    // 1. Check environment variable
+    if let Ok(env_path) = std::env::var("KNOT_PYTHON_PACKAGE_PATH") {
+        let path = PathBuf::from(env_path);
+        if path.exists() {
+            return Ok(path);
+        }
+        log::warn!(
+            "KNOT_PYTHON_PACKAGE_PATH set but path does not exist: {}",
+            path.display()
+        );
+    }
+
+    // 2. Try relative to current executable
+    if let Ok(exe_path) = std::env::current_exe() {
+        // Assuming structure: target/debug/knot or target/release/knot
+        // Go up to workspace root: ../../
+        if let Some(target_dir) = exe_path.parent() {
+            if let Some(workspace_root) = target_dir.parent() {
+                let package_path = workspace_root.join("knot-python-package");
+                if package_path.exists() {
+                    return Ok(package_path);
+                }
+            }
+        }
+    }
+
+    // 3. Try relative to current directory (for development)
+    let cwd_package = PathBuf::from("knot-python-package");
+    if cwd_package.exists() {
+        return Ok(cwd_package);
+    }
+
+    // 4. Try workspace root (from CARGO_MANIFEST_DIR at compile time)
+    #[cfg(debug_assertions)]
+    {
+        // In debug mode, try to use compile-time manifest dir
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        if let Some(workspace_root) = manifest_dir.parent() {
+            if let Some(workspace_root) = workspace_root.parent() {
+                let package_path = workspace_root.join("knot-python-package");
+                if package_path.exists() {
+                    return Ok(package_path);
+                }
+            }
+        }
+    }
+
+    anyhow::bail!(
+        "Could not find knot-python-package directory.\n\
+         Searched in:\n\
+         - KNOT_PYTHON_PACKAGE_PATH environment variable\n\
+         - Relative to executable\n\
+         - Current directory\n\
+         \n\
+         You can set KNOT_PYTHON_PACKAGE_PATH to specify the location."
+    )
 }
 
 #[cfg(test)]
