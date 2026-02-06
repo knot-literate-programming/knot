@@ -14,7 +14,6 @@
 
 use knot_core::executors::{r::RExecutor, LanguageExecutor, ExecutionResult, GraphicsOptions};
 use std::fs;
-use std::path::PathBuf;
 use tempfile::TempDir;
 
 fn default_graphics() -> GraphicsOptions {
@@ -31,15 +30,7 @@ fn setup_executor() -> (TempDir, RExecutor) {
     let cache_dir = temp_dir.path().join(".knot_cache");
     fs::create_dir_all(&cache_dir).unwrap();
 
-    // Use the knot R package source file from the repo
-    let r_helper_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("knot-r-package/R/typst.R");
-
-    let mut executor = RExecutor::new(cache_dir, Some(r_helper_path))
+    let mut executor = RExecutor::new(cache_dir)
         .expect("Failed to create R executor");
     executor.initialize().expect("Failed to initialize R");
 

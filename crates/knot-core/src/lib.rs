@@ -13,6 +13,9 @@ pub use graphics::{GraphicsDefaults, ResolvedGraphicsOptions, resolve_graphics_o
 pub use config::{Config, ChunkDefaults};
 pub use defaults::Defaults;
 
+pub const R_HELPER_SCRIPT: &str = include_str!("../resources/typst.R");
+pub const PYTHON_HELPER_SCRIPT: &str = include_str!("../resources/typst.py");
+
 use std::path::{Path, PathBuf};
 use std::fs;
 use anyhow::{Context, Result};

@@ -158,7 +158,7 @@ mod tests {
 
     fn setup_test_manager() -> (TempDir, ExecutorManager) {
         let temp_dir = TempDir::new().unwrap();
-        let manager = ExecutorManager::new(temp_dir.path().to_path_buf(), None);
+        let manager = ExecutorManager::new(temp_dir.path().to_path_buf());
         (temp_dir, manager)
     }
 
@@ -251,7 +251,7 @@ mod tests {
 
     #[test]
     fn test_process_chunk_unsupported_language() {
-        let chunk = create_test_chunk("python", "print(42)", None, true, false);
+        let chunk = create_test_chunk("unsupported_lang", "print(42)", None, true, false);
         let (_temp_dir_cache, mut cache) = setup_test_cache();
         let (_temp_dir_mgr, mut manager) = setup_test_manager();
 

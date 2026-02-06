@@ -44,11 +44,6 @@ impl Compiler {
             .unwrap_or_else(|_| knot_file_path.parent().unwrap_or(Path::new(".")).to_path_buf());
 
         let (config, project_root) = Config::find_and_load(&start_dir)?;
-        let r_helper_path = config.r_helper_path(&project_root);
-
-        if let Some(ref path) = r_helper_path {
-            info!("Using R helper from knot.toml: {}", path.display());
-        }
 
         // Determine isolated cache directory for this file
         let file_stem = knot_file_path.file_stem()
@@ -58,7 +53,7 @@ impl Compiler {
         
         info!("📦 Cache directory: {}", cache_dir.display());
 
-        let executor_manager = ExecutorManager::new(cache_dir.clone(), r_helper_path);
+        let executor_manager = ExecutorManager::new(cache_dir.clone());
 
         Ok(Self {
             executor_manager,

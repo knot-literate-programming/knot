@@ -79,7 +79,7 @@ mod tests {
 
     fn setup_test_manager() -> (TempDir, ExecutorManager) {
         let temp_dir = TempDir::new().unwrap();
-        let manager = ExecutorManager::new(temp_dir.path().to_path_buf(), None);
+        let manager = ExecutorManager::new(temp_dir.path().to_path_buf());
         (temp_dir, manager)
     }
 

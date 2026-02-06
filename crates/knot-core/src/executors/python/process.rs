@@ -24,17 +24,23 @@
 //! # Example
 //!
 //! ```rust
-//! let mut process = PythonProcess::uninitialized();
-//! process.initialize()?;
+//! use knot_core::executors::python::process::PythonProcess;
+//! use anyhow::Result;
 //!
-//! process.execute_code("x = 42\nprint(x)")?;
-//! let (stdout, stderr) = process.read_until_boundary()?;
-//! assert_eq!(stdout.trim(), "42");
+//! fn main() -> Result<()> {
+//!     let mut process = PythonProcess::uninitialized();
+//!     process.initialize()?;
 //!
-//! // Variables persist across executions
-//! process.execute_code("print(x * 2)")?;
-//! let (stdout, _) = process.read_until_boundary()?;
-//! assert_eq!(stdout.trim(), "84");
+//!     process.execute_code("x = 42\nprint(x)")?;
+//!     let (stdout, stderr) = process.read_until_boundary()?;
+//!     assert_eq!(stdout.trim(), "42");
+//!
+//!     // Variables persist across executions
+//!     process.execute_code("print(x * 2)")?;
+//!     let (stdout, _) = process.read_until_boundary()?;
+//!     assert_eq!(stdout.trim(), "84");
+//!     Ok(())
+//! }
 //! ```
 
 use anyhow::{Context, Result};

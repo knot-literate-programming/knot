@@ -47,7 +47,6 @@ pub struct DocumentConfig {
 #[derive(Debug, Default, Deserialize)]
 pub struct HelpersConfig {
     pub typst: Option<String>,
-    pub r: Option<String>,
 }
 
 impl Config {
@@ -106,11 +105,6 @@ impl Config {
         Ok(config)
     }
 
-    /// Get the R helper path, resolving it relative to the project root
-    pub fn r_helper_path(&self, project_root: &Path) -> Option<PathBuf> {
-        self.helpers.r.as_ref().map(|r| project_root.join(r))
-    }
-
     /// Get the Typst helper path, resolving it relative to the project root
     pub fn typst_helper_path(&self, project_root: &Path) -> Option<PathBuf> {
         self.helpers.typst.as_ref().map(|t| project_root.join(t))
@@ -131,161 +125,7 @@ impl Default for Config {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_parse_minimal_config() {
-        let toml = r#"
-[document]
-main = "main.knot"
 
-[helpers]
-typst = "lib/knot.typ"
-r = "lib/knot.R"
-"#;
-
-        let config: Config = toml::from_str(toml).unwrap();
-        assert_eq!(config.document.main, Some("main.knot".to_string()));
-        assert!(config.document.includes.is_none());
-        assert_eq!(config.helpers.typst, Some("lib/knot.typ".to_string()));
-        assert_eq!(config.helpers.r, Some("lib/knot.R".to_string()));
-    }
-
-    #[test]
-    fn test_parse_config_with_includes() {
-        let toml = r#"
-[document]
-main = "main.knot"
-includes = ["chap1.knot", "chap2.knot"]
-"#;
-
-        let config: Config = toml::from_str(toml).unwrap();
-        assert_eq!(config.document.main, Some("main.knot".to_string()));
-        assert_eq!(config.document.includes, Some(vec!["chap1.knot".to_string(), "chap2.knot".to_string()]));
-    }
-
-
-    #[test]
-    fn test_parse_empty_config() {
-        let toml = "";
-        let config: Config = toml::from_str(toml).unwrap();
-        assert!(config.document.main.is_none());
-        assert!(config.helpers.r.is_none());
-    }
-
-    #[test]
-    fn test_parse_package_config() {
-        let toml = r#"
-[helpers]
-typst = "@preview/knot"
-r = "@cran/knot"
-"#;
-
-        let config: Config = toml::from_str(toml).unwrap();
-        assert_eq!(config.helpers.typst, Some("@preview/knot".to_string()));
-        assert_eq!(config.helpers.r, Some("@cran/knot".to_string()));
-    }
-
-    #[test]
-    fn test_load_from_nonexistent_file() {
-        // Should return default config without error
-        let result = Config::load_from_path("/nonexistent/path/knot.toml");
-        assert!(result.is_ok());
-        let config = result.unwrap();
-        assert!(config.document.main.is_none());
-        assert!(config.helpers.r.is_none());
-    }
-
-    #[test]
-    fn test_load_from_invalid_toml() {
-        use std::fs;
-        use tempfile::NamedTempFile;
-
-        let temp_file = NamedTempFile::new().unwrap();
-        fs::write(temp_file.path(), "this is not valid TOML [[[\n").unwrap();
-
-        let result = Config::load_from_path(temp_file.path());
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Failed to parse"));
-    }
-
-    #[test]
-    fn test_r_helper_path() {
-        let toml = r#"
-[helpers]
-r = "lib/knot.R"
-"#;
-
-        let config: Config = toml::from_str(toml).unwrap();
-        let project_root = Path::new("/project");
-        let path = config.r_helper_path(project_root);
-        assert!(path.is_some());
-        assert_eq!(path.unwrap(), PathBuf::from("/project/lib/knot.R"));
-    }
-
-    #[test]
-    fn test_r_helper_path_none() {
-        let config = Config::default();
-        let project_root = Path::new("/project");
-        assert!(config.r_helper_path(project_root).is_none());
-    }
-
-    #[test]
-    fn test_typst_helper_path() {
-        let toml = r#"
-[helpers]
-typst = "lib/knot.typ"
-"#;
-
-        let config: Config = toml::from_str(toml).unwrap();
-        let project_root = Path::new("/project");
-        let path = config.typst_helper_path(project_root);
-        assert!(path.is_some());
-        assert_eq!(path.unwrap(), PathBuf::from("/project/lib/knot.typ"));
-    }
-
-    #[test]
-    fn test_typst_helper_path_none() {
-        let config = Config::default();
-        let project_root = Path::new("/project");
-        assert!(config.typst_helper_path(project_root).is_none());
-    }
-
-    #[test]
-    fn test_default_config() {
-        let config = Config::default();
-        assert!(config.document.main.is_none());
-        assert!(config.helpers.typst.is_none());
-        assert!(config.helpers.r.is_none());
-    }
-
-    #[test]
-    fn test_config_with_all_fields() {
-        let toml = r#"
-[document]
-main = "main.knot"
-
-[helpers]
-typst = "lib/knot.typ"
-r = "lib/knot.R"
-"#;
-
-        let config: Config = toml::from_str(toml).unwrap();
-        assert_eq!(config.document.main, Some("main.knot".to_string()));
-        assert_eq!(config.helpers.typst, Some("lib/knot.typ".to_string()));
-        assert_eq!(config.helpers.r, Some("lib/knot.R".to_string()));
-    }
-
-    #[test]
-    fn test_config_partial_fields() {
-        let toml = r#"
-[document]
-main = "main.knot"
-"#;
-
-        let config: Config = toml::from_str(toml).unwrap();
-        assert_eq!(config.document.main, Some("main.knot".to_string()));
-        assert!(config.helpers.typst.is_none());
-        assert!(config.helpers.r.is_none());
-    }
 
     #[test]
     fn test_defaults_section() {

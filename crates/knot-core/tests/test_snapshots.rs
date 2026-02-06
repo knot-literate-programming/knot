@@ -11,7 +11,7 @@ fn test_save_and_load_session() {
     let cache_dir = temp_dir.path().join("cache");
     std::fs::create_dir(&cache_dir).unwrap();
 
-    let mut executor = RExecutor::new(cache_dir, None).unwrap();
+    let mut executor = RExecutor::new(cache_dir).unwrap();
     executor.initialize().unwrap();
 
     // Execute code to create variables
@@ -56,7 +56,7 @@ fn test_snapshot_preserves_complex_objects() {
     let cache_dir = temp_dir.path().join("cache");
     std::fs::create_dir(&cache_dir).unwrap();
 
-    let mut executor = RExecutor::new(cache_dir, None).unwrap();
+    let mut executor = RExecutor::new(cache_dir).unwrap();
     executor.initialize().unwrap();
 
     // Create various types of objects

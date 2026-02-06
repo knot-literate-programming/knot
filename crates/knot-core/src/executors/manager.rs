@@ -17,17 +17,30 @@
 //!
 //! # Example
 //!
-//! ```
-//! let mut manager = ExecutorManager::new(cache_dir, r_helper_path);
+//! ```rust
+//! use knot_core::executors::{ExecutorManager, GraphicsOptions, KnotExecutor};
+//! use anyhow::Result;
+//! use std::path::PathBuf;
+//! use tempfile::TempDir;
 //!
-//! // First call initializes R executor
-//! let r_exec = manager.get_executor("r")?;
-//! r_exec.execute("x <- 1", &graphics)?;
+//! fn main() -> Result<()> {
+//!     let temp_dir = TempDir::new().unwrap();
+//!     let cache_dir = temp_dir.path().to_path_buf();
+//!     let graphics = GraphicsOptions {
+//!         width: 7.0, height: 5.0, dpi: 300, format: "svg".to_string(),
+//!     };
 //!
-//! // Second call reuses cached instance
-//! let r_exec_2 = manager.get_executor("r")?;
-//! r_exec_2.execute("print(x)", &graphics)?; // x is still in scope
-//! ```
+//!     let mut manager = ExecutorManager::new(cache_dir);
+//!
+//!     // First call initializes R executor
+//!     let r_exec = manager.get_executor("r")?;
+//!     r_exec.execute("x <- 1", &graphics)?;
+//!
+//!     // Second call reuses cached instance
+//!     let r_exec_2 = manager.get_executor("r")?;
+//!     r_exec_2.execute("print(x)", &graphics)?; // x is still in scope
+//!     Ok(())
+//! }
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -37,24 +50,22 @@ use crate::executors::{KnotExecutor, LanguageExecutor, r::RExecutor, python::Pyt
 pub struct ExecutorManager {
     executors: HashMap<String, Box<dyn KnotExecutor>>,
     cache_dir: PathBuf,
-    r_helper_path: Option<PathBuf>,
 }
 
 impl ExecutorManager {
-    pub fn new(cache_dir: PathBuf, r_helper_path: Option<PathBuf>) -> Self {
+    pub fn new(cache_dir: PathBuf) -> Self {
         Self {
             executors: HashMap::new(),
             cache_dir,
-            r_helper_path,
         }
     }
 
     /// Get or initialize an executor for the given language
-    pub fn get_executor(&mut self, lang: &str) -> Result<&mut dyn KnotExecutor> {
+    pub fn get_executor(&mut self, lang: &str) -> Result<&mut (dyn KnotExecutor + '_)> {
         if !self.executors.contains_key(lang) {
             let executor: Box<dyn KnotExecutor> = match lang {
                 "r" => {
-                    let mut exec = RExecutor::new(self.cache_dir.clone(), self.r_helper_path.clone())?;
+                    let mut exec = RExecutor::new(self.cache_dir.clone())?;
                     exec.initialize()?;
                     Box::new(exec)
                 }
@@ -68,7 +79,10 @@ impl ExecutorManager {
             self.executors.insert(lang.to_string(), executor);
         }
 
-        Ok(self.executors.get_mut(lang).unwrap().as_mut())
+        match self.executors.get_mut(lang) {
+            Some(executor) => Ok(executor.as_mut()),
+            None => anyhow::bail!("Failed to retrieve executor for language '{}' after initialization", lang),
+        }
     }
 
     /// Check if a language is supported
@@ -92,7 +106,7 @@ mod tests {
     fn setup_manager() -> (TempDir, ExecutorManager) {
         let temp_dir = TempDir::new().unwrap();
         let cache_dir = temp_dir.path().to_path_buf();
-        let manager = ExecutorManager::new(cache_dir, None);
+        let manager = ExecutorManager::new(cache_dir);
         (temp_dir, manager)
     }
 

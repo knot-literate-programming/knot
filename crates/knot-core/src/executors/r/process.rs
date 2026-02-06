@@ -8,7 +8,6 @@
 
 use anyhow::{Context, Result};
 use std::io::{BufRead, BufReader, Write};
-use std::path::PathBuf;
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
 use std::thread;
 
@@ -19,6 +18,7 @@ pub struct RProcess {
     pub(super) stdin: Option<ChildStdin>,
     pub(super) stdout: Option<BufReader<ChildStdout>>,
     pub(super) stderr: Option<BufReader<ChildStderr>>,
+    _helper_file: Option<tempfile::NamedTempFile>,
 }
 
 impl RProcess {
@@ -29,11 +29,12 @@ impl RProcess {
             stdin: None,
             stdout: None,
             stderr: None,
+            _helper_file: None,
         }
     }
 
     /// Initialize and spawn the R process
-    pub fn initialize(&mut self, r_helper_path: Option<PathBuf>) -> Result<()> {
+    pub fn initialize(&mut self) -> Result<()> {
         let mut child = Command::new("R")
             .arg("--vanilla")
             .arg("--quiet")
@@ -47,71 +48,24 @@ impl RProcess {
         // Disable command echoing in the R session
         let mut stdin = child.stdin.take().context("Failed to open R stdin")?;
         writeln!(stdin, "options(echo = FALSE)")?;
+        
+        // Load knot helper functions (stored in RProcess struct to keep it alive)
+        let helper_script = crate::R_HELPER_SCRIPT;
+        // Write to a temp file
+        let mut temp_file = tempfile::Builder::new().suffix(".R").tempfile()?;
+        write!(temp_file, "{}", helper_script)?;
+        let temp_path = temp_file.path().to_string_lossy().replace('\\', "\\\\");
+
+        // Source the temp file
+        writeln!(stdin, "source(\"{}\")", temp_path)?;
+        
         stdin.flush()?;
 
         self.stdin = Some(stdin);
         self.stdout = child.stdout.take().map(BufReader::new);
         self.stderr = child.stderr.take().map(BufReader::new);
         self.child = Some(child);
-
-        // Load the knot R package or source the helper file
-        self.load_knot_helpers(r_helper_path)?;
-
-        Ok(())
-    }
-
-    /// Load knot R helpers (either from local file or installed package)
-    ///
-    /// Priority:
-    /// 1. If r_helper_path is provided and exists → source("path/to/file.R")
-    /// 2. Otherwise → library(knot.r.package) (fallback to installed package)
-    ///
-    /// This is called during initialization. If loading fails, it logs a warning
-    /// but does not fail - users can still use knot without rich output features.
-    fn load_knot_helpers(&mut self, r_helper_path: Option<PathBuf>) -> Result<()> {
-        let stdin = self
-            .stdin
-            .as_mut()
-            .context("R process stdin is not available")?;
-
-        // Determine loading strategy
-        let load_command = if let Some(ref path) = r_helper_path {
-            if path.exists() {
-                // Source the local R helper file
-                let path_str = path.to_string_lossy();
-                log::info!("Loading R helpers from: {}", path_str);
-                format!("try(source(\"{}\"), silent = TRUE)", path_str)
-            } else {
-                log::warn!("R helper file not found: {}. Falling back to library(knot.r.package)", path.display());
-                "try(library(knot.r.package), silent = TRUE)".to_string()
-            }
-        } else {
-            // No path specified, try to load the installed package
-            log::info!("No R helper path specified. Trying library(knot.r.package)");
-            "try(library(knot.r.package), silent = TRUE)".to_string()
-        };
-
-        // Execute the load command
-        writeln!(stdin, "{}", load_command)?;
-        writeln!(stdin, "cat('{}\\n', file=stdout())", BOUNDARY)?;
-        writeln!(stdin, "cat('{}\\n', file=stderr())", BOUNDARY)?;
-        stdin.flush()?;
-
-        // Collect output
-        let (_stdout_output, stderr_output) = self.read_until_boundary()?;
-
-        // If there's an error, it likely means the package/file is not available
-        // We don't fail here - just log a warning
-        if !stderr_output.trim().is_empty() {
-            log::warn!("Could not load R helpers: {}", stderr_output.trim());
-            log::warn!("Rich output features (dataframes, plots) will not be available.");
-        } else {
-            if r_helper_path.is_some() {
-                log::info!("✓ Loaded R helpers from local file");
-            } else {
-                log::info!("✓ Loaded knot.r.package");
-            }
-        }
+        self._helper_file = Some(temp_file);
 
         Ok(())
     }

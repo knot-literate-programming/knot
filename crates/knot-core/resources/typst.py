@@ -167,8 +167,8 @@ def current_plot():
     # Check if figure has content (at least one axes)
     if not fig.get_axes():
         raise ValueError(
-            "Current figure is empty. Create a plot first.\n"
-            "Example: plt.plot([1, 2, 3])"
+            """Current figure is empty. Create a plot first.
+Example: plt.plot([1, 2, 3])"""
         )
 
     return fig

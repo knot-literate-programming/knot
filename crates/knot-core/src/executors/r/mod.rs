@@ -22,7 +22,6 @@ const BOUNDARY: &str = crate::defaults::Defaults::BOUNDARY_MARKER;
 pub struct RExecutor {
     process: RProcess,
     cache_dir: PathBuf,
-    r_helper_path: Option<PathBuf>,
 }
 
 impl RExecutor {
@@ -32,12 +31,11 @@ impl RExecutor {
     /// * `cache_dir` - Directory for caching R outputs
     /// * `r_helper_path` - Optional path to R helper file (e.g., "lib/knot.R")
     ///                     If None, will try to load the installed knot.r.package
-    pub fn new(cache_dir: PathBuf, r_helper_path: Option<PathBuf>) -> Result<Self> {
+    pub fn new(cache_dir: PathBuf) -> Result<Self> {
         std::fs::create_dir_all(&cache_dir)?;
         Ok(Self {
             process: RProcess::uninitialized(),
             cache_dir,
-            r_helper_path,
         })
     }
 
@@ -89,7 +87,7 @@ impl RExecutor {
 
 impl LanguageExecutor for RExecutor {
     fn initialize(&mut self) -> Result<()> {
-        self.process.initialize(self.r_helper_path.clone())
+        self.process.initialize()
     }
 
     fn execute(&mut self, code: &str, graphics: &GraphicsOptions) -> Result<ExecutionResult> {
@@ -217,21 +215,13 @@ impl Drop for RExecutor {
 mod tests {
     use super::*;
     use tempfile::TempDir;
-    use std::path::PathBuf;
 
-    fn get_r_helper_path() -> PathBuf {
-        // Get workspace root (2 levels up from knot-core crate)
-        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let workspace_root = manifest_dir.parent().unwrap().parent().unwrap();
-        workspace_root.join("knot-r-package/R/typst.R")
-    }
 
     fn setup_executor() -> (TempDir, RExecutor) {
         let temp_dir = TempDir::new().unwrap();
         let cache_dir = temp_dir.path().to_path_buf();
-        let r_helper_path = Some(get_r_helper_path());
 
-        let mut executor = RExecutor::new(cache_dir, r_helper_path).unwrap();
+        let mut executor = RExecutor::new(cache_dir).unwrap();
         executor.initialize().unwrap();
 
         (temp_dir, executor)

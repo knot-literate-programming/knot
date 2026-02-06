@@ -35,7 +35,8 @@
       )
       if (length(existing_json) > 0) {
         existing_metadata <- tryCatch(
-          jsonlite::fromJSON(paste(existing_json, collapse = "\n"), simplifyVector = FALSE),
+          jsonlite::fromJSON(paste(existing_json, collapse = "
+"), simplifyVector = FALSE),
           error = function(e) list()
         )
       }
@@ -259,6 +260,7 @@ typst.recordedplot <- function(x, width = NULL, height = NULL, dpi = NULL, forma
 #'
 #' The function checks if there is an active graphics device before
 #' attempting to record the plot. If no device is active, it will
+
 #' stop with an error message.
 #'
 #' @return A recordedplot object representing the current plot
@@ -279,7 +281,8 @@ current_plot <- function() {
   # dev.cur() returns 1 for the null device (no graphics)
   if (grDevices::dev.cur() == 1) {
     stop(
-      "No active graphics device. Create a plot first.\n",
+      "No active graphics device. Create a plot first.
+",
       "Example: plot(1:10)"
     )
   }

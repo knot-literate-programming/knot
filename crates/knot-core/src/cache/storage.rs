@@ -11,7 +11,9 @@ use anyhow::{anyhow, Result};
 use chrono::Utc;
 use log::warn;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use tempfile::NamedTempFile;
 
 /// Loads cache metadata from disk
 ///
@@ -44,10 +46,19 @@ pub fn load_metadata(cache_dir: &Path) -> CacheMetadata {
 }
 
 /// Saves cache metadata to disk
+///
+/// Uses atomic write (temp file + rename) to prevent corruption
 pub fn save_metadata(cache_dir: &Path, metadata: &CacheMetadata) -> Result<()> {
     let metadata_path = cache_dir.join("metadata.json");
     let content = serde_json::to_string_pretty(metadata)?;
-    fs::write(metadata_path, content)?;
+
+    // Create temp file in the same directory to ensure atomic rename works
+    let mut temp_file = NamedTempFile::new_in(cache_dir)?;
+    temp_file.write_all(content.as_bytes())?;
+    
+    // Atomically replace the old file
+    temp_file.persist(metadata_path).map_err(|e| e.error)?;
+    
     Ok(())
 }
 
@@ -113,8 +124,8 @@ pub fn save_result(
             // Assuming the plot is already in the cache dir, just get its name
             let filename = plot_path
                 .file_name()
-                .unwrap()
-                .to_string_lossy()
+                .and_then(|n| n.to_str())
+                .ok_or_else(|| anyhow!("Invalid plot filename"))?
                 .to_string();
             vec![filename]
         }
@@ -122,8 +133,8 @@ pub fn save_result(
             // DataFrame CSV is already saved in the cache dir, just get its name
             let filename = csv_path
                 .file_name()
-                .unwrap()
-                .to_string_lossy()
+                .and_then(|n| n.to_str())
+                .ok_or_else(|| anyhow!("Invalid dataframe filename"))?
                 .to_string();
             vec![filename]
         }
@@ -132,16 +143,24 @@ pub fn save_result(
             let text_path = cache_dir.join(&text_filename);
             fs::write(&text_path, text)?;
 
-            let plot_filename = plot.file_name().unwrap().to_string_lossy().to_string();
+            let plot_filename = plot
+                .file_name()
+                .and_then(|n| n.to_str())
+                .ok_or_else(|| anyhow!("Invalid plot filename"))?
+                .to_string();
             vec![text_filename, plot_filename]
         }
         ExecutionResult::DataFrameAndPlot { dataframe, plot } => {
             let dataframe_filename = dataframe
                 .file_name()
-                .unwrap()
-                .to_string_lossy()
+                .and_then(|n| n.to_str())
+                .ok_or_else(|| anyhow!("Invalid dataframe filename"))?
                 .to_string();
-            let plot_filename = plot.file_name().unwrap().to_string_lossy().to_string();
+            let plot_filename = plot
+                .file_name()
+                .and_then(|n| n.to_str())
+                .ok_or_else(|| anyhow!("Invalid plot filename"))?
+                .to_string();
             vec![dataframe_filename, plot_filename]
         }
         _ => {
