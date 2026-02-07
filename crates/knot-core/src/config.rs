@@ -82,6 +82,27 @@ impl Config {
         }
     }
 
+    /// Find project root starting from any path (file or directory)
+    ///
+    /// This is a convenience wrapper around `find_and_load()` that automatically
+    /// handles both file and directory paths:
+    /// - If `start_path` is a file, starts searching from its parent directory
+    /// - If `start_path` is a directory, starts searching from that directory
+    ///
+    /// Returns the project root directory (containing knot.toml)
+    pub fn find_project_root(start_path: &Path) -> Result<PathBuf> {
+        let search_dir = if start_path.is_file() {
+            start_path
+                .parent()
+                .ok_or_else(|| anyhow::anyhow!("File path has no parent directory"))?
+        } else {
+            start_path
+        };
+
+        let (_, project_root) = Self::find_and_load(search_dir)?;
+        Ok(project_root)
+    }
+
     /// Load configuration from knot.toml in the current directory
     pub fn load() -> Result<Self> {
         Self::load_from_path("knot.toml")

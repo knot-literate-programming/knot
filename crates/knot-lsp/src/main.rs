@@ -84,7 +84,8 @@ impl LanguageServer for KnotLanguageServer {
                         "#".to_string(),
                         "|".to_string(),
                         ":".to_string(),
-                        "$".to_string(), // Trigger completion for df$ (column names)
+                        "$".to_string(), // Trigger completion for df$ (R column names)
+                        ".".to_string(), // Trigger completion for obj. (Python/R attributes)
                     ]),
                     ..Default::default()
                 }),
@@ -103,7 +104,8 @@ impl LanguageServer for KnotLanguageServer {
         params: ExecuteCommandParams,
     ) -> Result<Option<serde_json::Value>> {
         if params.command == "knot.cleanProject" {
-            // Get the file URI from arguments if present
+            // Get the file/directory path from arguments if present
+            // clean_project() will automatically handle both files and directories
             let start_path = if let Some(first) = params.arguments.first() {
                 if let Some(uri_str) = first.as_str() {
                     if let Ok(uri) = Url::parse(uri_str) {
@@ -118,7 +120,7 @@ impl LanguageServer for KnotLanguageServer {
                 None
             };
 
-            // Fallback to workspace root
+            // Fallback to workspace root if no file argument
             let root_path = if start_path.is_some() {
                 start_path
             } else {
@@ -482,10 +484,9 @@ impl KnotLanguageServer {
             Err(_) => return,
         };
 
-        // 1. Find project root and cache dir
-        let start_dir = path.parent().unwrap_or(Path::new("."));
-        let (_config, project_root) = match Config::find_and_load(start_dir) {
-            Ok(res) => res,
+        // 1. Find project root and cache dir (handles both files and directories)
+        let project_root = match Config::find_project_root(&path) {
+            Ok(root) => root,
             Err(_) => return,
         };
 

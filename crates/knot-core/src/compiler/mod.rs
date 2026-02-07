@@ -39,18 +39,16 @@ impl Compiler {
     /// * `knot_file_path` - Path to the .knot file being compiled (used to find project root)
     pub fn new(knot_file_path: &Path) -> Result<Self> {
         // Find project root by searching for knot.toml in parent directories
-        let start_dir = knot_file_path
-            .parent()
-            .unwrap_or(Path::new("."))
-            .canonicalize()
-            .unwrap_or_else(|_| {
-                knot_file_path
-                    .parent()
-                    .unwrap_or(Path::new("."))
-                    .to_path_buf()
-            });
+        // find_project_root() handles both files and directories automatically
+        let project_root = Config::find_project_root(knot_file_path)?;
 
-        let (config, project_root) = Config::find_and_load(&start_dir)?;
+        // Load config from the project root
+        let config_path = project_root.join("knot.toml");
+        let config = if config_path.exists() {
+            Config::load_from_path(&config_path)?
+        } else {
+            Config::default()
+        };
 
         // Determine isolated cache directory for this file
         let file_stem = knot_file_path

@@ -104,9 +104,15 @@ async fn get_python_completion(state: &ServerState, uri: &Url, token: &str) -> O
     let mut managers = state.executors.write().await;
     let manager = managers.get_mut(uri)?;
     let executor = manager.get_executor("python").ok()?;
-    let code = format!("import builtins\ncandidates = list(globals().keys()) + dir(builtins)\nprint('\\n'.join([c for c in candidates if c.startswith('{}')][:50]))", token.replace('\'', "\\'"));
+    let code = format!(
+        "import builtins\ntoken = '{}'\nif '.' in token:\n    parts = token.split('.')\n    obj = globals().get(parts[0])\n    if obj is not None:\n        for part in parts[1:-1]:\n            obj = getattr(obj, part, None)\n            if obj is None:\n                break\n        if obj is not None:\n            prefix = parts[-1]\n            candidates = [x for x in dir(obj) if not x.startswith('_') and x.startswith(prefix)]\n            print('\\n'.join(candidates[:50]))\n        else:\n            print('')\n    else:\n        print('')\nelse:\n    candidates = list(globals().keys()) + dir(builtins)\n    print('\\n'.join([c for c in candidates if c.startswith(token)][:50]))\n",
+        token.replace('\'', "\\'").replace('"', "\\\"")
+    );
     let out = executor.query(&code).ok()?;
-    let items = out.lines().filter(|l| !l.trim().is_empty()).map(|l| CompletionItem { label: l.trim().to_string(), kind: Some(CompletionItemKind::VARIABLE), ..Default::default() }).collect::<Vec<_>>();
+    let items = out.lines().filter(|l| !l.trim().is_empty()).map(|l| {
+        let kind = if token.contains('.') { CompletionItemKind::METHOD } else { CompletionItemKind::VARIABLE };
+        CompletionItem { label: l.trim().to_string(), kind: Some(kind), ..Default::default() }
+    }).collect::<Vec<_>>();
     if items.is_empty() { None } else { Some(CompletionResponse::Array(items)) }
 }
 

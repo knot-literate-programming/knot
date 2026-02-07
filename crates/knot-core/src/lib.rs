@@ -32,21 +32,22 @@ pub fn get_cache_dir(project_root: &Path, sub_dir: &str) -> PathBuf {
 /// Clean project (remove cache and generated files)
 ///
 /// # Arguments
-/// * `start_dir` - Optional directory to start searching for knot.toml.
+/// * `start_path` - Optional path (file or directory) to start searching for knot.toml.
+///   If a file is provided, starts searching from its parent directory.
 ///   If None, uses current working directory.
-pub fn clean_project(start_dir: Option<&Path>) -> Result<()> {
+pub fn clean_project(start_path: Option<&Path>) -> Result<()> {
     use log::info;
 
     info!("🧹 Cleaning project...");
 
-    // 1. Find project root
-    let search_dir = if let Some(dir) = start_dir {
-        dir.to_path_buf()
+    // 1. Find project root (handles both files and directories)
+    let search_path = if let Some(path) = start_path {
+        path.to_path_buf()
     } else {
         std::env::current_dir().context("Failed to get current directory")?
     };
 
-    let (_, project_root) = config::Config::find_and_load(&search_dir)?;
+    let project_root = config::Config::find_project_root(&search_path)?;
 
     info!("📁 Project root: {}", project_root.display());
 
