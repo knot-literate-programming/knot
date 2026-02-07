@@ -20,8 +20,14 @@ pub async fn handle_hover(state: &ServerState, params: HoverParams) -> Result<Op
     // 2. Simple chunk detection based on line number (like GitLab version)
     let doc = parse_document(&text);
     let line = pos.line as usize;
+    eprintln!("LSP Hover: line={}, chunks_found={}", line, doc.chunks.len());
+    
     let current_chunk = doc.chunks.iter().find(|c| {
-        line >= c.range.start.line && line <= c.range.end.line
+        let hit = line >= c.range.start.line && line <= c.range.end.line;
+        if hit {
+            eprintln!("LSP Hover: HIT chunk starting at line {}", c.range.start.line);
+        }
+        hit
     });
 
     if let Some(chunk) = current_chunk {
@@ -102,7 +108,10 @@ async fn get_python_help(state: &ServerState, uri: &Url, token: &str) -> Option<
     let mut managers = state.executors.write().await;
     let manager = managers.get_mut(uri)?;
     let executor = manager.get_executor("python").ok()?;
-    let code = format!("import pydoc\ntopic = \"{0}\"\ntry:\n    print(pydoc.render_doc(topic, renderer=pydoc.plaintext))\nexcept: print(\"No help\")", token.replace('"', "\\\""));
+    let code = format!(
+        "import pydoc\ntopic = \"{0}\"\ntry:\n    obj = globals().get(topic)\n    if obj is not None:\n        print(pydoc.render_doc(obj, renderer=pydoc.plaintext))\n    else:\n        print(pydoc.render_doc(topic, renderer=pydoc.plaintext))\nexcept: print(\"No help found\")\n",
+        token.replace('"', "\\\"")
+    );
     let out = executor.query(&code).ok()?;
     if out.trim().is_empty() || out.contains("No help") { return None; }
     Some(Hover { contents: HoverContents::Markup(MarkupContent { kind: MarkupKind::Markdown, value: format!("```text\n{}\n```", out.trim()) }), range: None })
@@ -112,7 +121,10 @@ async fn get_r_help(state: &ServerState, uri: &Url, token: &str) -> Option<Hover
     let mut managers = state.executors.write().await;
     let manager = managers.get_mut(uri)?;
     let executor = manager.get_executor("r").ok()?;
-    let code = format!("{{ h <- utils::help(\"{0}\"); if(length(h)>0) {{ tf<-tempfile(); tools::Rd2txt(utils:::.getHelpFile(h), out=tf); cat(readLines(tf), sep=\"\\n\"); unlink(tf) }} }}", token.replace('"', "\\\""));
+    let code = format!(
+        "{{ h <- utils::help(\"{0}\"); if(length(h)>0) {{ tf<-tempfile(); tools::Rd2txt(utils:::.getHelpFile(h), out=tf, options=list(underline_titles=FALSE)); cat(readLines(tf), sep=\"\\n\"); unlink(tf) }} }}",
+        token.replace('"', "\\\"")
+    );
     let out = executor.query(&code).ok()?;
     if out.trim().is_empty() { return None; }
     Some(Hover { contents: HoverContents::Markup(MarkupContent { kind: MarkupKind::Markdown, value: format!("```text\n{}\n```", out.trim()) }), range: None })

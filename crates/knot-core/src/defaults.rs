@@ -63,8 +63,8 @@ impl Defaults {
     /// Default cache directory name
     pub const CACHE_DIR_NAME: &'static str = ".knot_cache";
 
-    /// Directory name for R-generated files (plots, CSVs)
-    pub const R_FILES_DIR: &'static str = "_knot_r_files";
+    /// Directory name for language-generated files (plots, CSVs)
+    pub const LANGUAGE_FILES_DIR: &'static str = "_knot_files";
 }
 
 #[cfg(test)]

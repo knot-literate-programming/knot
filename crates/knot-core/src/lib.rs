@@ -61,15 +61,15 @@ pub fn clean_project(start_dir: Option<&Path>) -> Result<()> {
         );
     }
 
-    // 3. Remove _knot_r_files directory
-    let r_files_dir = project_root.join(Defaults::R_FILES_DIR);
+    // 3. Remove _knot_files directory
+    let r_files_dir = project_root.join(Defaults::LANGUAGE_FILES_DIR);
     if r_files_dir.exists() {
         fs::remove_dir_all(&r_files_dir).with_context(|| {
             format!("Failed to remove helper files directory: {:?}", r_files_dir)
         })?;
         println!(
             "  ✓ Removed helper files directory: {:?}",
-            Defaults::R_FILES_DIR
+            Defaults::LANGUAGE_FILES_DIR
         );
     }
 

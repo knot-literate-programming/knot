@@ -193,17 +193,17 @@ pub fn compile_file(file: &PathBuf, output_path: Option<&PathBuf>) -> Result<Pat
 
 /// Copies generated files (CSVs, plots) to a local directory and updates paths
 ///
-/// Converts absolute cache paths to relative paths in _knot_r_files/
+/// Converts absolute cache paths to relative paths in _knot_files/
 fn fix_paths_in_typst(source: &str, typ_file: &Path) -> Result<String> {
     use knot_core::Defaults;
     use regex::Regex;
     use std::path::Path;
 
-    // Create _knot_r_files directory next to the .typ file
+    // Create _knot_files directory next to the .typ file
     let typ_dir = typ_file
         .parent()
         .context("Failed to get parent directory of .typ file")?;
-    let local_files_dir = typ_dir.join(Defaults::R_FILES_DIR);
+    let local_files_dir = typ_dir.join(Defaults::LANGUAGE_FILES_DIR);
     fs::create_dir_all(&local_files_dir)?;
 
     // Pattern to match absolute paths to .knot_cache (including sub-directories)
@@ -224,10 +224,10 @@ fn fix_paths_in_typst(source: &str, typ_file: &Path) -> Result<String> {
                     log::warn!("Failed to copy {}: {}", abs_path.display(), e);
                     format!("\"{}\"", abs_path_str)
                 } else {
-                    format!("\"{}/{}\"", Defaults::R_FILES_DIR, filename)
+                    format!("\"{}/{}\"", Defaults::LANGUAGE_FILES_DIR, filename)
                 }
             }
-            false => format!("\"{}/{}\"", Defaults::R_FILES_DIR, filename),
+            false => format!("\"{}/{}\"", Defaults::LANGUAGE_FILES_DIR, filename),
         }
     });
 
