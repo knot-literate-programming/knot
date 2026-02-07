@@ -56,7 +56,7 @@ pub fn clean_project(start_path: Option<&Path>) -> Result<()> {
     if cache_dir.exists() {
         fs::remove_dir_all(&cache_dir)
             .with_context(|| format!("Failed to remove cache directory: {:?}", cache_dir))?;
-        println!(
+        info!(
             "  ✓ Removed cache directory: {:?}",
             Defaults::CACHE_DIR_NAME
         );
@@ -68,7 +68,7 @@ pub fn clean_project(start_path: Option<&Path>) -> Result<()> {
         fs::remove_dir_all(&r_files_dir).with_context(|| {
             format!("Failed to remove helper files directory: {:?}", r_files_dir)
         })?;
-        println!(
+        info!(
             "  ✓ Removed helper files directory: {:?}",
             Defaults::LANGUAGE_FILES_DIR
         );
@@ -86,7 +86,7 @@ pub fn clean_project(start_path: Option<&Path>) -> Result<()> {
             {
                 fs::remove_file(&path)
                     .with_context(|| format!("Failed to remove file: {:?}", path))?;
-                println!("  ✓ Removed generated file: {}", name);
+                info!("  ✓ Removed generated file: {}", name);
             }
             _ => {}
         }

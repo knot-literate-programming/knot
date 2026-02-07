@@ -1,6 +1,7 @@
 use knot_core::cache::Cache;
 use knot_core::config::Config;
 use knot_core::get_cache_dir;
+use serde::Deserialize;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tower_lsp::jsonrpc::Result;
@@ -26,6 +27,24 @@ use proxy::TinymistProxy;
 use state::ServerState;
 use symbols::get_document_symbols;
 use transform::transform_to_typst;
+
+/// Robust VS Code URI representation
+#[derive(Debug, Deserialize)]
+struct VsCodeUri {
+    external: Option<String>,
+    path: Option<String>,
+    #[serde(rename = "fsPath")]
+    fs_path: Option<String>,
+}
+
+impl VsCodeUri {
+    fn preferred_uri(&self) -> Option<String> {
+        self.external
+            .clone()
+            .or_else(|| self.path.clone())
+            .or_else(|| self.fs_path.clone())
+    }
+}
 
 struct KnotLanguageServer {
     client: Client,
@@ -70,7 +89,6 @@ impl LanguageServer for KnotLanguageServer {
                 }),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 document_symbol_provider: Some(OneOf::Left(true)),
-                // Global formatting is disabled to prevent accidental content deletion
                 document_formatting_provider: Some(OneOf::Left(false)),
                 execute_command_provider: Some(ExecuteCommandOptions {
                     commands: vec!["knot.cleanProject".to_string()],
@@ -90,12 +108,6 @@ impl LanguageServer for KnotLanguageServer {
         let air_path = self.state.air_path_override.read().await.clone();
         let formatter = formatter::AirFormatter::new(air_path);
         if let Ok(f) = formatter {
-            self.client
-                .log_message(
-                    MessageType::INFO,
-                    format!("Air formatter initialized at: {:?}", f.path()),
-                )
-                .await;
             let mut formatter_guard = self.state.formatter.write().await;
             *formatter_guard = Some(f);
         }
@@ -220,21 +232,62 @@ impl LanguageServer for KnotLanguageServer {
         &self,
         params: ExecuteCommandParams,
     ) -> Result<Option<serde_json::Value>> {
+        self.client
+            .log_message(
+                MessageType::INFO,
+                format!("LSP: Executing command: {}", params.command),
+            )
+            .await;
+
         match params.command.as_str() {
             "knot.cleanProject" => {
                 if let Some(arg) = params.arguments.first() {
-                    if let Some(uri_str) = arg.as_str() {
-                        if let Ok(uri) = Url::parse(uri_str) {
+                    // 1. Try direct string
+                    let mut uri_str = arg.as_str().map(|s| s.to_string());
+
+                    // 2. Try Serde deserialization
+                    if uri_str.is_none() {
+                        if let Ok(vs_uri) = serde_json::from_value::<VsCodeUri>(arg.clone()) {
+                            uri_str = vs_uri.preferred_uri();
+                        }
+                    }
+
+                    if let Some(s) = uri_str {
+                        self.client
+                            .log_message(MessageType::INFO, format!("LSP: Target URI: {}", s))
+                            .await;
+                        // Handle both URI string and raw path
+                        let url = Url::parse(&s).ok().or_else(|| Url::from_file_path(&s).ok());
+
+                        if let Some(uri) = url {
                             if let Ok(path) = uri.to_file_path() {
                                 if let Err(e) = knot_core::clean_project(Some(&path)) {
+                                    self.client
+                                        .log_message(
+                                            MessageType::ERROR,
+                                            format!("LSP: Clean failed: {}", e),
+                                        )
+                                        .await;
                                     return Err(tower_lsp::jsonrpc::Error::invalid_params(
                                         format!("Clean failed: {}", e),
                                     ));
                                 }
+                                self.client
+                                    .log_message(
+                                        MessageType::INFO,
+                                        "LSP: Project cleaned successfully",
+                                    )
+                                    .await;
                                 return Ok(Some(serde_json::json!({"status": "success"})));
                             }
                         }
                     }
+                    self.client
+                        .log_message(
+                            MessageType::WARNING,
+                            "LSP: Could not extract valid path from arguments",
+                        )
+                        .await;
                 }
             }
             _ => {}
@@ -325,7 +378,7 @@ impl KnotLanguageServer {
                 let _ = self.client.log_message(
                     MessageType::ERROR,
                     format!("Failed to send to tinymist: {}", e),
-                );
+                ).await;
             } else if !is_opened {
                 opened_map.insert(uri.clone(), true);
             }
@@ -433,6 +486,11 @@ impl KnotLanguageServer {
 
 #[tokio::main]
 async fn main() {
+    // Initialize logger to stderr (important for LSP stability)
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+        .target(env_logger::Target::Stderr)
+        .init();
+
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 

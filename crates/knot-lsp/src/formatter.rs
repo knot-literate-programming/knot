@@ -49,6 +49,7 @@ impl AirFormatter {
     /// # Returns
     /// * `Ok(formatted_code)` - Successfully formatted code
     /// * `Err(_)` - Formatting failed (syntax error, air not available, etc.)
+    #[allow(dead_code)]
     pub async fn format_r_code(&self, code: &str) -> Result<String> {
         // Create a temporary file for the R code
         let temp_dir = std::env::temp_dir();
@@ -88,6 +89,7 @@ impl AirFormatter {
     }
 
     /// Get the path to the Air executable
+    #[allow(dead_code)]
     pub fn path(&self) -> &PathBuf {
         &self.air_path
     }

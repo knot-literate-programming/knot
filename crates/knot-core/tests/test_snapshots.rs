@@ -1,6 +1,6 @@
 // Integration test for R session snapshots
 
-use knot_core::executors::{LanguageExecutor, r::RExecutor};
+use knot_core::executors::{KnotExecutor, LanguageExecutor, r::RExecutor};
 use tempfile::TempDir;
 
 #[test]
