@@ -52,13 +52,19 @@ pub struct HelpersConfig {
 impl Config {
     /// Find and load configuration by searching for knot.toml in parent directories
     ///
-    /// Starts from `start_dir` and walks up the directory tree until it finds knot.toml.
-    /// This mimics Cargo's behavior for finding Cargo.toml.
+    /// Starts from `start_path` (file or directory) and walks up the directory tree
+    /// until it finds knot.toml. This mimics Cargo's behavior for finding Cargo.toml.
     ///
     /// Returns:
     /// - Ok((config, project_root)) if knot.toml is found
     /// - Ok((default_config, start_dir)) if no knot.toml is found
-    pub fn find_and_load(start_dir: &Path) -> Result<(Self, PathBuf)> {
+    pub fn find_and_load(start_path: &Path) -> Result<(Self, PathBuf)> {
+        let start_dir = if start_path.is_file() {
+            start_path.parent().unwrap_or(start_path)
+        } else {
+            start_path
+        };
+
         let mut current_dir = start_dir.to_path_buf();
 
         loop {
@@ -85,21 +91,11 @@ impl Config {
     /// Find project root starting from any path (file or directory)
     ///
     /// This is a convenience wrapper around `find_and_load()` that automatically
-    /// handles both file and directory paths:
-    /// - If `start_path` is a file, starts searching from its parent directory
-    /// - If `start_path` is a directory, starts searching from that directory
+    /// handles both file and directory paths.
     ///
     /// Returns the project root directory (containing knot.toml)
     pub fn find_project_root(start_path: &Path) -> Result<PathBuf> {
-        let search_dir = if start_path.is_file() {
-            start_path
-                .parent()
-                .ok_or_else(|| anyhow::anyhow!("File path has no parent directory"))?
-        } else {
-            start_path
-        };
-
-        let (_, project_root) = Self::find_and_load(search_dir)?;
+        let (_, project_root) = Self::find_and_load(start_path)?;
         Ok(project_root)
     }
 
@@ -135,6 +131,33 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+
+    #[test]
+    fn test_find_and_load() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let project_root = temp.path().join("project");
+        let sub_dir = project_root.join("sub/dir");
+        fs::create_dir_all(&sub_dir)?;
+
+        let config_path = project_root.join("knot.toml");
+        fs::write(&config_path, "[document]\nmain = \"test.knot\"")?;
+
+        let knot_file = sub_dir.join("file.knot");
+        fs::write(&knot_file, "content")?;
+
+        // Test with directory
+        let (config, root) = Config::find_and_load(&sub_dir)?;
+        assert_eq!(root, project_root);
+        assert_eq!(config.document.main, Some("test.knot".to_string()));
+
+        // Test with file
+        let (config, root) = Config::find_and_load(&knot_file)?;
+        assert_eq!(root, project_root);
+        assert_eq!(config.document.main, Some("test.knot".to_string()));
+
+        Ok(())
+    }
 
     #[test]
     fn test_defaults_section() {
