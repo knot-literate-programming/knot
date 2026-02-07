@@ -142,14 +142,41 @@ export async function activate(context: ExtensionContext) {
         outputChannel.appendLine(`Failed to start Knot LSP client: ${error}`);
     }
 
-    // Register preview command
+    // Register commands
     context.subscriptions.push(
         commands.registerCommand('knot.openPreview', async () => {
             await openPreview(outputChannel);
         })
     );
 
-    // Register clean project command
+    context.subscriptions.push(
+        commands.registerCommand('knot.stopWatch', async () => {
+            const editor = window.activeTextEditor;
+            if (!editor || editor.document.languageId !== 'knot') {
+                return;
+            }
+
+            const knotPath = editor.document.uri.fsPath;
+            const projectRoot = findProjectRoot(path.dirname(knotPath));
+            if (!projectRoot) {
+                window.showErrorMessage('Could not find project root');
+                return;
+            }
+
+            if (watchProcesses.has(projectRoot)) {
+                outputChannel.appendLine(`Stopping knot watch for ${projectRoot}...`);
+                const process = watchProcesses.get(projectRoot);
+                if (process) {
+                    process.kill();
+                    watchProcesses.delete(projectRoot);
+                    window.showInformationMessage(`Knot preview stopped for ${path.basename(projectRoot)}`);
+                }
+            } else {
+                window.showInformationMessage('No active Knot preview running for this project');
+            }
+        })
+    );
+
     context.subscriptions.push(
         commands.registerCommand('knot.cleanProject', async (resource?: Uri) => {
             if (!client) return;
@@ -175,7 +202,9 @@ export async function activate(context: ExtensionContext) {
 
 export async function deactivate(): Promise<void> {
     if (client) { await client.stop(); }
-    for (const [knotPath, process] of watchProcesses) { process.kill(); }
+    for (const [knotPath, process] of watchProcesses) {
+        process.kill();
+    }
     watchProcesses.clear();
 }
 
@@ -186,12 +215,16 @@ async function openPreview(outputChannel: any): Promise<void> {
     const knotPath = editor.document.uri.fsPath;
     const knotDir = path.dirname(knotPath);
     const projectRoot = findProjectRoot(knotDir);
-    if (!projectRoot) { return; }
+    if (!projectRoot) {
+        window.showErrorMessage('Could not find knot.toml in parent directories');
+        return;
+    }
 
     const projectName = path.basename(projectRoot);
     const pdfPath = path.join(projectRoot, `${projectName}.pdf`);
 
     if (!watchProcesses.has(projectRoot)) {
+        outputChannel.appendLine('Starting knot watch...');
         const knotBinary = resolveBinaryPath('knot', outputChannel);
         try {
             const watchProcess = spawn(knotBinary, ['watch'], {
@@ -199,7 +232,7 @@ async function openPreview(outputChannel: any): Promise<void> {
                 stdio: ['ignore', 'pipe', 'pipe']
             });
             watchProcess.stdout?.on('data', (data) => outputChannel.appendLine(`[knot watch] ${data.toString().trim()}`));
-            watchProcess.stderr?.on('data', (data) => outputChannel.appendLine(`[knot watch error] ${data.toString().trim()}`));
+            watchProcess.stderr?.on('data', (data) => outputChannel.appendLine(`[knot watch stderr] ${data.toString().trim()}`));
             watchProcess.on('exit', () => watchProcesses.delete(projectRoot));
             watchProcesses.set(projectRoot, watchProcess);
             await new Promise(resolve => setTimeout(resolve, 1000));
