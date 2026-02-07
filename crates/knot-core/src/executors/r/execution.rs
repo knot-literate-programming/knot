@@ -33,7 +33,6 @@ pub fn execute(
         .context("R process stdin is not available")?;
 
     // Set environment variables in the R process
-    // We must use Sys.setenv() because the child process environment is independent
     let meta_file = escape_path_for_code(channel.path());
     let cache_dir_str = escape_path_for_code(cache_dir);
     writeln!(stdin, "Sys.setenv(KNOT_METADATA_FILE = '{}')", meta_file)?;
@@ -51,7 +50,7 @@ pub fn execute(
 
     let (stdout_output, stderr_output) = process.read_until_boundary()?;
 
-    // Check if stderr contains actual errors (not just warnings/messages)
+    // Check if stderr contains actual errors
     if !stderr_output.trim().is_empty() {
         let stderr_lower = stderr_output.to_lowercase();
         let is_error = stderr_lower.contains("error")
@@ -62,7 +61,6 @@ pub fn execute(
             || stderr_lower.contains("objet") && stderr_lower.contains("introuvable");
 
         if is_error {
-            // Format a cleaner error message
             let code_preview = if code.lines().count() > 5 {
                 let lines: Vec<&str> = code.lines().take(5).collect();
                 format!(
@@ -80,7 +78,6 @@ pub fn execute(
                 stderr_output.trim()
             );
         } else {
-            // Just warnings or informational messages, log them but don't fail
             log::warn!("R stderr (informational): {}", stderr_output.trim());
         }
     }
@@ -92,7 +89,6 @@ pub fn execute(
 
 /// Execute an inline R expression and return formatted result
 pub fn execute_inline(executor: &mut RExecutor, code: &str) -> Result<String> {
-    // For inline expressions, use default graphics options (not used anyway)
     let graphics = GraphicsOptions {
         width: crate::defaults::Defaults::FIG_WIDTH,
         height: crate::defaults::Defaults::FIG_HEIGHT,
@@ -100,33 +96,40 @@ pub fn execute_inline(executor: &mut RExecutor, code: &str) -> Result<String> {
         format: crate::defaults::Defaults::FIG_FORMAT.to_string(),
     };
 
-    // Execute the code and get output
-    let result = executor.execute(code, &graphics)?;
+    // Correctly call trait method
+    let result = LanguageExecutor::execute(executor, code, &graphics)?;
 
-    // Extract text output
     let output = match result {
         ExecutionResult::Text(text) => text,
-        ExecutionResult::DataFrame(_) => {
-            anyhow::bail!(
-                "DataFrames are not supported in inline expressions. Use typst(df) in a chunk instead."
-            )
-        }
-        ExecutionResult::Plot(_) => {
-            anyhow::bail!(
-                "Plots are not supported in inline expressions. Use typst(gg) in a chunk instead."
-            )
-        }
-        ExecutionResult::TextAndPlot { .. } | ExecutionResult::DataFrameAndPlot { .. } => {
-            anyhow::bail!("Complex outputs are not supported in inline expressions.")
-        }
+        _ => anyhow::bail!("Complex outputs are not supported in inline expressions."),
     };
 
     formatters::format_inline_output(&output)
 }
 
+/// Execute lightweight R code and return raw stdout
+pub fn query(process: &mut RProcess, code: &str) -> Result<String> {
+    let stdin = process
+        .stdin
+        .as_mut()
+        .context("R process stdin is not available")?;
+
+    // Write the code, followed by boundary markers
+    writeln!(stdin, "{}", code)?;
+    writeln!(stdin, "cat('{}\\n', file=stdout())", BOUNDARY)?;
+    writeln!(stdin, "cat('{}\\n', file=stderr())", BOUNDARY)?;
+    stdin.flush()?;
+
+    let (stdout_output, stderr_output) = process.read_until_boundary()?;
+
+    if !stderr_output.trim().is_empty() {
+        log::warn!("R query stderr: {}", stderr_output.trim());
+    }
+
+    Ok(stdout_output)
+}
+
 /// Convert side-channel metadata to ExecutionResult
-///
-/// If metadata is empty, uses stdout text as content.
 fn metadata_to_execution_result(
     metadata: Vec<OutputMetadata>,
     stdout_text: &str,
@@ -135,7 +138,6 @@ fn metadata_to_execution_result(
     let mut plot_path: Option<PathBuf> = None;
     let mut dataframe_path: Option<PathBuf> = None;
 
-    // Process metadata from side-channel
     for item in metadata {
         match item {
             OutputMetadata::Text { content } => {
@@ -153,12 +155,10 @@ fn metadata_to_execution_result(
         }
     }
 
-    // If no metadata from side-channel, use stdout text
     if text_content.is_empty() && !stdout_text.trim().is_empty() {
         text_content = stdout_text.to_string();
     }
 
-    // Build ExecutionResult based on what we have
     match (text_content.is_empty(), dataframe_path, plot_path) {
         (false, None, None) => Ok(ExecutionResult::Text(text_content)),
         (_, Some(df), None) => Ok(ExecutionResult::DataFrame(df)),
@@ -173,119 +173,4 @@ fn metadata_to_execution_result(
         }),
         (true, None, None) => Ok(ExecutionResult::Text(String::new())),
     }
-}
-
-/// Save the current R session to a snapshot file
-///
-/// Executes `save.image(file)` to save all objects in the global environment
-/// to a .RData file, and also saves the list of loaded packages to a separate
-/// .rds file. This ensures that when the session is restored, both objects
-/// and packages are available.
-pub fn save_session(process: &mut RProcess, snapshot_file: &Path) -> Result<()> {
-    let stdin = process
-        .stdin
-        .as_mut()
-        .context("R process stdin is not available")?;
-
-    // Convert path to string, escaping backslashes for Windows
-    let path_str = escape_path_for_code(snapshot_file);
-
-    // Derive packages file path (snapshot.RData -> snapshot_packages.rds)
-    let packages_path_buf = snapshot_file.with_extension("");
-    let packages_file = format!("{}_packages.rds", escape_path_for_code(&packages_path_buf));
-
-    // Execute save.image() to save objects
-    writeln!(stdin, "save.image(file = \"{}\")", path_str)?;
-
-    // Also save loaded packages (excluding base packages that are always loaded)
-    writeln!(stdin, "saveRDS(.packages(), \"{}\")", packages_file)?;
-
-    writeln!(stdin, "cat('{}\\n', file=stdout())", BOUNDARY)?;
-    writeln!(stdin, "cat('{}\\n', file=stderr())", BOUNDARY)?;
-    stdin.flush()?;
-
-    // Wait for completion by reading until boundary markers
-    let (_stdout_output, stderr_output) = process.read_until_boundary()?;
-
-    // Check for errors
-    if !stderr_output.trim().is_empty() {
-        anyhow::bail!("Failed to save R session: {}", stderr_output.trim());
-    }
-
-    log::debug!("💾 Saved R session to: {}", snapshot_file.display());
-    log::debug!("📦 Saved loaded packages to: {}", packages_file);
-    Ok(())
-}
-
-/// Load an R session from a snapshot file
-///
-/// First reloads all packages that were loaded when the session was saved,
-/// then executes `load(file, envir = .GlobalEnv)` to restore all objects
-/// from the .RData file. This ensures the complete R environment is restored,
-/// including both packages and objects.
-pub fn load_session(process: &mut RProcess, snapshot_file: &Path) -> Result<()> {
-    let stdin = process
-        .stdin
-        .as_mut()
-        .context("R process stdin is not available")?;
-
-    // Convert path to string, escaping backslashes for Windows
-    let path_str = escape_path_for_code(snapshot_file);
-
-    // Derive packages file path (snapshot.RData -> snapshot_packages.rds)
-    let packages_path_buf = snapshot_file.with_extension("");
-    let packages_file = format!("{}_packages.rds", escape_path_for_code(&packages_path_buf));
-
-    // First, reload packages if the packages file exists
-    writeln!(stdin, "if (file.exists(\"{}\")) {{", packages_file)?;
-    writeln!(stdin, "  pkgs <- readRDS(\"{}\")", packages_file)?;
-    writeln!(
-        stdin,
-        "  invisible(lapply(pkgs, library, character.only = TRUE))"
-    )?;
-    writeln!(stdin, "}}")?;
-
-    // Then load the objects with envir = .GlobalEnv to load into global environment
-    writeln!(stdin, "load(file = \"{}\", envir = .GlobalEnv)", path_str)?;
-
-    writeln!(stdin, "cat('{}\\n', file=stdout())", BOUNDARY)?;
-    writeln!(stdin, "cat('{}\\n', file=stderr())", BOUNDARY)?;
-    stdin.flush()?;
-
-    // Wait for completion by reading until boundary markers
-    let (_stdout_output, stderr_output) = process.read_until_boundary()?;
-
-    // Check for errors
-    if !stderr_output.trim().is_empty() {
-        anyhow::bail!("Failed to load R session: {}", stderr_output.trim());
-    }
-
-    log::debug!("📂 Loaded R session from: {}", snapshot_file.display());
-    Ok(())
-}
-
-/// Execute lightweight R code and return raw stdout
-///
-/// Unlike execute(), this does not use the side-channel and returns the raw output string.
-/// Useful for LSP queries (completion, help) and constant object operations.
-pub fn query(process: &mut RProcess, code: &str) -> Result<String> {
-    let stdin = process
-        .stdin
-        .as_mut()
-        .context("R process stdin is not available")?;
-
-    // Write the code, followed by boundary markers
-    writeln!(stdin, "{}", code)?;
-    writeln!(stdin, "cat('{}\\n', file=stdout())", BOUNDARY)?;
-    writeln!(stdin, "cat('{}\\n', file=stderr())", BOUNDARY)?;
-    stdin.flush()?;
-
-    let (stdout_output, stderr_output) = process.read_until_boundary()?;
-
-    if !stderr_output.trim().is_empty() {
-        // Log warning but don't fail, return what we have
-        log::warn!("R query stderr: {}", stderr_output.trim());
-    }
-
-    Ok(stdout_output)
 }

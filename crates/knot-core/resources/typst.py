@@ -8,6 +8,12 @@ to Typst-compatible output via side-channel communication.
 import os
 import json
 import hashlib
+import pickle
+import types
+import importlib
+import sys
+import pydoc
+import builtins
 from pathlib import Path
 from typing import Any, Optional
 
@@ -286,3 +292,108 @@ def _typst_dataframe(df, index: bool = False, **kwargs):
         print(df)
 
     return df
+
+# --- Session Management ---
+
+def save_session(path):
+    """Saves the current global session including module aliases."""
+    try:
+        state = {'__knot_modules__': {}}
+        for k, v in list(globals().items()):
+            if k.startswith('__') or k in ['save_session', 'load_session', 'pickle', 'types', 'importlib', 'sys', 'os']:
+                continue
+            
+            # Identify modules and their aliases
+            if isinstance(v, types.ModuleType):
+                state['__knot_modules__'][k] = v.__name__
+                continue
+                
+            try:
+                # Only save picklable objects
+                pickle.dumps(v)
+                state[k] = v
+            except:
+                pass
+                
+        with open(path, 'wb') as f:
+            pickle.dump(state, f)
+        return True
+    except Exception as e:
+        print(f"Python Error in save_session: {e}", file=sys.stderr)
+        return False
+
+def load_session(path):
+    """Restores a session including module aliases."""
+    try:
+        if not os.path.exists(path):
+            return False
+            
+        with open(path, 'rb') as f:
+            state = pickle.load(f)
+            
+        # Restore modules first
+        modules = state.pop('__knot_modules__', {})
+        for alias, name in modules.items():
+            try:
+                globals()[alias] = importlib.import_module(name)
+            except Exception as e:
+                print(f"Failed to restore module {alias} ({name}): {e}", file=sys.stderr)
+                
+        # Restore other variables
+        globals().update(state)
+        return True
+    except Exception as e:
+        print(f"Python Error in load_session: {e}", file=sys.stderr)
+        return False
+
+# --- LSP Support ---
+
+def get_hover(topic):
+    """Returns documentation for a given topic/token."""
+    try:
+        # 1. Try to get object from globals
+        obj = globals().get(topic)
+        if obj is None:
+            try:
+                # 2. Try evaluating (for complex names like pd.DataFrame)
+                obj = eval(topic, globals())
+            except:
+                pass
+        
+        # 3. Use pydoc to get documentation
+        if obj is not None:
+            doc = pydoc.getdoc(obj)
+            if not doc:
+                doc = pydoc.render_doc(obj, renderer=pydoc.plaintext)
+            return doc
+        else:
+            # 4. Fallback to pydoc's own resolution
+            return pydoc.render_doc(topic, renderer=pydoc.plaintext)
+    except Exception as e:
+        return f"No help found for '{topic}'"
+
+def get_completions(token):
+    """Returns a list of potential completions for a token."""
+    try:
+        if '.' in token:
+            parts = token.split('.')
+            base_name = parts[0]
+            prefix = parts[-1]
+            
+            # Resolve the base object
+            obj = globals().get(base_name)
+            if obj is not None:
+                for part in parts[1:-1]:
+                    obj = getattr(obj, part, None)
+                    if obj is None: break
+            
+            if obj is not None:
+                # Get attributes starting with prefix
+                return "\n".join([attr for attr in dir(obj) if attr.startswith(prefix) and not attr.startswith('_')])
+        else:
+            # Global completions
+            candidates = list(globals().keys()) + dir(builtins)
+            return "\n".join([c for c in candidates if c.startswith(token) and not c.startswith('_')])
+    except:
+        return ""
+    return ""

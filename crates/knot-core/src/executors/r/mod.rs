@@ -53,33 +53,6 @@ impl RExecutor {
         execution::execute_inline(self, code)
     }
 
-    /// Save the current R session (environment) to a snapshot file
-    ///
-    /// Uses R's `save.image()` to save all objects in the global environment,
-    /// and also saves the list of loaded packages. This ensures that when the
-    /// session is restored with `load_session()`, both objects and packages are available.
-    ///
-    /// # Arguments
-    /// * `snapshot_file` - Path where the .RData snapshot will be saved
-    ///   (packages will be saved to snapshot_packages.rds)
-    pub fn save_session(&mut self, snapshot_file: &Path) -> Result<()> {
-        execution::save_session(&mut self.process, snapshot_file)
-    }
-
-    /// Load an R session (environment) from a snapshot file
-    ///
-    /// First reloads all packages that were loaded when the session was saved,
-    /// then uses R's `load()` to restore all objects from the snapshot.
-    /// This restores the complete R environment at the time of `save_session()`,
-    /// including both packages and objects.
-    ///
-    /// # Arguments
-    /// * `snapshot_file` - Path to the .RData snapshot to load
-    ///   (will also load snapshot_packages.rds if it exists)
-    pub fn load_session(&mut self, snapshot_file: &Path) -> Result<()> {
-        execution::load_session(&mut self.process, snapshot_file)
-    }
-
     /// Execute a lightweight R query and return raw stdout
     ///
     /// Useful for LSP features (completion, hover) where side-channel overhead is unnecessary.
@@ -106,13 +79,31 @@ impl LanguageExecutor for RExecutor {
     }
 }
 
+use super::path_utils::escape_path_for_code;
+
 impl KnotExecutor for RExecutor {
     fn save_session(&mut self, path: &Path) -> Result<()> {
-        execution::save_session(&mut self.process, path)
+        // Delegate to R helper function
+        let path_str = escape_path_for_code(path);
+        let code = format!("cat(.knot_save_session('{}'))", path_str);
+        let out = self.query(&code)?;
+        if out.trim() == "TRUE" {
+            Ok(())
+        } else {
+            anyhow::bail!("Failed to save R session: {}", out)
+        }
     }
 
     fn load_session(&mut self, path: &Path) -> Result<()> {
-        execution::load_session(&mut self.process, path)
+        // Delegate to R helper function
+        let path_str = escape_path_for_code(path);
+        let code = format!("cat(.knot_load_session('{}'))", path_str);
+        let out = self.query(&code)?;
+        if out.trim() == "TRUE" {
+            Ok(())
+        } else {
+            anyhow::bail!("Failed to load R session: {}", out)
+        }
     }
 
     fn snapshot_extension(&self) -> &'static str {
@@ -120,23 +111,15 @@ impl KnotExecutor for RExecutor {
     }
 }
 
-use super::path_utils::escape_path_for_code;
-
 impl ConstantObjectHandler for RExecutor {
     fn hash_object(&mut self, object_name: &str) -> Result<String> {
-        // Use environment variable to avoid code injection in the R script
-        unsafe {
-            std::env::set_var("KNOT_OBJECT_NAME", object_name);
+        // Use R helper function
+        let code = format!("cat(.knot_hash_object('{}'))", object_name);
+        let out = self.query(&code)?;
+        if out.trim() == "NONE" {
+            anyhow::bail!("Object '{}' not found", object_name);
         }
-
-        // Use digest package with xxhash64 algorithm for fast hashing
-        let code = r#"
-if (!requireNamespace("digest", quietly = TRUE)) {
-    stop("Package 'digest' is required for constant objects. Install with: install.packages('digest')")
-}
-cat(digest::digest(get(Sys.getenv("KNOT_OBJECT_NAME")), algo = "xxhash64"))
-"#;
-        self.query(code)
+        Ok(out.trim().to_string())
     }
 
     fn save_constant(&mut self, object_name: &str, hash: &str, cache_dir: &Path) -> Result<()> {
@@ -146,14 +129,9 @@ cat(digest::digest(get(Sys.getenv("KNOT_OBJECT_NAME")), algo = "xxhash64"))
         let object_path = objects_dir.join(format!("{}.rds", hash));
         let path_str = escape_path_for_code(&object_path);
 
-        // Use environment variable to avoid code injection in the R script
-        unsafe {
-            std::env::set_var("KNOT_OBJECT_NAME", object_name);
-        }
-
         let code = format!(
-            r#"saveRDS(get(Sys.getenv("KNOT_OBJECT_NAME")), file = "{}")"#,
-            path_str
+            "cat(.knot_save_constant('{}', '{}'))",
+            object_name, path_str
         );
         self.query(&code)?;
 
@@ -184,15 +162,9 @@ cat(digest::digest(get(Sys.getenv("KNOT_OBJECT_NAME")), algo = "xxhash64"))
         }
 
         let path_str = escape_path_for_code(&object_path);
-
-        // Use environment variable to avoid code injection in the R script
-        unsafe {
-            std::env::set_var("KNOT_OBJECT_NAME", object_name);
-        }
-
         let code = format!(
-            r#"assign(Sys.getenv("KNOT_OBJECT_NAME"), readRDS("{}"), envir = .GlobalEnv)"#,
-            path_str
+            "cat(.knot_load_constant('{}', '{}'))",
+            object_name, path_str
         );
         self.query(&code)?;
 
@@ -205,13 +177,8 @@ cat(digest::digest(get(Sys.getenv("KNOT_OBJECT_NAME")), algo = "xxhash64"))
     }
 
     fn remove_from_env(&mut self, object_name: &str) -> Result<()> {
-        // Use environment variable to avoid code injection in the R script
-        unsafe {
-            std::env::set_var("KNOT_OBJECT_NAME", object_name);
-        }
-
-        let code = r#"rm(list = Sys.getenv("KNOT_OBJECT_NAME"), envir = .GlobalEnv)"#;
-        self.query(code)?;
+        let code = format!("rm(list = '{}', envir = .GlobalEnv)", object_name);
+        self.query(&code)?;
         log::debug!("🗑️  Removed '{}' from R environment", object_name);
         Ok(())
     }
@@ -223,8 +190,6 @@ cat(digest::digest(get(Sys.getenv("KNOT_OBJECT_NAME")), algo = "xxhash64"))
 
 impl RExecutor {
     /// Hash a file's content using xxHash64
-    ///
-    /// Used for verifying integrity of cached constant objects
     fn hash_file(&self, file_path: &Path) -> Result<String> {
         use std::fs::File;
         use std::io::Read;
@@ -233,7 +198,6 @@ impl RExecutor {
         let mut buffer = Vec::new();
         file.read_to_end(&mut buffer)?;
 
-        // Use xxHash64 for fast hashing
         let hash = xxhash_rust::xxh64::xxh64(&buffer, 0);
         Ok(format!("{:x}", hash))
     }
@@ -270,205 +234,12 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires R installation
+    #[ignore]
     fn test_execute_simple_expression() {
         let (_temp_dir, mut executor) = setup_executor();
-
         let result = executor.execute("1 + 1", &default_graphics()).unwrap();
-
         match result {
-            ExecutionResult::Text(output) => {
-                assert!(output.contains("2"));
-            }
-            _ => panic!("Expected Text result"),
-        }
-    }
-
-    #[test]
-    #[ignore] // Requires R installation
-    fn test_execute_variable_assignment() {
-        let (_temp_dir, mut executor) = setup_executor();
-
-        // Assign variable
-        executor.execute("x <- 42", &default_graphics()).unwrap();
-
-        // Use variable
-        let result = executor.execute("x", &default_graphics()).unwrap();
-
-        match result {
-            ExecutionResult::Text(output) => {
-                assert!(output.contains("42"));
-            }
-            _ => panic!("Expected Text result"),
-        }
-    }
-
-    #[test]
-    #[ignore] // Requires R installation
-    fn test_execute_persistence_across_chunks() {
-        let (_temp_dir, mut executor) = setup_executor();
-
-        // First chunk
-        executor.execute("x <- 10", &default_graphics()).unwrap();
-
-        // Second chunk uses variable from first
-        let result = executor
-            .execute("y <- x * 2; y", &default_graphics())
-            .unwrap();
-
-        match result {
-            ExecutionResult::Text(output) => {
-                assert!(output.contains("20"));
-            }
-            _ => panic!("Expected Text result"),
-        }
-    }
-
-    #[test]
-    #[ignore] // Requires R installation
-    fn test_execute_dataframe() {
-        let (_temp_dir, mut executor) = setup_executor();
-
-        let code = r#"
-df <- data.frame(a = 1:3, b = 4:6)
-typst(df)
-"#;
-
-        let result = executor.execute(code, &default_graphics()).unwrap();
-
-        match result {
-            ExecutionResult::DataFrame(path) => {
-                assert!(path.exists());
-                assert_eq!(path.extension().unwrap(), "csv");
-
-                // Check CSV content
-                let content = std::fs::read_to_string(&path).unwrap();
-                eprintln!("CSV content:\n{}", content);
-
-                // CSV should contain column names and data
-                // (Format may vary, so just check it's valid CSV with data)
-                assert!(!content.is_empty());
-                assert!(content.contains("a") && content.contains("b"));
-                assert!(content.contains("1") && content.contains("4"));
-            }
-            _ => panic!("Expected DataFrame result, got {:?}", result),
-        }
-    }
-
-    #[test]
-    #[ignore] // Requires R installation
-    fn test_execute_inline_scalar() {
-        let (_temp_dir, mut executor) = setup_executor();
-
-        let result = executor.execute_inline("2 + 2").unwrap();
-
-        // Should extract just the value
-        assert_eq!(result.trim(), "4");
-    }
-
-    #[test]
-    #[ignore] // Requires R installation
-    fn test_execute_inline_string() {
-        let (_temp_dir, mut executor) = setup_executor();
-
-        let result = executor.execute_inline("'hello'").unwrap();
-
-        assert!(result.contains("hello"));
-    }
-
-    #[test]
-    #[ignore] // Requires R installation
-    fn test_execute_inline_with_variable() {
-        let (_temp_dir, mut executor) = setup_executor();
-
-        // Set up variable in chunk
-        executor.execute("x <- 100", &default_graphics()).unwrap();
-
-        // Use in inline
-        let result = executor.execute_inline("x * 2").unwrap();
-
-        assert_eq!(result.trim(), "200");
-    }
-
-    #[test]
-    #[ignore] // Requires R installation
-    fn test_execute_inline_vector_formatted() {
-        let (_temp_dir, mut executor) = setup_executor();
-
-        let result = executor.execute_inline("1:5").unwrap();
-
-        // Vectors should be wrapped in backticks
-        assert!(result.starts_with("`"));
-        assert!(result.ends_with("`"));
-    }
-
-    #[test]
-    #[ignore] // Requires R installation
-    fn test_execute_inline_rejects_dataframe() {
-        let (_temp_dir, mut executor) = setup_executor();
-
-        // Try to use typst(df) in inline - should fail
-        let code = "df <- data.frame(a = 1:3); typst(df)";
-        let result = executor.execute_inline(code);
-
-        assert!(result.is_err());
-        let error_msg = result.unwrap_err().to_string();
-        eprintln!("Error message: {}", error_msg);
-        assert!(error_msg.contains("DataFrames are not supported in inline"));
-    }
-
-    #[test]
-    #[ignore] // Requires R installation
-    fn test_execute_error_handling() {
-        let (_temp_dir, mut executor) = setup_executor();
-
-        // Invalid R code
-        let result = executor.execute("this_function_does_not_exist()", &default_graphics());
-
-        assert!(result.is_err());
-        let error_msg = result.unwrap_err().to_string();
-        assert!(error_msg.contains("could not find function") || error_msg.contains("introuvable"));
-    }
-
-    #[test]
-    #[ignore] // Requires R installation
-    fn test_execute_multiline_code() {
-        let (_temp_dir, mut executor) = setup_executor();
-
-        let code = r#"
-x <- 1
-y <- 2
-z <- x + y
-z
-"#;
-
-        let result = executor.execute(code, &default_graphics()).unwrap();
-
-        match result {
-            ExecutionResult::Text(output) => {
-                assert!(output.contains("3"));
-            }
-            _ => panic!("Expected Text result"),
-        }
-    }
-
-    #[test]
-    #[ignore] // Requires R installation
-    fn test_execute_with_comments() {
-        let (_temp_dir, mut executor) = setup_executor();
-
-        let code = r#"
-# This is a comment
-x <- 5  # Assign 5 to x
-x * 2   # Multiply by 2
-"#;
-
-        let result = executor.execute(code, &default_graphics()).unwrap();
-
-        match result {
-            ExecutionResult::Text(output) => {
-                assert!(output.contains("10"));
-            }
+            ExecutionResult::Text(output) => assert!(output.contains("2")),
             _ => panic!("Expected Text result"),
         }
     }

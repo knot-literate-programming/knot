@@ -29,8 +29,8 @@ pub struct ServerState {
     pub tinymist_path_override: Arc<RwLock<Option<PathBuf>>>,
     /// The proxy to the tinymist LSP subprocess
     pub tinymist: Arc<RwLock<Option<TinymistProxy>>>,
-    /// Track the last loaded snapshot hash per document (for smart reloading with knot watch)
-    pub loaded_snapshot_hash: Arc<RwLock<HashMap<Url, String>>>,
+    /// Track the last loaded snapshot hash per document+language (key is "uri::lang")
+    pub loaded_snapshot_hash: Arc<RwLock<HashMap<String, String>>>,
 }
 
 impl ServerState {

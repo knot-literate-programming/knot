@@ -132,7 +132,10 @@ fn parse_chunk_internal<'i>(input: &mut Input<'i>) -> ModalResult<(Chunk, &'i st
         Some(name_str.trim().to_string())
     };
 
+    log::debug!("Parsed chunk header: lang='{}', name='{:?}'", lang, name);
+
     let _ = "}".parse_next(input)?;
+    let _ = space0.parse_next(input)?;
     let _ = line_ending.parse_next(input)?;
 
     // Options

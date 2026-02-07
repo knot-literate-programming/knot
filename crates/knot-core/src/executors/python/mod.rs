@@ -112,7 +112,12 @@ impl LanguageExecutor for PythonExecutor {
              os.environ['KNOT_FIG_HEIGHT'] = '{}'\n\
              os.environ['KNOT_FIG_DPI'] = '{}'\n\
              os.environ['KNOT_FIG_FORMAT'] = '{}'",
-            meta_file, cache_dir_str, graphics.width, graphics.height, graphics.dpi, graphics.format
+            meta_file,
+            cache_dir_str,
+            graphics.width,
+            graphics.height,
+            graphics.dpi,
+            graphics.format
         );
 
         self.process.execute_code(&setup_code)?;
@@ -240,38 +245,24 @@ use super::path_utils::escape_path_for_code;
 impl KnotExecutor for PythonExecutor {
     fn save_session(&mut self, path: &Path) -> Result<()> {
         let path_str = escape_path_for_code(path);
-        let code = format!(
-            "import pickle\n\
-             import types\n\
-             state = {{}}\n\
-             for k, v in list(globals().items()):\n    \
-                 if k.startswith('__') or isinstance(v, types.ModuleType):\n        \
-                     continue\n    \
-                 try:\n        \
-                     # Test if picklable\n        \
-                     pickle.dumps(v)\n        \
-                     state[k] = v\n    \
-                 except:\n        \
-                     pass\n\
-             with open('{}', 'wb') as f:\n    \
-                 pickle.dump(state, f)",
-            path_str
-        );
-        self.query(&code)?;
-        Ok(())
+        let code = format!("print(save_session('{}'))", path_str);
+        let out = self.query(&code)?;
+        if out.trim() == "True" {
+            Ok(())
+        } else {
+            anyhow::bail!("Failed to save python session snapshot: {}", out)
+        }
     }
 
     fn load_session(&mut self, path: &Path) -> Result<()> {
         let path_str = escape_path_for_code(path);
-        let code = format!(
-            "import pickle\n\
-             with open('{}', 'rb') as f:\n    \
-                 state = pickle.load(f)\n    \
-                 globals().update(state)",
-            path_str
-        );
-        self.query(&code)?;
-        Ok(())
+        let code = format!("print(load_session('{}'))", path_str);
+        let out = self.query(&code)?;
+        if out.trim() == "True" {
+            Ok(())
+        } else {
+            anyhow::bail!("Failed to load python session snapshot: {}", out)
+        }
     }
 
     fn snapshot_extension(&self) -> &'static str {
@@ -287,22 +278,34 @@ impl ConstantObjectHandler for PythonExecutor {
         }
 
         let code = r#"
+import os
+import pickle
+import hashlib
 try:
     import xxhash
+    obj = globals().get(os.environ["KNOT_OBJECT_NAME"])
+    if obj is None:
+        print('NONE')
+    else:
+        h = xxhash.xxh64(pickle.dumps(obj)).hexdigest()
+        print(h)
 except ImportError:
-    raise ImportError('Package xxhash is required for constant objects. Install with: pip install xxhash')
-import pickle
-import os
-obj = globals().get(os.environ["KNOT_OBJECT_NAME"])
-if obj is None:
-    print('NONE')
-else:
-    h = xxhash.xxh64(pickle.dumps(obj)).hexdigest()
-    print(h)
+    # Use fallback if xxhash is missing
+    obj = globals().get(os.environ["KNOT_OBJECT_NAME"])
+    if obj is None:
+        print('NONE')
+    else:
+        h = hashlib.sha256(pickle.dumps(obj)).hexdigest()
+        print(h)
+except Exception as e:
+    print(f'ERROR: {e}')
 "#;
         let out = self.query(code)?;
         if out.trim() == "NONE" {
             anyhow::bail!("Object not found");
+        }
+        if out.trim().starts_with("ERROR:") {
+            anyhow::bail!("Python error during hashing: {}", out.trim());
         }
         Ok(out.trim().to_string())
     }
@@ -311,16 +314,17 @@ else:
         let obj_path = cache_dir.join("objects").join(format!("{}.pkl", hash));
         let path_str = escape_path_for_code(&obj_path);
 
-        // Use environment variable to avoid code injection in the Python script
         unsafe {
             std::env::set_var("KNOT_OBJECT_NAME", object_name);
         }
 
         let code = format!(
-            "import pickle\n\
-             import os\n\
-             with open('{}', 'wb') as f:\n    \
-                 pickle.dump(globals()[os.environ['KNOT_OBJECT_NAME']], f)",
+            r#"
+import pickle
+import os
+with open('{}', 'wb') as f:
+    pickle.dump(globals()[os.environ['KNOT_OBJECT_NAME']], f)
+"#,
             path_str
         );
         self.query(&code)?;
@@ -331,16 +335,17 @@ else:
         let obj_path = cache_dir.join("objects").join(format!("{}.pkl", hash));
         let path_str = escape_path_for_code(&obj_path);
 
-        // Use environment variable to avoid code injection in the Python script
         unsafe {
             std::env::set_var("KNOT_OBJECT_NAME", object_name);
         }
 
         let code = format!(
-            "import pickle\n\
-             import os\n\
-             with open('{}', 'rb') as f:\n    \
-                 globals()[os.environ['KNOT_OBJECT_NAME']] = pickle.load(f)",
+            r#"
+import pickle
+import os
+with open('{}', 'rb') as f:
+    globals()[os.environ['KNOT_OBJECT_NAME']] = pickle.load(f)
+"#,
             path_str
         );
         self.query(&code)?;
@@ -348,7 +353,6 @@ else:
     }
 
     fn remove_from_env(&mut self, object_name: &str) -> Result<()> {
-        // Use environment variable to avoid code injection in the Python script
         unsafe {
             std::env::set_var("KNOT_OBJECT_NAME", object_name);
         }
@@ -438,34 +442,25 @@ mod tests {
             )
             .unwrap();
 
-        // Try to hash, expecting it to succeed or fail due to missing xxhash
         let result = executor.hash_object("y");
+        assert!(result.is_ok());
+        let hash1 = result.unwrap();
+        assert!(!hash1.is_empty());
 
-        if let Err(e) = result {
-            // If xxhash is not installed, the error message from Python should contain it
-            assert!(e.to_string().contains("xxhash is required"));
-            eprintln!(
-                "Skipping further assertions for test_python_hash_object because xxhash is not installed in Python environment. Install with `pip install xxhash` to run full test."
-            );
-        } else {
-            let hash1 = result.unwrap();
-            assert!(!hash1.is_empty());
+        executor
+            .execute(
+                "y.append(4)",
+                &GraphicsOptions {
+                    width: 0.0,
+                    height: 0.0,
+                    dpi: 0,
+                    format: String::new(),
+                },
+            )
+            .unwrap();
 
-            executor
-                .execute(
-                    "y.append(4)",
-                    &GraphicsOptions {
-                        width: 0.0,
-                        height: 0.0,
-                        dpi: 0,
-                        format: String::new(),
-                    },
-                )
-                .unwrap();
-
-            let hash2 = executor.hash_object("y").unwrap();
-            assert_ne!(hash1, hash2);
-        }
+        let hash2 = executor.hash_object("y").unwrap();
+        assert_ne!(hash1, hash2);
     }
 
     #[test]

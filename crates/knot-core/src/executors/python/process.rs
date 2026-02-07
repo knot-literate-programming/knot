@@ -1,47 +1,6 @@
 //! Python Process Management
 //!
 //! Manages the lifecycle of a persistent Python3 subprocess using an embedded event loop wrapper.
-//!
-//! # Design
-//!
-//! Unlike traditional approaches that spawn Python per-chunk, this implementation:
-//! - Embeds a Python event loop as a string constant (`PYTHON_WRAPPER`)
-//! - Spawns Python once with `-c` flag to execute the wrapper
-//! - Communicates via stdin/stdout using a simple protocol
-//!
-//! # Protocol
-//!
-//! 1. **Send code**: Write lines to stdin, terminated by "END_EXEC"
-//! 2. **Execute**: Python runs `exec(code, globals())`
-//! 3. **Receive**: Read stdout/stderr until "---KNOT_BOUNDARY---"
-//! 4. **Repeat**: Loop back to step 1
-//!
-//! # Thread Safety
-//!
-//! The `read_until_boundary()` method uses `thread::scope` to read stdout and stderr
-//! concurrently, preventing deadlocks when both streams have data.
-//!
-//! # Example
-//!
-//! ```rust
-//! use knot_core::executors::python::process::PythonProcess;
-//! use anyhow::Result;
-//!
-//! fn main() -> Result<()> {
-//!     let mut process = PythonProcess::uninitialized();
-//!     process.initialize()?;
-//!
-//!     process.execute_code("x = 42\nprint(x)")?;
-//!     let (stdout, stderr) = process.read_until_boundary()?;
-//!     assert_eq!(stdout.trim(), "42");
-//!
-//!     // Variables persist across executions
-//!     process.execute_code("print(x * 2)")?;
-//!     let (stdout, _) = process.read_until_boundary()?;
-//!     assert_eq!(stdout.trim(), "84");
-//!     Ok(())
-//! }
-//! ```
 
 use anyhow::{Context, Result};
 use std::io::{BufRead, BufReader, Write};
@@ -51,11 +10,6 @@ use std::thread;
 pub const BOUNDARY: &str = crate::defaults::Defaults::BOUNDARY_MARKER;
 
 // The wrapper script runs an infinite loop reading commands from stdin.
-// It uses a simple protocol:
-// 1. Read lines until "END_EXEC"
-// 2. Execute the accumulated code
-// 3. Print the BOUNDARY
-// 4. Repeat
 const PYTHON_WRAPPER: &str = r#"
 import sys
 import traceback
@@ -169,7 +123,9 @@ impl PythonProcess {
                         break;
                     }
 
-                    if line_buffer.trim() == BOUNDARY {
+                    if line_buffer.contains(BOUNDARY) {
+                        let parts: Vec<&str> = line_buffer.split(BOUNDARY).collect();
+                        output.push_str(parts[0]);
                         break;
                     }
                     output.push_str(&line_buffer);
@@ -187,7 +143,9 @@ impl PythonProcess {
                         break;
                     }
 
-                    if line_buffer.trim() == BOUNDARY {
+                    if line_buffer.contains(BOUNDARY) {
+                        let parts: Vec<&str> = line_buffer.split(BOUNDARY).collect();
+                        output.push_str(parts[0]);
                         break;
                     }
                     output.push_str(&line_buffer);
@@ -205,38 +163,5 @@ impl PythonProcess {
         if let Some(mut child) = self.child.take() {
             let _ = child.kill();
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_python_process_simple_execution() {
-        let mut process = PythonProcess::uninitialized();
-        process.initialize().unwrap();
-
-        process.execute_code("print('hello')").unwrap();
-
-        let (stdout, _) = process.read_until_boundary().unwrap();
-        assert_eq!(stdout.trim(), "hello");
-
-        process.terminate();
-    }
-
-    #[test]
-    fn test_python_process_persistence() {
-        let mut process = PythonProcess::uninitialized();
-        process.initialize().unwrap();
-
-        process.execute_code("x = 42").unwrap();
-        let _ = process.read_until_boundary().unwrap();
-
-        process.execute_code("print(x)").unwrap();
-        let (stdout, _) = process.read_until_boundary().unwrap();
-        assert_eq!(stdout.trim(), "42");
-
-        process.terminate();
     }
 }

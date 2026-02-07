@@ -1,11 +1,11 @@
-// Knot Language Server Protocol Implementation
-//
-// Provides IDE support for .knot files including:
-// - Diagnostics (parsing errors, invalid options)
-// - Document symbols (chunk listing)
-// - Hover information (chunk metadata)
-// - Completion (chunk options and names)
-// - R code formatting with Air
+use knot_core::cache::Cache;
+use knot_core::config::Config;
+use knot_core::get_cache_dir;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use tower_lsp::jsonrpc::Result;
+use tower_lsp::lsp_types::*;
+use tower_lsp::{Client, LanguageServer, LspService, Server};
 
 mod diagnostics;
 mod formatter;
@@ -17,20 +17,15 @@ mod state;
 mod symbols;
 mod transform;
 
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use tokio::sync::RwLock;
-use tower_lsp::jsonrpc::Result;
-use tower_lsp::lsp_types::*;
-use tower_lsp::{Client, LanguageServer, LspService, Server};
-
-use formatter::AirFormatter;
-use knot_core::executors::ExecutorManager;
+use diagnostics::get_diagnostics;
+use handlers::completion::handle_completion;
+use handlers::formatting::handle_formatting;
+use handlers::hover::handle_hover;
 use position_mapper::PositionMapper;
 use proxy::TinymistProxy;
 use state::ServerState;
+use symbols::get_document_symbols;
 use transform::transform_to_typst;
-// Traits used for dynamic dispatch // Ensure traits are imported
 
 struct KnotLanguageServer {
     client: Client,
@@ -41,123 +36,51 @@ struct KnotLanguageServer {
 #[tower_lsp::async_trait]
 impl LanguageServer for KnotLanguageServer {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
-        if let Some(uri) = params.root_uri {
-            *self.root_uri.write().await = Some(uri);
-        } else if let Some(folders) = params.workspace_folders {
-            if let Some(first) = folders.first() {
-                *self.root_uri.write().await = Some(first.uri.clone());
+        if let Some(folders) = params.workspace_folders {
+            if !folders.is_empty() {
+                let mut root = self.root_uri.write().await;
+                *root = Some(folders[0].uri.clone());
             }
         }
 
-        // Handle initialization options
         if let Some(options) = params.initialization_options {
             if let Some(air_path) = options.get("airPath").and_then(|v| v.as_str()) {
-                *self.state.air_path_override.write().await = Some(PathBuf::from(air_path));
+                let mut p = self.state.air_path_override.write().await;
+                *p = Some(air_path.into());
             }
             if let Some(tinymist_path) = options.get("tinymistPath").and_then(|v| v.as_str()) {
-                *self.state.tinymist_path_override.write().await =
-                    Some(PathBuf::from(tinymist_path));
+                let mut p = self.state.tinymist_path_override.write().await;
+                *p = Some(tinymist_path.into());
             }
         }
 
         Ok(InitializeResult {
-            server_info: Some(ServerInfo {
-                name: "knot-lsp".to_string(),
-                version: Some(env!("CARGO_PKG_VERSION").to_string()),
-            }),
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
                     TextDocumentSyncKind::FULL,
                 )),
-                diagnostic_provider: Some(DiagnosticServerCapabilities::Options(
-                    DiagnosticOptions {
-                        identifier: Some("knot".to_string()),
-                        inter_file_dependencies: false,
-                        workspace_diagnostics: false,
-                        work_done_progress_options: WorkDoneProgressOptions::default(),
-                    },
-                )),
-                document_symbol_provider: Some(OneOf::Left(true)),
-                hover_provider: Some(HoverProviderCapability::Simple(true)),
                 completion_provider: Some(CompletionOptions {
+                    resolve_provider: Some(false),
                     trigger_characters: Some(vec![
-                        "#".to_string(),
-                        "|".to_string(),
+                        ".".to_string(),
+                        "$".to_string(),
                         ":".to_string(),
-                        "$".to_string(), // Trigger completion for df$ (R column names)
-                        ".".to_string(), // Trigger completion for obj. (Python/R attributes)
                     ]),
                     ..Default::default()
                 }),
-                document_formatting_provider: Some(OneOf::Left(true)),
+                hover_provider: Some(HoverProviderCapability::Simple(true)),
+                document_symbol_provider: Some(OneOf::Left(true)),
+                // Disabling global formatting provider to avoid "Format on Type" etc.
+                // We will handle formatting via a custom command triggered on save by the extension.
+                document_formatting_provider: Some(OneOf::Left(false)),
                 execute_command_provider: Some(ExecuteCommandOptions {
-                    commands: vec!["knot.cleanProject".to_string()],
+                    commands: vec!["knot.cleanProject".to_string(), "knot.format".to_string()],
                     ..Default::default()
                 }),
                 ..Default::default()
             },
+            ..Default::default()
         })
-    }
-
-    async fn execute_command(
-        &self,
-        params: ExecuteCommandParams,
-    ) -> Result<Option<serde_json::Value>> {
-        if params.command == "knot.cleanProject" {
-            // Get the file/directory path from arguments if present
-            // clean_project() will automatically handle both files and directories
-            let start_path = if let Some(first) = params.arguments.first() {
-                if let Some(uri_str) = first.as_str() {
-                    if let Ok(uri) = Url::parse(uri_str) {
-                        uri.to_file_path().ok()
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-
-            // Fallback to workspace root if no file argument
-            let root_path = if start_path.is_some() {
-                start_path
-            } else {
-                let guard = self.root_uri.read().await;
-                guard.as_ref().and_then(|uri| uri.to_file_path().ok())
-            };
-
-            if let Some(path) = &root_path {
-                self.client
-                    .log_message(
-                        MessageType::INFO,
-                        format!("LSP: Cleaning project starting from {:?}", path),
-                    )
-                    .await;
-            } else {
-                self.client
-                    .log_message(MessageType::INFO, "LSP: Cleaning project (unknown root)")
-                    .await;
-            }
-
-            match knot_core::clean_project(root_path.as_deref()) {
-                Ok(_) => {
-                    self.client
-                        .show_message(MessageType::INFO, "Project cleaned successfully!")
-                        .await;
-                }
-                Err(e) => {
-                    self.client
-                        .show_message(
-                            MessageType::ERROR,
-                            format!("Failed to clean project: {}", e),
-                        )
-                        .await;
-                }
-            }
-        }
-        Ok(None)
     }
 
     async fn initialized(&self, _: InitializedParams) {
@@ -165,100 +88,34 @@ impl LanguageServer for KnotLanguageServer {
             .log_message(MessageType::INFO, "Knot LSP server initialized")
             .await;
 
-        let root_uri = self.root_uri.read().await.clone();
-        let tinymist_override = self.state.tinymist_path_override.read().await.clone();
-        let air_override = self.state.air_path_override.read().await.clone();
-
-        // Initialize Air formatter if not already done (with possible override)
-        match AirFormatter::new(air_override) {
-            Ok(f) => {
-                self.client
-                    .log_message(
-                        MessageType::INFO,
-                        format!("Air formatter initialized at: {:?}", f.path()),
-                    )
-                    .await;
-                *self.state.formatter.write().await = Some(f);
-            }
-            Err(e) => {
-                self.client
-                    .log_message(
-                        MessageType::WARNING,
-                        format!("Air formatter not available: {}", e),
-                    )
-                    .await;
-            }
+        let air_path = self.state.air_path_override.read().await.clone();
+        let formatter = formatter::AirFormatter::new(air_path);
+        if let Ok(f) = formatter {
+            self.client
+                .log_message(
+                    MessageType::INFO,
+                    format!("Air formatter initialized at: {:?}", f.path()),
+                )
+                .await;
+            let mut formatter_guard = self.state.formatter.write().await;
+            *formatter_guard = Some(f);
         }
 
-        // Try to spawn tinymist subprocess
-        match TinymistProxy::spawn(root_uri, tinymist_override).await {
-            Ok((proxy, mut notification_rx)) => {
+        let tinymist_path = self.state.tinymist_path_override.read().await.clone();
+        let root_uri = self.root_uri.read().await.clone();
+        match TinymistProxy::spawn(root_uri, tinymist_path).await {
+            Ok((proxy, _notification_rx)) => {
+                let mut tinymist_guard = self.state.tinymist.write().await;
+                *tinymist_guard = Some(proxy);
                 self.client
                     .log_message(MessageType::INFO, "Tinymist proxy spawned successfully")
                     .await;
-                *self.state.tinymist.write().await = Some(proxy);
-
-                // Spawn a task to handle notifications from tinymist
-                let client = self.client.clone();
-                let mappers = self.state.mappers.clone();
-                let knot_diagnostics_cache = self.state.knot_diagnostics_cache.clone();
-
-                tokio::spawn(async move {
-                    while let Some(msg) = notification_rx.recv().await {
-                        if let Some(method) = msg.get("method").and_then(|m| m.as_str()) {
-                            if method == "textDocument/publishDiagnostics" {
-                                if let Some(params) = msg.get("params") {
-                                    if let Ok(diag_params) =
-                                        serde_json::from_value::<PublishDiagnosticsParams>(
-                                            params.clone(),
-                                        )
-                                    {
-                                        // Retrieve mapper and knot diagnostics
-                                        let uri = diag_params.uri.clone();
-
-                                        // Get cached knot diagnostics
-                                        let mut merged_diagnostics = {
-                                            let cache = knot_diagnostics_cache.read().await;
-                                            cache.get(&uri).cloned().unwrap_or_default()
-                                        };
-
-                                        // Map tinymist diagnostics
-                                        if let Some(mapper) = mappers.read().await.get(&uri) {
-                                            for mut diag in diag_params.diagnostics {
-                                                if let Some(start) =
-                                                    mapper.typ_to_knot_position(diag.range.start)
-                                                {
-                                                    if let Some(end) =
-                                                        mapper.typ_to_knot_position(diag.range.end)
-                                                    {
-                                                        diag.range.start = start;
-                                                        diag.range.end = end;
-                                                        diag.source = Some("typst".to_string());
-                                                        merged_diagnostics.push(diag);
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        // Publish merged diagnostics
-                                        client
-                                            .publish_diagnostics(uri, merged_diagnostics, None)
-                                            .await;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                });
             }
             Err(e) => {
                 self.client
                     .log_message(
-                        MessageType::WARNING,
-                        format!(
-                            "Failed to spawn tinymist: {}. Typst features will be limited.",
-                            e
-                        ),
+                        MessageType::ERROR,
+                        format!("Failed to spawn tinymist: {}", e),
                     )
                     .await;
             }
@@ -266,225 +123,243 @@ impl LanguageServer for KnotLanguageServer {
     }
 
     async fn shutdown(&self) -> Result<()> {
-        // Shutdown tinymist if it's running
-        if let Some(mut proxy) = self.state.tinymist.write().await.take() {
+        let mut tinymist_guard = self.state.tinymist.write().await;
+        if let Some(proxy) = tinymist_guard.as_mut() {
             let _ = proxy.shutdown().await;
         }
         Ok(())
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        let uri = params.text_document.uri.clone();
-        let text = params.text_document.text.clone();
+        let uri = params.text_document.uri;
+        let text = params.text_document.text;
 
-        // Store document text
-        self.state
-            .documents
-            .write()
-            .await
-            .insert(uri.clone(), text.clone());
+        {
+            let mut docs = self.state.documents.write().await;
+            docs.insert(uri.clone(), text.clone());
+        }
 
-        // Initialize ExecutorManager for this document
+        self.update_mapper(&uri, &text).await;
+        self.publish_diagnostics(&uri, &text).await;
+
         {
             let mut managers = self.state.executors.write().await;
             if !managers.contains_key(&uri) {
-                // Create a temp dir for this LSP session
-                let temp_dir =
-                    std::env::temp_dir().join(format!("knot_lsp_{}", uuid::Uuid::new_v4()));
-
-                // Initialize ExecutorManager
-                // Helper scripts are embedded in the binary and loaded automatically
-                let manager = ExecutorManager::new(temp_dir);
-                managers.insert(uri.clone(), manager);
-                self.client
-                    .log_message(
-                        MessageType::INFO,
-                        "Initialized executor manager for document",
-                    )
-                    .await;
+                let path = uri.to_file_path().unwrap_or_default();
+                if let Ok(project_root) = Config::find_project_root(&path) {
+                    let file_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("main");
+                    let cache_dir = get_cache_dir(&project_root, file_stem);
+                    managers.insert(
+                        uri.clone(),
+                        knot_core::executors::ExecutorManager::new(cache_dir),
+                    );
+                }
             }
         }
 
-        // Sync with cache to restore previous session state (only on open, not on every change)
         self.sync_with_cache(&uri).await;
-
-        // Trigger diagnostics on file open
-        self.on_change(uri, text).await;
+        self.forward_to_tinymist("textDocument/didOpen", &uri).await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        // Get the full document text from the first change (FULL sync mode)
-        if let Some(change) = params.content_changes.first() {
-            let uri = params.text_document.uri.clone();
-            let text = change.text.clone();
-
-            // Update stored document text
-            self.state
-                .documents
-                .write()
-                .await
-                .insert(uri.clone(), text.clone());
-
-            self.on_change(uri, text).await;
-        }
-    }
-
-    async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri;
-        self.state.documents.write().await.remove(&uri);
-        self.state.mappers.write().await.remove(&uri);
-
-        // Remove and drop executors (terminates processes)
-        if let Some(_manager) = self.state.executors.write().await.remove(&uri) {
-            self.client
-                .log_message(MessageType::INFO, "Closed execution session for document")
+        if let Some(change) = params.content_changes.first() {
+            let text = change.text.clone();
+            {
+                let mut docs = self.state.documents.write().await;
+                docs.insert(uri.clone(), text.clone());
+            }
+            self.update_mapper(&uri, &text).await;
+            self.publish_diagnostics(&uri, &text).await;
+            self.forward_to_tinymist("textDocument/didChange", &uri)
                 .await;
         }
     }
 
-    async fn diagnostic(
-        &self,
-        _params: DocumentDiagnosticParams,
-    ) -> Result<DocumentDiagnosticReportResult> {
-        // We handle diagnostics via push (publishDiagnostics)
-        Ok(DocumentDiagnosticReportResult::Report(
-            DocumentDiagnosticReport::Full(RelatedFullDocumentDiagnosticReport {
-                related_documents: None,
-                full_document_diagnostic_report: FullDocumentDiagnosticReport {
-                    result_id: None,
-                    items: vec![],
-                },
-            }),
-        ))
+    async fn did_save(&self, params: DidSaveTextDocumentParams) {
+        let uri = params.text_document.uri;
+        let this = self.clone_for_task();
+        let uri_clone = uri.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            this.sync_with_cache(&uri_clone).await;
+        });
+
+        self.forward_to_tinymist("textDocument/didSave", &uri).await;
+    }
+
+    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        handle_completion(&self.state, params).await
+    }
+
+    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        handle_hover(&self.state, params).await
+    }
+
+    async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
+        handle_formatting(&self.state, params).await
     }
 
     async fn document_symbol(
         &self,
         params: DocumentSymbolParams,
     ) -> Result<Option<DocumentSymbolResponse>> {
-        // Get document text
-        let documents = self.state.documents.read().await;
-        let text = match documents.get(&params.text_document.uri) {
-            Some(text) => text,
+        let uri = params.text_document.uri;
+        let docs = self.state.documents.read().await;
+        let text = match docs.get(&uri) {
+            Some(t) => t,
             None => return Ok(None),
         };
 
-        // Generate symbols
-        let symbols = symbols::get_document_symbols(text);
-
-        Ok(symbols.map(DocumentSymbolResponse::Nested))
+        if let Some(symbols) = get_document_symbols(text) {
+            return Ok(Some(DocumentSymbolResponse::Nested(symbols)));
+        }
+        Ok(None)
     }
 
-    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
-        handlers::hover::handle_hover(&self.state, params).await
-    }
-
-    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
-        handlers::completion::handle_completion(&self.state, params).await
-    }
-
-    async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
-        handlers::formatting::handle_formatting(&self.state, params).await
-    }
-
-    async fn on_type_formatting(
+    async fn execute_command(
         &self,
-        _params: DocumentOnTypeFormattingParams,
-    ) -> Result<Option<Vec<TextEdit>>> {
+        params: ExecuteCommandParams,
+    ) -> Result<Option<serde_json::Value>> {
+        match params.command.as_str() {
+            "knot.cleanProject" => {
+                if let Some(arg) = params.arguments.first() {
+                    if let Some(uri_str) = arg.as_str() {
+                        if let Ok(uri) = Url::parse(uri_str) {
+                            if let Ok(path) = uri.to_file_path() {
+                                if let Err(e) = knot_core::clean_project(Some(&path)) {
+                                    return Err(tower_lsp::jsonrpc::Error::invalid_params(
+                                        format!("Clean failed: {}", e),
+                                    ));
+                                }
+                                return Ok(Some(serde_json::json!({"status": "success"})));
+                            }
+                        }
+                    }
+                }
+            }
+            "knot.format" => {
+                if let Some(arg) = params.arguments.first() {
+                    if let Some(uri_str) = arg.as_str() {
+                        if let Ok(uri) = Url::parse(uri_str) {
+                            let formatting_params = DocumentFormattingParams {
+                                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                                options: FormattingOptions {
+                                    tab_size: 2,
+                                    insert_spaces: true,
+                                    ..Default::default()
+                                },
+                                work_done_progress_params: WorkDoneProgressParams::default(),
+                            };
+                            let edits = handle_formatting(&self.state, formatting_params).await?;
+                            return Ok(Some(
+                                serde_json::to_value(edits).unwrap_or(serde_json::Value::Null),
+                            ));
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
         Ok(None)
     }
 }
 
 impl KnotLanguageServer {
-    async fn on_change(&self, uri: Url, text: String) {
-        // 1. Get knot-specific diagnostics (R chunks parsing)
-        let knot_diagnostics = diagnostics::get_diagnostics(&text);
-
-        // 2. Cache knot diagnostics
-        self.state
-            .knot_diagnostics_cache
-            .write()
-            .await
-            .insert(uri.clone(), knot_diagnostics.clone());
-
-        // 3. Publish knot diagnostics immediately (fast feedback)
-        self.client
-            .publish_diagnostics(uri.clone(), knot_diagnostics, None)
-            .await;
-
-        // 4. Transform .knot to .typ placeholder for tinymist
-        let typ_content = transform_to_typst(&text);
-
-        // 5. Create and store PositionMapper
-        let mapper = PositionMapper::new(&text, &typ_content);
-        self.state.mappers.write().await.insert(uri.clone(), mapper);
-
-        // 6. Forward to tinymist subprocess
-        self.send_to_tinymist(uri, typ_content).await;
+    fn clone_for_task(&self) -> Arc<Self> {
+        Arc::new(KnotLanguageServer {
+            client: self.client.clone(),
+            state: ServerState {
+                documents: self.state.documents.clone(),
+                mappers: self.state.mappers.clone(),
+                knot_diagnostics_cache: self.state.knot_diagnostics_cache.clone(),
+                opened_in_tinymist: self.state.opened_in_tinymist.clone(),
+                document_versions: self.state.document_versions.clone(),
+                formatter: self.state.formatter.clone(),
+                executors: self.state.executors.clone(),
+                air_path_override: self.state.air_path_override.clone(),
+                tinymist_path_override: self.state.tinymist_path_override.clone(),
+                tinymist: self.state.tinymist.clone(),
+                loaded_snapshot_hash: self.state.loaded_snapshot_hash.clone(),
+            },
+            root_uri: self.root_uri.clone(),
+        })
     }
 
-    async fn send_to_tinymist(&self, uri: Url, content: String) {
+    async fn update_mapper(&self, uri: &Url, text: &str) {
+        let typ_text = transform_to_typst(text);
+        let mapper = PositionMapper::new(text, &typ_text);
+        let mut mappers = self.state.mappers.write().await;
+        mappers.insert(uri.clone(), mapper);
+    }
+
+    async fn publish_diagnostics(&self, uri: &Url, text: &str) {
+        let diagnostics = get_diagnostics(text);
+        let _ = self
+            .client
+            .publish_diagnostics(uri.clone(), diagnostics, None)
+            .await;
+    }
+
+    async fn forward_to_tinymist(&self, method: &str, uri: &Url) {
         let mut tinymist_guard = self.state.tinymist.write().await;
         if let Some(proxy) = tinymist_guard.as_mut() {
-            let mut opened_map = self.state.opened_in_tinymist.write().await;
-            let mut versions_map = self.state.document_versions.write().await;
-
-            let is_opened = *opened_map.get(&uri).unwrap_or(&false);
-            let version = *versions_map.get(&uri).unwrap_or(&0) + 1;
-            versions_map.insert(uri.clone(), version);
-
-            let method = if is_opened {
-                "textDocument/didChange"
-            } else {
-                "textDocument/didOpen"
+            let content = {
+                let docs = self.state.documents.read().await;
+                docs.get(uri).cloned().unwrap_or_default()
             };
 
-            let params = if is_opened {
-                serde_json::json!({
-                    "textDocument": {
-                        "uri": uri,
-                        "version": version,
-                    },
-                    "contentChanges": [
-                        { "text": content }
-                    ]
-                })
-            } else {
+            let mut opened_map = self.state.opened_in_tinymist.write().await;
+            let mut versions = self.state.document_versions.write().await;
+
+            let is_opened = opened_map.get(uri).cloned().unwrap_or(false);
+            let version = versions.get(uri).cloned().unwrap_or(0) + 1;
+            versions.insert(uri.clone(), version);
+
+            let params = if method == "textDocument/didOpen" || !is_opened {
                 serde_json::json!({
                     "textDocument": {
                         "uri": uri,
                         "languageId": "typst",
                         "version": version,
-                        "text": content
+                        "text": transform_to_typst(&content)
                     }
+                })
+            } else {
+                serde_json::json!({
+                    "textDocument": {
+                        "uri": uri,
+                        "version": version
+                    },
+                    "contentChanges": [{
+                        "text": transform_to_typst(&content)
+                    }]
                 })
             };
 
-            // Send notification
-            if let Err(e) = proxy.send_notification(method, params).await {
-                self.client
-                    .log_message(
-                        MessageType::ERROR,
-                        format!("Failed to send to tinymist: {}", e),
-                    )
-                    .await;
+            let actual_method = if !is_opened {
+                "textDocument/didOpen"
+            } else {
+                method
+            };
+
+            if let Err(e) = proxy.send_notification(actual_method, params).await {
+                let _ = self.client.log_message(
+                    MessageType::ERROR,
+                    format!("Failed to send to tinymist: {}", e),
+                );
             } else if !is_opened {
-                opened_map.insert(uri, true);
+                opened_map.insert(uri.clone(), true);
             }
         }
     }
 
     async fn sync_with_cache(&self, uri: &Url) {
-        use knot_core::cache::Cache;
-        use knot_core::config::Config;
-        use knot_core::get_cache_dir;
-
         let path = match uri.to_file_path() {
             Ok(p) => p,
             Err(_) => return,
         };
 
-        // 1. Find project root and cache dir (handles both files and directories)
         let project_root = match Config::find_project_root(&path) {
             Ok(root) => root,
             Err(_) => return,
@@ -493,62 +368,80 @@ impl KnotLanguageServer {
         let file_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("main");
         let cache_dir = get_cache_dir(&project_root, file_stem);
 
-        // 2. Load metadata to find the latest snapshot for R
         if let Ok(cache) = Cache::new(cache_dir.clone()) {
-            // Find the last chunk that was executed in R
             let last_r_chunk = cache
                 .metadata
                 .chunks
                 .iter()
-                .filter(|c| {
-                    // Check if chunk is R AND snapshot exists with .RData extension
-                    c.language == "r" && cache.has_snapshot(&c.hash, "RData")
-                })
+                .filter(|c| c.language == "r" && cache.has_snapshot(&c.hash, "RData"))
                 .max_by_key(|c| c.index);
 
             if let Some(last_chunk) = last_r_chunk {
                 let snapshot_hash = &last_chunk.hash;
+                let reload_key = format!("{}::r", uri);
 
-                // 3. Check if this snapshot is different from the last loaded one
                 let should_reload = {
                     let loaded_hashes = self.state.loaded_snapshot_hash.read().await;
-                    loaded_hashes.get(uri) != Some(snapshot_hash)
+                    loaded_hashes.get(&reload_key) != Some(snapshot_hash)
                 };
 
                 if should_reload {
                     let snapshot_path = cache.get_snapshot_path(snapshot_hash, "RData");
-                    if snapshot_path.exists() {
-                        // 4. Load this snapshot into our live R session
-                        let result = {
-                            let mut managers = self.state.executors.write().await;
-                            if let Some(manager) = managers.get_mut(uri) {
-                                // We explicitly want to load the R session
-                                if let Ok(executor) = manager.get_executor("r") {
-                                    executor.load_session(&snapshot_path).map(|_| true)
-                                } else {
-                                    Ok(false)
-                                }
-                            } else {
-                                Ok(false)
-                            }
-                        };
-
-                        match result {
-                            Ok(true) => {
-                                // 5. Update the loaded hash
+                    let mut managers = self.state.executors.write().await;
+                    if let Some(manager) = managers.get_mut(uri) {
+                        if let Ok(executor) = manager.get_executor("r") {
+                            if executor.load_session(&snapshot_path).is_ok() {
                                 self.state
                                     .loaded_snapshot_hash
                                     .write()
                                     .await
-                                    .insert(uri.clone(), snapshot_hash.clone());
-                                self.client.log_message(MessageType::INFO, format!("Synced R session with snapshot for chunk {} (hash: {})", last_chunk.index, &snapshot_hash[..8])).await;
-                            }
-                            Ok(false) => {}
-                            Err(e) => {
+                                    .insert(reload_key, snapshot_hash.clone());
                                 self.client
                                     .log_message(
-                                        MessageType::WARNING,
-                                        format!("Failed to load R snapshot: {}", e),
+                                        MessageType::INFO,
+                                        format!("Synced R session (chunk {})", last_chunk.index),
+                                    )
+                                    .await;
+                            }
+                        }
+                    }
+                }
+            }
+
+            let last_py_chunk = cache
+                .metadata
+                .chunks
+                .iter()
+                .filter(|c| c.language == "python" && cache.has_snapshot(&c.hash, "pkl"))
+                .max_by_key(|c| c.index);
+
+            if let Some(last_chunk) = last_py_chunk {
+                let snapshot_hash = &last_chunk.hash;
+                let reload_key = format!("{}::python", uri);
+
+                let should_reload = {
+                    let loaded_hashes = self.state.loaded_snapshot_hash.read().await;
+                    loaded_hashes.get(&reload_key) != Some(snapshot_hash)
+                };
+
+                if should_reload {
+                    let snapshot_path = cache.get_snapshot_path(snapshot_hash, "pkl");
+                    let mut managers = self.state.executors.write().await;
+                    if let Some(manager) = managers.get_mut(uri) {
+                        if let Ok(executor) = manager.get_executor("python") {
+                            if executor.load_session(&snapshot_path).is_ok() {
+                                self.state
+                                    .loaded_snapshot_hash
+                                    .write()
+                                    .await
+                                    .insert(reload_key, snapshot_hash.clone());
+                                self.client
+                                    .log_message(
+                                        MessageType::INFO,
+                                        format!(
+                                            "Synced Python session (chunk {})",
+                                            last_chunk.index
+                                        ),
                                     )
                                     .await;
                             }
@@ -561,17 +454,13 @@ impl KnotLanguageServer {
 }
 
 #[tokio::main]
-
 async fn main() {
     let stdin = tokio::io::stdin();
-
     let stdout = tokio::io::stdout();
 
     let (service, socket) = LspService::new(|client| KnotLanguageServer {
         client,
-
         state: ServerState::new(),
-
         root_uri: Arc::new(RwLock::new(None)),
     });
 

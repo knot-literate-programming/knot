@@ -98,7 +98,11 @@ impl RProcess {
                     if bytes_read == 0 {
                         break;
                     }
-                    if line_buffer.trim_end() == BOUNDARY {
+
+                    if line_buffer.contains(BOUNDARY) {
+                        // Extract everything before the boundary
+                        let parts: Vec<&str> = line_buffer.split(BOUNDARY).collect();
+                        output.push_str(parts[0]);
                         break;
                     }
                     output.push_str(&line_buffer);
@@ -115,7 +119,11 @@ impl RProcess {
                     if bytes_read == 0 {
                         break;
                     }
-                    if line_buffer.trim_end() == BOUNDARY {
+
+                    if line_buffer.contains(BOUNDARY) {
+                        // Extract everything before the boundary
+                        let parts: Vec<&str> = line_buffer.split(BOUNDARY).collect();
+                        output.push_str(parts[0]);
                         break;
                     }
                     output.push_str(&line_buffer);

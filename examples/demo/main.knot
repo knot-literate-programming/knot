@@ -25,7 +25,8 @@ The iris dataset contains `{r} nrow(data)` observations.
 #| label: iris-plot
 gg <- ggplot(data, aes(x = Sepal.Length, y = Sepal.Width, color = Species)) +
   geom_point() +
-  theme_minimal()
+  theme_minimal() +
+  geom_line()
 
 typst(gg)
 ```
@@ -53,8 +54,10 @@ We can also create plots with matplotlib:
 ```{python matplotlib}
 #| caption: "A simple bar chart generated with Matplotlib."
 plt.bar(df["Language"], df["Speed"], color=["blue", "yellow", "orange"])
+
 typst(current_plot())
 ```
+
 
 == Conclusion
 
