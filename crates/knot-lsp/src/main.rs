@@ -70,11 +70,10 @@ impl LanguageServer for KnotLanguageServer {
                 }),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 document_symbol_provider: Some(OneOf::Left(true)),
-                // Disabling global formatting provider to avoid "Format on Type" etc.
-                // We will handle formatting via a custom command triggered on save by the extension.
+                // Global formatting is disabled to prevent accidental content deletion
                 document_formatting_provider: Some(OneOf::Left(false)),
                 execute_command_provider: Some(ExecuteCommandOptions {
-                    commands: vec!["knot.cleanProject".to_string(), "knot.format".to_string()],
+                    commands: vec!["knot.cleanProject".to_string()],
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -234,27 +233,6 @@ impl LanguageServer for KnotLanguageServer {
                                 }
                                 return Ok(Some(serde_json::json!({"status": "success"})));
                             }
-                        }
-                    }
-                }
-            }
-            "knot.format" => {
-                if let Some(arg) = params.arguments.first() {
-                    if let Some(uri_str) = arg.as_str() {
-                        if let Ok(uri) = Url::parse(uri_str) {
-                            let formatting_params = DocumentFormattingParams {
-                                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                                options: FormattingOptions {
-                                    tab_size: 2,
-                                    insert_spaces: true,
-                                    ..Default::default()
-                                },
-                                work_done_progress_params: WorkDoneProgressParams::default(),
-                            };
-                            let edits = handle_formatting(&self.state, formatting_params).await?;
-                            return Ok(Some(
-                                serde_json::to_value(edits).unwrap_or(serde_json::Value::Null),
-                            ));
                         }
                     }
                 }

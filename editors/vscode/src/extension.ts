@@ -2,7 +2,6 @@
 //
 // This extension provides IDE support for .knot files by connecting to the knot-lsp server.
 // Features:
-// - R code formatting with Air (on save)
 // - Diagnostics (parsing errors, invalid options)
 // - Document symbols (chunk navigation)
 // - Hover information
@@ -11,7 +10,7 @@
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
-import { workspace, ExtensionContext, window, commands, Uri, WorkspaceEdit, Range, Position } from 'vscode';
+import { workspace, ExtensionContext, window, commands, Uri } from 'vscode';
 import { ChildProcess, spawn } from 'child_process';
 import {
     LanguageClient,
@@ -74,6 +73,7 @@ export async function activate(context: ExtensionContext) {
         transport: TransportKind.stdio,
     };
 
+    // Air path resolution (kept for future manual use)
     let airPath = config.get<string>('formatter.air.path', 'air');
     if (airPath === 'air') {
         const homeAir = path.join(os.homedir(), 'bin', 'air');
@@ -146,44 +146,6 @@ export async function activate(context: ExtensionContext) {
     context.subscriptions.push(
         commands.registerCommand('knot.openPreview', async () => {
             await openPreview(outputChannel);
-        })
-    );
-
-    // Format on Save logic
-    context.subscriptions.push(
-        workspace.onDidSaveTextDocument(async (document) => {
-            if (document.languageId !== 'knot' || !client) { return; }
-            
-            const config = workspace.getConfiguration('knot');
-            if (!config.get<boolean>('formatter.formatOnSave', true)) { return; }
-
-            outputChannel.appendLine(`Formatting ${document.uri.toString()} on save...`);
-            
-            try {
-                const edits = await client.sendRequest(ExecuteCommandRequest.type, {
-                    command: 'knot.format',
-                    arguments: [document.uri.toString()]
-                }) as any[];
-
-                if (edits && edits.length > 0) {
-                    const workspaceEdit = new WorkspaceEdit();
-                    for (const edit of edits) {
-                        workspaceEdit.replace(
-                            document.uri,
-                            new Range(
-                                new Position(edit.range.start.line, edit.range.start.character),
-                                new Position(edit.range.end.line, edit.range.end.character)
-                            ),
-                            edit.new_text
-                        );
-                    }
-                    await workspace.applyEdit(workspaceEdit);
-                    // Save again after formatting
-                    await document.save();
-                }
-            } catch (error) {
-                outputChannel.appendLine(`Formatting error: ${error}`);
-            }
         })
     );
 
