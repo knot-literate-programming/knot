@@ -59,6 +59,10 @@ impl RProcess {
         // Source the temp file
         writeln!(stdin, "source(\"{}\")", temp_path)?;
 
+        // Send boundary markers to signal end of initialization
+        writeln!(stdin, "cat('{}\\n', file=stdout())", BOUNDARY)?;
+        writeln!(stdin, "cat('{}\\n', file=stderr())", BOUNDARY)?;
+
         stdin.flush()?;
 
         self.stdin = Some(stdin);
@@ -66,6 +70,9 @@ impl RProcess {
         self.stderr = child.stderr.take().map(BufReader::new);
         self.child = Some(child);
         self._helper_file = Some(temp_file);
+
+        // Consume the initialization output
+        let _ = self.read_until_boundary()?;
 
         Ok(())
     }
