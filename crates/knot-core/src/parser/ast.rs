@@ -39,122 +39,126 @@ impl ChunkError {
     }
 }
 
-/// ChunkOptions with optional fields for YAML parsing.
-/// None means "not specified", allowing fallbacks to knot.toml or defaults.
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct ChunkOptions {
+/// Internal macros to handle type expansion and resolution
+macro_rules! expand_type {
+    (val, $type:ty) => { Option<$type> };
+    (opt, $type:ty) => { Option<$type> };
+    (col, $type:ty) => { $type };
+}
+
+macro_rules! expand_resolved_type {
+    (val, $type:ty) => { $type };
+    (opt, $type:ty) => { Option<$type> };
+    (col, $type:ty) => { $type };
+}
+
+macro_rules! expand_resolve {
+    ($val:expr, val, $type:ty, $default:expr) => {
+        $val.clone().unwrap_or_else(|| $default)
+    };
+    ($val:expr, opt, $type:ty, $default:expr) => {
+        $val.clone()
+    };
+    ($val:expr, col, $type:ty, $default:expr) => {
+        $val.clone()
+    };
+}
+
+macro_rules! define_options {
+    (
+        $(
+            $(#[doc = $doc:expr])*
+            $(#[serde($($serde_attr:tt)*)])*
+            [$kind:ident] $name:ident : $type:ty , $default:expr
+        ),* $(,)?
+    ) => {
+        /// ChunkOptions with optional fields for YAML parsing.
+        #[derive(Debug, Default, Clone, Serialize, Deserialize)]
+        #[serde(default, deny_unknown_fields)]
+        pub struct ChunkOptions {
+            $(
+                $(#[doc = $doc])*
+                $(#[serde($($serde_attr)*)])*
+                pub $name: expand_type!($kind, $type),
+            )*
+        }
+
+        /// ChunkOptions with all values resolved to concrete types.
+        #[derive(Debug, Clone, Serialize)]
+        pub struct ResolvedChunkOptions {
+            $(
+                $(#[doc = $doc])*
+                pub $name: expand_resolved_type!($kind, $type),
+            )*
+        }
+
+        impl ChunkOptions {
+            /// Resolve all options to concrete values, applying hardcoded defaults.
+            pub fn resolve(&self) -> ResolvedChunkOptions {
+                #[allow(unused_imports)]
+                use crate::defaults::Defaults;
+                ResolvedChunkOptions {
+                    $(
+                        $name: expand_resolve!(self.$name, $kind, $type, $default),
+                    )*
+                }
+            }
+
+            /// Get a ResolvedChunkOptions instance with all default values.
+            pub fn default_resolved() -> ResolvedChunkOptions {
+                Self::default().resolve()
+            }
+
+            /// Apply default values from knot.toml configuration.
+            pub fn apply_config_defaults(&mut self, defaults: &crate::config::ChunkDefaults) {
+                if self.eval.is_none() { self.eval = defaults.eval; }
+                if self.echo.is_none() { self.echo = defaults.echo; }
+                if self.output.is_none() { self.output = defaults.output; }
+                if self.cache.is_none() { self.cache = defaults.cache; }
+
+                if self.fig_width.is_none() { self.fig_width = defaults.fig_width; }
+                if self.fig_height.is_none() { self.fig_height = defaults.fig_height; }
+                if self.dpi.is_none() { self.dpi = defaults.dpi; }
+                if self.fig_format.is_none() { self.fig_format = defaults.fig_format.clone(); }
+            }
+        }
+    }
+}
+
+define_options! {
     /// Whether to evaluate the chunk
-    pub eval: Option<bool>,
+    [val] eval: bool, true,
     /// Whether to include the source code in the output
-    pub echo: Option<bool>,
+    [val] echo: bool, true,
     /// Whether to include the execution results
-    pub output: Option<bool>,
+    [val] output: bool, true,
     /// Whether to cache the results
-    pub cache: Option<bool>,
+    [val] cache: bool, true,
 
     /// Optional label for the chunk
-    pub label: Option<String>,
+    [opt] label: String, None,
     /// Optional caption for figures
-    pub caption: Option<String>,
+    [opt] caption: String, None,
     /// File dependencies
-    pub depends: Vec<PathBuf>,
+    [col] depends: Vec<PathBuf>, Vec::new(),
 
     /// Figure width in inches
     #[serde(rename = "fig-width")]
-    pub fig_width: Option<f64>,
+    [val] fig_width: f64, 7.0,
     /// Figure height in inches
     #[serde(rename = "fig-height")]
-    pub fig_height: Option<f64>,
+    [val] fig_height: f64, 5.0,
     /// DPI for raster graphics
-    pub dpi: Option<u32>,
+    [val] dpi: u32, 300,
     /// Format of plots (e.g., "svg", "png")
     #[serde(rename = "fig-format")]
-    pub fig_format: Option<String>,
+    [val] fig_format: String, "svg".to_string(),
     /// Alternative text for figures
     #[serde(rename = "fig-alt")]
-    pub fig_alt: Option<String>,
+    [opt] fig_alt: String, None,
 
     /// Names of objects to treat as immutable constants
-    pub constant: Vec<String>,
-}
-
-/// ChunkOptions with all values resolved to concrete types.
-#[derive(Debug, Clone, Serialize)]
-pub struct ResolvedChunkOptions {
-    pub eval: bool,
-    pub echo: bool,
-    pub output: bool,
-    pub cache: bool,
-    pub label: Option<String>,
-    pub caption: Option<String>,
-    pub depends: Vec<PathBuf>,
-    pub fig_width: f64,
-    pub fig_height: f64,
-    pub dpi: u32,
-    pub fig_format: String,
-    pub fig_alt: Option<String>,
-    pub constant: Vec<String>,
-}
-
-impl ChunkOptions {
-    /// Resolve all options to concrete values, applying hardcoded defaults.
-    /// This is called after potential config defaults have been applied.
-    pub fn resolve(&self) -> ResolvedChunkOptions {
-        use crate::defaults::Defaults;
-        ResolvedChunkOptions {
-            eval: self.eval.unwrap_or(Defaults::CHUNK_EVAL),
-            echo: self.echo.unwrap_or(Defaults::CHUNK_ECHO),
-            output: self.output.unwrap_or(Defaults::CHUNK_OUTPUT),
-            cache: self.cache.unwrap_or(Defaults::CHUNK_CACHE),
-            label: self.label.clone(),
-            caption: self.caption.clone(),
-            depends: self.depends.clone(),
-            fig_width: self.fig_width.unwrap_or(Defaults::FIG_WIDTH),
-            fig_height: self.fig_height.unwrap_or(Defaults::FIG_HEIGHT),
-            dpi: self.dpi.unwrap_or(Defaults::DPI),
-            fig_format: self
-                .fig_format
-                .clone()
-                .unwrap_or_else(|| Defaults::FIG_FORMAT.to_string()),
-            fig_alt: self.fig_alt.clone(),
-            constant: self.constant.clone(),
-        }
-    }
-
-    /// Get a ResolvedChunkOptions instance with all default values.
-    pub fn default_resolved() -> ResolvedChunkOptions {
-        Self::default().resolve()
-    }
-
-    /// Apply default values from knot.toml configuration.
-    /// Only applies defaults for fields that are still None.
-    pub fn apply_config_defaults(&mut self, defaults: &crate::config::ChunkDefaults) {
-        if self.eval.is_none() {
-            self.eval = defaults.eval;
-        }
-        if self.echo.is_none() {
-            self.echo = defaults.echo;
-        }
-        if self.output.is_none() {
-            self.output = defaults.output;
-        }
-        if self.cache.is_none() {
-            self.cache = defaults.cache;
-        }
-        if self.fig_width.is_none() {
-            self.fig_width = defaults.fig_width;
-        }
-        if self.fig_height.is_none() {
-            self.fig_height = defaults.fig_height;
-        }
-        if self.dpi.is_none() {
-            self.dpi = defaults.dpi;
-        }
-        if self.fig_format.is_none() {
-            self.fig_format = defaults.fig_format.clone();
-        }
-    }
+    [col] constant: Vec<String>, Vec::new(),
 }
 
 #[derive(Debug)]
@@ -172,24 +176,66 @@ pub struct Chunk {
     pub code_end_byte: usize,
 }
 
-/// Options for inline expressions
-#[derive(Debug, Clone, PartialEq)]
-pub struct InlineOptions {
-    pub echo: bool,          // Show the inline code (default: false)
-    pub eval: bool,          // Evaluate the code (default: true)
-    pub output: bool,        // Show the result in the document (default: true)
-    pub digits: Option<u32>, // Number of digits for numeric formatting
-}
+macro_rules! define_inline_options {
+    (
+        $(
+            $(#[doc = $doc:expr])*
+            $name:ident : $type:ty = $default:expr
+        ),* $(,)?
+    ) => {
+        /// Options for inline expressions
+        #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+        pub struct InlineOptions {
+            $(
+                $(#[doc = $doc])*
+                pub $name: expand_type!(val, $type),
+            )*
+        }
 
-impl Default for InlineOptions {
-    fn default() -> Self {
-        Self {
-            echo: crate::defaults::Defaults::INLINE_ECHO,
-            eval: crate::defaults::Defaults::INLINE_EVAL,
-            output: crate::defaults::Defaults::INLINE_OUTPUT,
-            digits: None, // Use default formatting
+        /// Resolved options for inline expressions
+        #[derive(Debug, Clone, Serialize)]
+        pub struct ResolvedInlineOptions {
+            $(
+                $(#[doc = $doc])*
+                pub $name: expand_resolved_type!(val, $type),
+            )*
+        }
+
+        impl Default for InlineOptions {
+            fn default() -> Self {
+                Self {
+                    $( $name: None, )*
+                }
+            }
+        }
+
+        impl InlineOptions {
+            /// Resolve all options to concrete values, applying defaults.
+            pub fn resolve(&self) -> ResolvedInlineOptions {
+                ResolvedInlineOptions {
+                    $(
+                        $name: expand_resolve!(self.$name, val, $type, $default),
+                    )*
+                }
+            }
+
+            /// Get a ResolvedInlineOptions instance with all default values.
+            pub fn default_resolved() -> ResolvedInlineOptions {
+                Self::default().resolve()
+            }
         }
     }
+}
+
+define_inline_options! {
+    /// Show the inline code
+    echo: bool = false,
+    /// Evaluate the code
+    eval: bool = true,
+    /// Show the result in the document
+    output: bool = true,
+    /// Number of digits for numeric formatting
+    digits: Option<u32> = None,
 }
 
 /// Inline expression (e.g., `{r} nrow(df)` or `{r echo=false} x`)

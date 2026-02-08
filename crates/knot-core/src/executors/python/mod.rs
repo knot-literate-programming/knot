@@ -151,15 +151,16 @@ impl LanguageExecutor for PythonExecutor {
     }
 
     fn execute_inline(&mut self, code: &str) -> Result<String> {
+        let defaults = ChunkOptions::default_resolved();
         // Wrap in print() to get output if it's just an expression
         let wrapped_code = format!("print({})", code);
         let result = self.execute(
             &wrapped_code,
             &crate::executors::GraphicsOptions {
-                width: 0.0,
-                height: 0.0,
-                dpi: 0,
-                format: String::new(),
+                width: defaults.fig_width,
+                height: defaults.fig_height,
+                dpi: defaults.dpi,
+                format: defaults.fig_format,
             },
         )?;
 
@@ -240,6 +241,7 @@ impl PythonExecutor {
 }
 
 use super::path_utils::escape_path_for_code;
+use crate::parser::ChunkOptions;
 
 impl KnotExecutor for PythonExecutor {
     fn save_session(&mut self, path: &Path) -> Result<()> {

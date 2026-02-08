@@ -323,11 +323,11 @@ fn parse_inline_options(options_str: &str) -> (InlineOptions, Vec<ChunkError>) {
     if let Ok(pairs) = parse_kv_pairs.parse_next(&mut input) {
         for (key, value) in pairs {
             match key {
-                "echo" => options.echo = value == "true",
-                "eval" => options.eval = value == "true",
-                "output" => options.output = value == "true",
+                "echo" => options.echo = Some(value == "true"),
+                "eval" => options.eval = Some(value == "true"),
+                "output" => options.output = Some(value == "true"),
                 "digits" => match value.parse::<u32>() {
-                    Ok(n) => options.digits = Some(n),
+                    Ok(n) => options.digits = Some(Some(n)),
                     Err(e) => errors.push(ChunkError::new(format!("Option 'digits': {}", e), None)),
                 },
                 _ => {
@@ -556,10 +556,11 @@ More text below."###;
         let doc = Document::parse(content.to_string()).unwrap();
         assert_eq!(doc.inline_exprs.len(), 1);
         let inline = &doc.inline_exprs[0];
+        let resolved = inline.options.resolve();
         assert_eq!(inline.code, "mean(1:10)");
-        assert!(!inline.options.echo); // default
-        assert!(inline.options.eval); // default
-        assert_eq!(inline.options.digits, None); // default
+        assert!(!resolved.echo); // default
+        assert!(resolved.eval); // default
+        assert_eq!(resolved.digits, None); // default
     }
 
     #[test]
@@ -568,10 +569,11 @@ More text below."###;
         let doc = Document::parse(content.to_string()).unwrap();
         assert_eq!(doc.inline_exprs.len(), 1);
         let inline = &doc.inline_exprs[0];
+        let resolved = inline.options.resolve();
         assert_eq!(inline.code, "x");
-        assert!(inline.options.echo);
-        assert!(inline.options.eval); // default
-        assert_eq!(inline.options.digits, None); // default
+        assert!(resolved.echo);
+        assert!(resolved.eval); // default
+        assert_eq!(resolved.digits, None); // default
     }
 
     #[test]
@@ -580,10 +582,11 @@ More text below."###;
         let doc = Document::parse(content.to_string()).unwrap();
         assert_eq!(doc.inline_exprs.len(), 1);
         let inline = &doc.inline_exprs[0];
+        let resolved = inline.options.resolve();
         assert_eq!(inline.code, "pi");
-        assert!(inline.options.echo);
-        assert!(!inline.options.eval);
-        assert_eq!(inline.options.digits, Some(3));
+        assert!(resolved.echo);
+        assert!(!resolved.eval);
+        assert_eq!(resolved.digits, Some(3));
     }
 
     #[test]
@@ -593,9 +596,10 @@ More text below."###;
         let doc = Document::parse(content.to_string()).unwrap();
         assert_eq!(doc.inline_exprs.len(), 1);
         let inline = &doc.inline_exprs[0];
+        let resolved = inline.options.resolve();
         assert_eq!(inline.code, "sqrt(2)");
-        assert!(!inline.options.echo);
-        assert!(inline.options.eval);
+        assert!(!resolved.echo);
+        assert!(resolved.eval);
     }
 
     #[test]
@@ -605,9 +609,10 @@ More text below."###;
         let doc = Document::parse(content.to_string()).unwrap();
         assert_eq!(doc.inline_exprs.len(), 1);
         let inline = &doc.inline_exprs[0];
+        let resolved = inline.options.resolve();
         assert_eq!(inline.code, "sqrt(2)");
-        assert!(!inline.options.echo);
-        assert!(inline.options.eval);
+        assert!(!resolved.echo);
+        assert!(resolved.eval);
     }
 
     #[test]
@@ -617,8 +622,9 @@ More text below."###;
         let doc = Document::parse(content.to_string()).unwrap();
         assert_eq!(doc.inline_exprs.len(), 1);
         let inline = &doc.inline_exprs[0];
-        assert!(inline.options.echo);
-        assert!(inline.options.eval); // default
+        let resolved = inline.options.resolve();
+        assert!(resolved.echo);
+        assert!(resolved.eval); // default
         assert_eq!(inline.errors.len(), 1);
         assert!(
             inline.errors[0]
@@ -646,7 +652,7 @@ More text below."###;
         assert_eq!(doc.inline_exprs.len(), 1);
         let inline = &doc.inline_exprs[0];
         assert_eq!(inline.code, "dangerous_code()");
-        assert!(!inline.options.eval);
+        assert!(!inline.options.resolve().eval);
     }
 
     #[test]
@@ -655,7 +661,7 @@ More text below."###;
         let doc = Document::parse(content.to_string()).unwrap();
         assert_eq!(doc.inline_exprs.len(), 1);
         let inline = &doc.inline_exprs[0];
-        assert_eq!(inline.options.digits, Some(5));
+        assert_eq!(inline.options.resolve().digits, Some(5));
     }
 
     #[test]
@@ -666,15 +672,15 @@ More text below."###;
 
         // First inline: defaults
         assert_eq!(doc.inline_exprs[0].code, "x");
-        assert!(doc.inline_exprs[0].options.eval);
-        assert_eq!(doc.inline_exprs[0].options.digits, None);
+        assert!(doc.inline_exprs[0].options.resolve().eval);
+        assert_eq!(doc.inline_exprs[0].options.resolve().digits, None);
 
         // Second inline: digits=2
         assert_eq!(doc.inline_exprs[1].code, "y");
-        assert_eq!(doc.inline_exprs[1].options.digits, Some(2));
+        assert_eq!(doc.inline_exprs[1].options.resolve().digits, Some(2));
 
         // Third inline: eval=false
         assert_eq!(doc.inline_exprs[2].code, "z");
-        assert!(!doc.inline_exprs[2].options.eval);
+        assert!(!doc.inline_exprs[2].options.resolve().eval);
     }
 }

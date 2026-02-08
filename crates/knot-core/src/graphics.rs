@@ -11,11 +11,12 @@ pub struct GraphicsDefaults {
 
 impl Default for GraphicsDefaults {
     fn default() -> Self {
+        let defaults = crate::parser::ChunkOptions::default_resolved();
         Self {
-            fig_width: crate::defaults::Defaults::FIG_WIDTH,
-            fig_height: crate::defaults::Defaults::FIG_HEIGHT,
-            dpi: crate::defaults::Defaults::DPI,
-            format: crate::defaults::Defaults::FIG_FORMAT.to_string(),
+            fig_width: defaults.fig_width,
+            fig_height: defaults.fig_height,
+            dpi: defaults.dpi,
+            format: defaults.fig_format,
         }
     }
 }

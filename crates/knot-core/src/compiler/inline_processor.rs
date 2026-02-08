@@ -18,11 +18,12 @@ pub fn process_inline_expr(
     cache: &mut Cache,
     previous_hash: &str,
 ) -> Result<(String, String)> {
+    let resolved_options = inline_expr.options.resolve();
     let inline_hash =
         cache.get_inline_expr_hash(&inline_expr.code, &inline_expr.options, previous_hash);
 
     // If eval=false, skip execution
-    if !inline_expr.options.eval {
+    if !resolved_options.eval {
         info!(
             "  ⊗ `{{{}}} eval=false {}` [skipped]",
             inline_expr.language, inline_expr.code
@@ -56,7 +57,7 @@ pub fn process_inline_expr(
         ))?;
 
     // If output=false, we discard the result for the document
-    let final_result = if inline_expr.options.output {
+    let final_result = if resolved_options.output {
         result
     } else {
         String::new()
@@ -103,7 +104,7 @@ mod tests {
         let inline = create_inline_expr(
             "x <- 42",
             crate::parser::InlineOptions {
-                eval: false,
+                eval: Some(false),
                 ..Default::default()
             },
         );
@@ -152,14 +153,14 @@ mod tests {
         let inline_eval_false = create_inline_expr(
             "x <- 1",
             crate::parser::InlineOptions {
-                eval: false,
+                eval: Some(false),
                 ..Default::default()
             },
         );
         let inline_output_false = create_inline_expr(
             "x <- 1",
             crate::parser::InlineOptions {
-                output: false,
+                output: Some(false),
                 ..Default::default()
             },
         );
@@ -203,25 +204,26 @@ mod tests {
         let inline = create_inline_expr(
             "x <- 42",
             crate::parser::InlineOptions {
-                eval: false,
+                eval: Some(false),
                 ..Default::default()
             },
         );
 
         // The code in process_inline_expr returns String::new() when eval=false
-        assert!(!inline.options.eval);
+        assert_eq!(inline.options.resolve().eval, false);
     }
 
     #[test]
     fn test_inline_expr_structure() {
         let inline = create_inline_expr("mean(1:10)", crate::parser::InlineOptions::default());
+        let resolved = inline.options.resolve();
 
         assert_eq!(inline.language, "r");
         assert_eq!(inline.code, "mean(1:10)");
-        assert!(!inline.options.echo);
-        assert!(inline.options.eval);
-        assert!(inline.options.output);
-        assert_eq!(inline.options.digits, None);
+        assert!(!resolved.echo);
+        assert!(resolved.eval);
+        assert!(resolved.output);
+        assert_eq!(resolved.digits, None);
         assert_eq!(inline.start, 0);
         assert_eq!(inline.end, "mean(1:10)".len());
     }
@@ -231,19 +233,20 @@ mod tests {
         let inline = create_inline_expr(
             "library(dplyr)",
             crate::parser::InlineOptions {
-                eval: false,
-                echo: true,
-                output: false,
-                digits: Some(3),
+                eval: Some(false),
+                echo: Some(true),
+                output: Some(false),
+                digits: Some(Some(3)),
             },
         );
+        let resolved = inline.options.resolve();
 
         assert_eq!(inline.language, "r");
         assert_eq!(inline.code, "library(dplyr)");
-        assert!(!inline.options.eval);
-        assert!(inline.options.echo);
-        assert!(!inline.options.output);
-        assert_eq!(inline.options.digits, Some(3));
+        assert!(!resolved.eval);
+        assert!(resolved.echo);
+        assert!(!resolved.output);
+        assert_eq!(resolved.digits, Some(3));
     }
 
     #[test]

@@ -47,10 +47,11 @@ pub fn get_inline_expr_hash(
     options: &crate::parser::InlineOptions,
     previous_hash: &str,
 ) -> String {
+    let resolved = options.resolve();
     // Include options in hash to invalidate cache when options change
     let options_str = format!(
         "echo={},eval={},output={},digits={:?}",
-        options.echo, options.eval, options.output, options.digits
+        resolved.echo, resolved.eval, resolved.output, resolved.digits
     );
     let inline_content = format!("{}|{}|{}", code, options_str, previous_hash);
 

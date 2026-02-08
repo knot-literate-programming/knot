@@ -88,11 +88,12 @@ pub fn execute(
 
 /// Execute an inline R expression and return formatted result
 pub fn execute_inline(executor: &mut RExecutor, code: &str) -> Result<String> {
+    let defaults = crate::parser::ChunkOptions::default_resolved();
     let graphics = GraphicsOptions {
-        width: crate::defaults::Defaults::FIG_WIDTH,
-        height: crate::defaults::Defaults::FIG_HEIGHT,
-        dpi: crate::defaults::Defaults::DPI,
-        format: crate::defaults::Defaults::FIG_FORMAT.to_string(),
+        width: defaults.fig_width,
+        height: defaults.fig_height,
+        dpi: defaults.dpi,
+        format: defaults.fig_format,
     };
 
     // Correctly call trait method
