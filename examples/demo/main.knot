@@ -34,7 +34,7 @@ gg <- ggplot(iris) +
 typst(gg)
 ```
 
-Nouveau texte
+Nouveau texte [2,3]
 
 == Python Integration
 

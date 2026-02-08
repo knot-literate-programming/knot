@@ -71,7 +71,7 @@ impl LanguageExecutor for PythonExecutor {
         )?;
 
         match result {
-            ExecutionResult::Text(t) => Ok(formatters::format_inline_output(&t)),
+            ExecutionResult::Text(t) => formatters::format_inline_output(&t),
             _ => anyhow::bail!(
                 "Inline expression returned a complex object (plot or dataframe).\n\
                  Inline code must return text or a simple value.\n\
