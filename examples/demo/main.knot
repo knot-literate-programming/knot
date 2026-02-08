@@ -1,4 +1,5 @@
 #import "lib/knot.typ": *
+#show: codly-init
 
 #set page(paper: "a4", margin: 2cm)
 
@@ -12,23 +13,28 @@ We can perform statistical analysis and generate plots using R.
 
 ```{r setup}
 #| eval: true
-#| echo: true
+#| echo: false
 library(ggplot2)
-data <- iris
 ```
 
-The iris dataset contains `{r} nrow(data)` observations.
+The iris dataset contains `{r} nrow(iris)` observations.
 
 ```{r plot}
 #| caption: "A ggplot2 visualization of the Iris dataset."
 #| label: iris-plot
-gg <- ggplot(data, aes(x = Sepal.Length, y = Sepal.Width, color = Species)) +
+gg <- ggplot(iris) +
+  aes(
+    x = Sepal.Length,
+    y = Sepal.Width,
+    color = Species) +
   geom_point() +
   theme_minimal() +
   geom_line()
 
 typst(gg)
 ```
+
+Nouveau texte
 
 == Python Integration
 

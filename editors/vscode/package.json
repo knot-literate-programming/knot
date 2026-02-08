@@ -47,7 +47,10 @@
         "embeddedLanguages": {
           "source.r": "r",
           "meta.embedded.block.r": "r",
-          "meta.embedded.inline.r": "r"
+          "meta.embedded.inline.r": "r",
+          "source.python": "python",
+          "meta.embedded.block.python": "python",
+          "meta.embedded.inline.python": "python"
         }
       }
     ],
