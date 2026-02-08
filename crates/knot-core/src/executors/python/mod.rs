@@ -1,76 +1,26 @@
-//! Python Executor
-//!
-//! Manages a persistent Python3 subprocess for executing code chunks and inline expressions.
-//!
-//! # Architecture
-//!
-//! The executor maintains a single Python process that runs for the entire document compilation.
-//! Code is executed in a shared global namespace, allowing variables to persist across chunks.
-//!
-//! ## Process Management
-//!
-//! Uses an embedded event loop wrapper (see `process.rs`) that:
-//! - Runs in an infinite loop reading commands from stdin
-//! - Executes code blocks using `exec()` in global scope
-//! - Returns results via stdout/stderr with boundary markers
-//!
-//! ## Session Persistence
-//!
-//! Sessions are saved using Python's `pickle` module:
-//! - Filters out non-picklable objects (modules, functions)
-//! - Stores only user-defined variables
-//! - Can restore state between compilation runs
-//!
-//! ## Constant Objects
-//!
-//! Large immutable objects can be cached separately using content-addressed storage:
-//! - Objects are hashed with xxHash64 (requires `xxhash` package)
-//! - Stored as `.pkl` files indexed by hash
-//! - Automatically verified on load to detect corruption
-//!
-//! # Example
-//!
-//! ```rust
-//! use knot_core::executors::python::PythonExecutor;
-//! use knot_core::executors::{GraphicsOptions, KnotExecutor, LanguageExecutor};
-//! use anyhow::Result;
-//! use std::path::PathBuf;
-//! use tempfile::TempDir;
-//!
-//! fn main() -> Result<()> {
-//!     let temp_dir = TempDir::new().unwrap();
-//!     let cache_dir = temp_dir.path().to_path_buf();
-//!     let graphics = GraphicsOptions {
-//!         width: 0.0, height: 0.0, dpi: 0, format: String::new(),
-//!     };
-//!
-//!     let mut executor = PythonExecutor::new(cache_dir)?;
-//!     executor.initialize()?;
-//!
-//!     // Execute a chunk
-//!     let result = executor.execute("x = 1 + 1\nprint(x)", &graphics)?;
-//!
-//!     // Execute inline expression
-//!     let value = executor.execute_inline("x * 2")?; // Returns "4"
-//!     assert_eq!(value, "4");
-//!     Ok(())
-//! }
-//! ```
+// Python Executor - Public API and main struct
+//
+// This module orchestrates Python code execution with caching support.
+// The implementation is split across multiple submodules for clarity:
+// - process: Python process lifecycle management
+// - execution: Code execution logic (chunks, inline, side-channel communication)
+// - formatters: Inline expression output formatting
 
-pub mod process;
+mod execution;
+mod formatters;
+mod process;
 
+use super::{
+    ConstantObjectHandler, ExecutionResult, GraphicsOptions, KnotExecutor, LanguageExecutor,
+};
+use crate::parser::ChunkOptions;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
-use crate::executors::{
-    ConstantObjectHandler, ExecutionResult, GraphicsOptions, KnotExecutor, LanguageExecutor,
-    OutputMetadata, SideChannel,
-};
-use process::PythonProcess;
+pub use process::PythonProcess;
 
 pub struct PythonExecutor {
     process: PythonProcess,
-    #[allow(dead_code)]
     cache_dir: PathBuf,
 }
 
@@ -81,6 +31,13 @@ impl PythonExecutor {
             process: PythonProcess::uninitialized(),
             cache_dir,
         })
+    }
+
+    /// Execute a lightweight Python query and return raw stdout
+    pub fn query(&mut self, code: &str) -> Result<String> {
+        self.process.execute_code(code)?;
+        let (stdout, _) = self.process.read_until_boundary()?;
+        Ok(stdout)
     }
 }
 
@@ -96,58 +53,7 @@ impl LanguageExecutor for PythonExecutor {
     }
 
     fn execute(&mut self, code: &str, graphics: &GraphicsOptions) -> Result<ExecutionResult> {
-        // Create side-channel for this chunk
-        let channel = SideChannel::new()?;
-
-        // Set environment variables in the Python process
-        let meta_file = escape_path_for_code(channel.path());
-        let cache_dir_str = escape_path_for_code(&self.cache_dir);
-
-        let setup_code = format!(
-            "import os\n\
-             os.environ['KNOT_METADATA_FILE'] = '{}'\n\
-             os.environ['KNOT_CACHE_DIR'] = '{}'\n\
-             os.environ['KNOT_FIG_WIDTH'] = '{}'\n\
-             os.environ['KNOT_FIG_HEIGHT'] = '{}'\n\
-             os.environ['KNOT_FIG_DPI'] = '{}'\n\
-             os.environ['KNOT_FIG_FORMAT'] = '{}'",
-            meta_file,
-            cache_dir_str,
-            graphics.width,
-            graphics.height,
-            graphics.dpi,
-            graphics.format
-        );
-
-        self.process.execute_code(&setup_code)?;
-        let _ = self.process.read_until_boundary()?;
-
-        // Execute the actual code
-        self.process.execute_code(code)?;
-        let (stdout, stderr) = self.process.read_until_boundary()?;
-
-        if !stderr.is_empty() && stderr.to_lowercase().contains("traceback") {
-            let code_preview = if code.lines().count() > 5 {
-                let lines: Vec<&str> = code.lines().take(5).collect();
-                format!(
-                    "{}\n... ({} lines truncated)",
-                    lines.join("\n"),
-                    code.lines().count() - 5
-                )
-            } else {
-                code.to_string()
-            };
-
-            anyhow::bail!(
-                "Python execution failed.\n\nCode:\n{}\n\nError:\n{}",
-                code_preview,
-                stderr.trim()
-            );
-        }
-
-        // Read metadata from side-channel
-        let metadata = channel.read_metadata()?;
-        self.metadata_to_execution_result(metadata, &stdout)
+        execution::execute(&mut self.process, &self.cache_dir, code, graphics)
     }
 
     fn execute_inline(&mut self, code: &str) -> Result<String> {
@@ -165,7 +71,7 @@ impl LanguageExecutor for PythonExecutor {
         )?;
 
         match result {
-            ExecutionResult::Text(t) => Ok(t.trim().to_string()),
+            ExecutionResult::Text(t) => Ok(formatters::format_inline_output(&t)),
             _ => anyhow::bail!(
                 "Inline expression returned a complex object (plot or dataframe).\n\
                  Inline code must return text or a simple value.\n\
@@ -175,73 +81,11 @@ impl LanguageExecutor for PythonExecutor {
     }
 
     fn query(&mut self, code: &str) -> Result<String> {
-        let result = self.execute(
-            code,
-            &crate::executors::GraphicsOptions {
-                width: 0.0,
-                height: 0.0,
-                dpi: 0,
-                format: String::new(),
-            },
-        )?;
-        match result {
-            ExecutionResult::Text(t) => Ok(t.trim().to_string()),
-            _ => anyhow::bail!("Internal Error: Query returned unexpected non-text result"),
-        }
-    }
-}
-
-impl PythonExecutor {
-    /// Convert side-channel metadata to ExecutionResult
-    fn metadata_to_execution_result(
-        &self,
-        metadata: Vec<OutputMetadata>,
-        stdout_text: &str,
-    ) -> Result<ExecutionResult> {
-        let mut text_content = String::new();
-        let mut plot_path: Option<PathBuf> = None;
-        let mut dataframe_path: Option<PathBuf> = None;
-
-        for item in metadata {
-            match item {
-                OutputMetadata::Text { content } => {
-                    if !text_content.is_empty() {
-                        text_content.push('\n');
-                    }
-                    text_content.push_str(&content);
-                }
-                OutputMetadata::Plot { path, .. } => {
-                    plot_path = Some(path);
-                }
-                OutputMetadata::DataFrame { path } => {
-                    dataframe_path = Some(path);
-                }
-            }
-        }
-
-        if text_content.is_empty() && !stdout_text.trim().is_empty() {
-            text_content = stdout_text.to_string();
-        }
-
-        match (text_content.is_empty(), dataframe_path, plot_path) {
-            (false, None, None) => Ok(ExecutionResult::Text(text_content)),
-            (_, Some(df), None) => Ok(ExecutionResult::DataFrame(df)),
-            (false, None, Some(plot)) => Ok(ExecutionResult::TextAndPlot {
-                text: text_content,
-                plot,
-            }),
-            (_, None, Some(plot)) => Ok(ExecutionResult::Plot(plot)),
-            (_, Some(df), Some(plot)) => Ok(ExecutionResult::DataFrameAndPlot {
-                dataframe: df,
-                plot,
-            }),
-            (true, None, None) => Ok(ExecutionResult::Text(String::new())),
-        }
+        self.query(code)
     }
 }
 
 use super::path_utils::escape_path_for_code;
-use crate::parser::ChunkOptions;
 
 impl KnotExecutor for PythonExecutor {
     fn save_session(&mut self, path: &Path) -> Result<()> {
@@ -310,8 +154,11 @@ except Exception as e:
     }
 
     fn save_constant(&mut self, object_name: &str, hash: &str, cache_dir: &Path) -> Result<()> {
-        let obj_path = cache_dir.join("objects").join(format!("{}.pkl", hash));
-        let path_str = escape_path_for_code(&obj_path);
+        let objects_dir = cache_dir.join("objects");
+        std::fs::create_dir_all(&objects_dir)?;
+
+        let object_path = objects_dir.join(format!("{}.pkl", hash));
+        let path_str = escape_path_for_code(&object_path);
 
         let code = format!(
             r#"
@@ -323,11 +170,32 @@ with open('{path_str}', 'wb') as f:
             object_name = object_name.replace('\'', "\\'")
         );
         self.query(&code)?;
+        log::debug!(
+            "💾 Saved constant object '{}' to: {}",
+            object_name,
+            object_path.display()
+        );
         Ok(())
     }
 
     fn load_constant(&mut self, object_name: &str, hash: &str, cache_dir: &Path) -> Result<()> {
         let object_path = cache_dir.join("objects").join(format!("{}.pkl", hash));
+
+        // Verify file integrity by hashing the file (parity with R)
+        let actual_hash = self.hash_file(&object_path)?;
+        if actual_hash != hash {
+            anyhow::bail!(
+                "Cache corruption detected for constant object '{}'.\n\
+                 Expected hash: {}\n\
+                 Actual hash: {}\n\
+                 File: {}",
+                object_name,
+                hash,
+                actual_hash,
+                object_path.display()
+            );
+        }
+
         let path_str = escape_path_for_code(&object_path);
 
         let code = format!(
@@ -340,17 +208,38 @@ with open('{path_str}', 'rb') as f:
             object_name = object_name.replace('\'', "\\'")
         );
         self.query(&code)?;
+        log::debug!(
+            "📥 Loaded constant object '{}' from: {}",
+            object_name,
+            object_path.display()
+        );
         Ok(())
     }
 
     fn remove_from_env(&mut self, object_name: &str) -> Result<()> {
         let code = format!("del globals()['{}']", object_name.replace('\'', "\\'"));
         self.query(&code)?;
+        log::debug!("🗑️  Removed '{}' from Python environment", object_name);
         Ok(())
     }
 
     fn object_extension(&self) -> &'static str {
         "pkl"
+    }
+}
+
+impl PythonExecutor {
+    /// Hash a file's content using xxHash64 (parity with R)
+    fn hash_file(&self, file_path: &Path) -> Result<String> {
+        use std::fs::File;
+        use std::io::Read;
+
+        let mut file = File::open(file_path)?;
+        let mut buffer = Vec::new();
+        file.read_to_end(&mut buffer)?;
+
+        let hash = xxhash_rust::xxh64::xxh64(&buffer, 0);
+        Ok(format!("{:x}", hash))
     }
 }
 
@@ -457,7 +346,7 @@ mod tests {
 
         executor
             .execute(
-                "z = 'hello'",
+                "z = 999",
                 &GraphicsOptions {
                     width: 0.0,
                     height: 0.0,
@@ -469,12 +358,12 @@ mod tests {
 
         executor.save_session(&snapshot_path).unwrap();
 
-        // Create new executor and load session
+        // New executor
         let mut executor2 = PythonExecutor::new(tmp.path().to_path_buf()).unwrap();
         executor2.initialize().unwrap();
         executor2.load_session(&snapshot_path).unwrap();
 
         let result = executor2.execute_inline("z").unwrap();
-        assert_eq!(result, "hello");
+        assert_eq!(result, "999");
     }
 }
