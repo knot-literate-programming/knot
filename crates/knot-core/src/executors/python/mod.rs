@@ -98,7 +98,6 @@ impl LanguageExecutor for PythonExecutor {
     fn execute(&mut self, code: &str, graphics: &GraphicsOptions) -> Result<ExecutionResult> {
         // Create side-channel for this chunk
         let channel = SideChannel::new()?;
-        channel.setup_env()?;
 
         // Set environment variables in the Python process
         let meta_file = escape_path_for_code(channel.path());
@@ -272,18 +271,14 @@ impl KnotExecutor for PythonExecutor {
 
 impl ConstantObjectHandler for PythonExecutor {
     fn hash_object(&mut self, object_name: &str) -> Result<String> {
-        // Use environment variable to avoid code injection in the Python script
-        unsafe {
-            std::env::set_var("KNOT_OBJECT_NAME", object_name);
-        }
-
-        let code = r#"
+        let code = format!(
+            r#"
 import os
 import pickle
 import hashlib
 try:
     import xxhash
-    obj = globals().get(os.environ["KNOT_OBJECT_NAME"])
+    obj = globals().get("{object_name}")
     if obj is None:
         print('NONE')
     else:
@@ -291,16 +286,18 @@ try:
         print(h)
 except ImportError:
     # Use fallback if xxhash is missing
-    obj = globals().get(os.environ["KNOT_OBJECT_NAME"])
+    obj = globals().get("{object_name}")
     if obj is None:
         print('NONE')
     else:
         h = hashlib.sha256(pickle.dumps(obj)).hexdigest()
         print(h)
 except Exception as e:
-    print(f'ERROR: {e}')
-"#;
-        let out = self.query(code)?;
+    print(f'ERROR: {{e}}')
+"#,
+            object_name = object_name.replace('"', "\\\"")
+        );
+        let out = self.query(&code)?;
         if out.trim() == "NONE" {
             anyhow::bail!("Object not found");
         }
@@ -314,51 +311,42 @@ except Exception as e:
         let obj_path = cache_dir.join("objects").join(format!("{}.pkl", hash));
         let path_str = escape_path_for_code(&obj_path);
 
-        unsafe {
-            std::env::set_var("KNOT_OBJECT_NAME", object_name);
-        }
-
         let code = format!(
             r#"
 import pickle
-import os
-with open('{}', 'wb') as f:
-    pickle.dump(globals()[os.environ['KNOT_OBJECT_NAME']], f)
+with open('{path_str}', 'wb') as f:
+    pickle.dump(globals()['{object_name}'], f)
 "#,
-            path_str
+            path_str = path_str,
+            object_name = object_name.replace('\'', "\\'")
         );
         self.query(&code)?;
         Ok(())
     }
 
     fn load_constant(&mut self, object_name: &str, hash: &str, cache_dir: &Path) -> Result<()> {
-        let obj_path = cache_dir.join("objects").join(format!("{}.pkl", hash));
-        let path_str = escape_path_for_code(&obj_path);
-
-        unsafe {
-            std::env::set_var("KNOT_OBJECT_NAME", object_name);
-        }
+        let object_path = cache_dir.join("objects").join(format!("{}.pkl", hash));
+        let path_str = escape_path_for_code(&object_path);
 
         let code = format!(
             r#"
 import pickle
-import os
-with open('{}', 'rb') as f:
-    globals()[os.environ['KNOT_OBJECT_NAME']] = pickle.load(f)
+with open('{path_str}', 'rb') as f:
+    globals()['{object_name}'] = pickle.load(f)
 "#,
-            path_str
+            path_str = path_str,
+            object_name = object_name.replace('\'', "\\'")
         );
         self.query(&code)?;
         Ok(())
     }
 
     fn remove_from_env(&mut self, object_name: &str) -> Result<()> {
-        unsafe {
-            std::env::set_var("KNOT_OBJECT_NAME", object_name);
-        }
-
-        let code = "import os\ndel globals()[os.environ['KNOT_OBJECT_NAME']]";
-        self.query(code)?;
+        let code = format!(
+            "del globals()['{}']",
+            object_name.replace('\'', "\\'")
+        );
+        self.query(&code)?;
         Ok(())
     }
 

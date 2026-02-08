@@ -25,7 +25,6 @@ pub fn execute(
 ) -> Result<ExecutionResult> {
     // Create side-channel for this chunk
     let channel = SideChannel::new()?;
-    channel.setup_env()?;
 
     let stdin = process
         .stdin

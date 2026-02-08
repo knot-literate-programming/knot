@@ -30,7 +30,6 @@ pub enum OutputMetadata {
 /// ```
 /// # use knot_core::executors::side_channel::SideChannel;
 /// let channel = SideChannel::new().unwrap();
-/// channel.setup_env().unwrap();
 ///
 /// // Execute code (R/Python writes to KNOT_METADATA_FILE)
 /// // executor.run(code)?;
@@ -51,25 +50,6 @@ impl SideChannel {
         let metadata_file = temp_dir.join(format!("knot_meta_{}.json", uuid));
 
         Ok(Self { metadata_file })
-    }
-
-    /// Setup environment variable for language runtime to write to
-    ///
-    /// # Safety
-    ///
-    /// This method uses `unsafe { std::env::set_var() }` which is not thread-safe.
-    /// It MUST be called in a single-threaded context (e.g., before spawning
-    /// executor threads). In the current architecture, this is guaranteed because
-    /// the compiler runs chunks sequentially in a single thread.
-    ///
-    /// # Panics
-    ///
-    /// May panic if called concurrently with other environment modifications.
-    pub fn setup_env(&self) -> Result<()> {
-        unsafe {
-            std::env::set_var("KNOT_METADATA_FILE", &self.metadata_file);
-        }
-        Ok(())
     }
 
     /// Read metadata written by language runtime
@@ -127,15 +107,6 @@ mod tests {
                 .to_string_lossy()
                 .contains("knot_meta_")
         );
-    }
-
-    #[test]
-    fn test_setup_env() {
-        let channel = SideChannel::new().unwrap();
-        channel.setup_env().unwrap();
-
-        let env_value = std::env::var("KNOT_METADATA_FILE").unwrap();
-        assert_eq!(env_value, channel.metadata_file.to_string_lossy());
     }
 
     #[test]
