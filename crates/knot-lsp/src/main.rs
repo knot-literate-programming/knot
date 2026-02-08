@@ -115,12 +115,20 @@ impl LanguageServer for KnotLanguageServer {
         let tinymist_path = self.state.tinymist_path_override.read().await.clone();
         let root_uri = self.root_uri.read().await.clone();
         match TinymistProxy::spawn(root_uri, tinymist_path).await {
-            Ok((proxy, _notification_rx)) => {
+            Ok((proxy, mut notification_rx)) => {
                 let mut tinymist_guard = self.state.tinymist.write().await;
                 *tinymist_guard = Some(proxy);
                 self.client
                     .log_message(MessageType::INFO, "Tinymist proxy spawned successfully")
                     .await;
+
+                // Spawn background task to handle notifications from tinymist
+                let this = self.clone_for_task();
+                tokio::spawn(async move {
+                    while let Some(msg) = notification_rx.recv().await {
+                        this.handle_tinymist_notification(msg).await;
+                    }
+                });
             }
             Err(e) => {
                 self.client
@@ -478,6 +486,31 @@ impl KnotLanguageServer {
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+
+    /// Handle notifications coming from the Tinymist subprocess
+    async fn handle_tinymist_notification(&self, msg: serde_json::Value) {
+        if let Some(method) = msg.get("method").and_then(|m| m.as_str()) {
+            match method {
+                "textDocument/publishDiagnostics" => {
+                    // This is where diagnostics mapping logic will go.
+                    // 1. Extract Typst diagnostics from msg["params"]
+                    // 2. Map ranges (Typst -> Knot)
+                    // 3. Publish to client
+                    let _ = self.client.log_message(
+                        MessageType::LOG,
+                        "LSP: Received diagnostics from Tinymist (mapping logic needed)",
+                    ).await;
+                }
+                _ => {
+                    // Log other notifications for development/debugging
+                    let _ = self.client.log_message(
+                        MessageType::LOG,
+                        format!("LSP: Received notification from Tinymist: {}", method),
+                    ).await;
                 }
             }
         }
