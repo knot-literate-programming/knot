@@ -342,10 +342,7 @@ with open('{path_str}', 'rb') as f:
     }
 
     fn remove_from_env(&mut self, object_name: &str) -> Result<()> {
-        let code = format!(
-            "del globals()['{}']",
-            object_name.replace('\'', "\\'")
-        );
+        let code = format!("del globals()['{}']", object_name.replace('\'', "\\'"));
         self.query(&code)?;
         Ok(())
     }
