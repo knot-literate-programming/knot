@@ -39,44 +39,97 @@ impl ChunkError {
     }
 }
 
+/// ChunkOptions with optional fields for YAML parsing.
+/// None means "not specified", allowing fallbacks to knot.toml or defaults.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ChunkOptions {
-    // Boolean options: None means "use defaults"
+    /// Whether to evaluate the chunk
     pub eval: Option<bool>,
+    /// Whether to include the source code in the output
     pub echo: Option<bool>,
+    /// Whether to include the execution results
     pub output: Option<bool>,
+    /// Whether to cache the results
     pub cache: Option<bool>,
 
+    /// Optional label for the chunk
     pub label: Option<String>,
+    /// Optional caption for figures
     pub caption: Option<String>,
+    /// File dependencies
     pub depends: Vec<PathBuf>,
 
-    // Graphics options (Phase 4)
+    /// Figure width in inches
     #[serde(rename = "fig-width")]
     pub fig_width: Option<f64>,
+    /// Figure height in inches
     #[serde(rename = "fig-height")]
     pub fig_height: Option<f64>,
+    /// DPI for raster graphics
     pub dpi: Option<u32>,
+    /// Format of plots (e.g., "svg", "png")
     #[serde(rename = "fig-format")]
     pub fig_format: Option<String>,
+    /// Alternative text for figures
     #[serde(rename = "fig-alt")]
     pub fig_alt: Option<String>,
 
-    // Constant objects (Cache optimization)
-    #[serde(default)]
+    /// Names of objects to treat as immutable constants
+    pub constant: Vec<String>,
+}
+
+/// ChunkOptions with all values resolved to concrete types.
+#[derive(Debug, Clone, Serialize)]
+pub struct ResolvedChunkOptions {
+    pub eval: bool,
+    pub echo: bool,
+    pub output: bool,
+    pub cache: bool,
+    pub label: Option<String>,
+    pub caption: Option<String>,
+    pub depends: Vec<PathBuf>,
+    pub fig_width: f64,
+    pub fig_height: f64,
+    pub dpi: u32,
+    pub fig_format: String,
+    pub fig_alt: Option<String>,
     pub constant: Vec<String>,
 }
 
 impl ChunkOptions {
-    /// Apply default values from knot.toml configuration
-    ///
-    /// Only applies defaults for fields that are None (not specified in chunk).
-    /// Chunk-specific options always take priority over config defaults.
-    ///
-    /// Priority: chunk options > knot.toml defaults > hardcoded defaults
+    /// Resolve all options to concrete values, applying hardcoded defaults.
+    /// This is called after potential config defaults have been applied.
+    pub fn resolve(&self) -> ResolvedChunkOptions {
+        use crate::defaults::Defaults;
+        ResolvedChunkOptions {
+            eval: self.eval.unwrap_or(Defaults::CHUNK_EVAL),
+            echo: self.echo.unwrap_or(Defaults::CHUNK_ECHO),
+            output: self.output.unwrap_or(Defaults::CHUNK_OUTPUT),
+            cache: self.cache.unwrap_or(Defaults::CHUNK_CACHE),
+            label: self.label.clone(),
+            caption: self.caption.clone(),
+            depends: self.depends.clone(),
+            fig_width: self.fig_width.unwrap_or(Defaults::FIG_WIDTH),
+            fig_height: self.fig_height.unwrap_or(Defaults::FIG_HEIGHT),
+            dpi: self.dpi.unwrap_or(Defaults::DPI),
+            fig_format: self
+                .fig_format
+                .clone()
+                .unwrap_or_else(|| Defaults::FIG_FORMAT.to_string()),
+            fig_alt: self.fig_alt.clone(),
+            constant: self.constant.clone(),
+        }
+    }
+
+    /// Get a ResolvedChunkOptions instance with all default values.
+    pub fn default_resolved() -> ResolvedChunkOptions {
+        Self::default().resolve()
+    }
+
+    /// Apply default values from knot.toml configuration.
+    /// Only applies defaults for fields that are still None.
     pub fn apply_config_defaults(&mut self, defaults: &crate::config::ChunkDefaults) {
-        // Boolean options: apply config defaults if not set in chunk
         if self.eval.is_none() {
             self.eval = defaults.eval;
         }
@@ -89,8 +142,6 @@ impl ChunkOptions {
         if self.cache.is_none() {
             self.cache = defaults.cache;
         }
-
-        // Graphics options: apply config defaults if not set in chunk
         if self.fig_width.is_none() {
             self.fig_width = defaults.fig_width;
         }
@@ -104,63 +155,6 @@ impl ChunkOptions {
             self.fig_format = defaults.fig_format.clone();
         }
     }
-
-    /// Resolve all options to concrete values
-    ///
-    /// Applies hardcoded defaults for any options still None after config defaults.
-    /// This is the final step that converts Option<bool> to bool.
-    pub fn resolve(&self) -> ResolvedChunkOptions {
-        ResolvedChunkOptions {
-            eval: self.eval.unwrap_or(crate::defaults::Defaults::CHUNK_EVAL),
-            echo: self.echo.unwrap_or(crate::defaults::Defaults::CHUNK_ECHO),
-            output: self
-                .output
-                .unwrap_or(crate::defaults::Defaults::CHUNK_OUTPUT),
-            cache: self.cache.unwrap_or(crate::defaults::Defaults::CHUNK_CACHE),
-
-            label: self.label.clone(),
-            caption: self.caption.clone(),
-            depends: self.depends.clone(),
-
-            fig_width: self
-                .fig_width
-                .unwrap_or(crate::defaults::Defaults::FIG_WIDTH),
-            fig_height: self
-                .fig_height
-                .unwrap_or(crate::defaults::Defaults::FIG_HEIGHT),
-            dpi: self.dpi.unwrap_or(crate::defaults::Defaults::DPI),
-            fig_format: self
-                .fig_format
-                .clone()
-                .unwrap_or_else(|| crate::defaults::Defaults::FIG_FORMAT.to_string()),
-            fig_alt: self.fig_alt.clone(),
-
-            constant: self.constant.clone(),
-        }
-    }
-}
-
-/// ChunkOptions with all values resolved to concrete types
-///
-/// This is what the compiler uses after applying chunk > config > hardcoded defaults.
-#[derive(Debug, Clone)]
-pub struct ResolvedChunkOptions {
-    pub eval: bool,
-    pub echo: bool,
-    pub output: bool,
-    pub cache: bool,
-
-    pub label: Option<String>,
-    pub caption: Option<String>,
-    pub depends: Vec<PathBuf>,
-
-    pub fig_width: f64,
-    pub fig_height: f64,
-    pub dpi: u32,
-    pub fig_format: String,
-    pub fig_alt: Option<String>,
-
-    pub constant: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -222,11 +216,6 @@ impl Document {
     // La logique de parsing utilise winnow (v2)
     pub fn parse(source: String) -> Result<Self> {
         let doc = super::winnow_parser::parse_document(&source);
-        if !doc.errors.is_empty() {
-            // For now, we still return Ok but the document contains errors.
-            // This is good for LSP.
-            // In the future, the compiler might want to check doc.errors.
-        }
         Ok(doc)
     }
 }
