@@ -210,7 +210,7 @@ mod tests {
         );
 
         // The code in process_inline_expr returns String::new() when eval=false
-        assert_eq!(inline.options.resolve().eval, false);
+        assert!(!inline.options.resolve().eval);
     }
 
     #[test]
