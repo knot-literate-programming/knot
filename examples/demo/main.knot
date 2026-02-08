@@ -5,7 +5,7 @@
 
 = Knot Demonstration
 
-This document demonstrates the capabilities of Knot for literate programming with Typst, R, and Python.
+This document demonstrates the capabilities of Knot for literate programming with Typst, R, and #emph[Python].
 
 == R Integration
 

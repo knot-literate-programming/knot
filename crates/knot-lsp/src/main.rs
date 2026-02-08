@@ -247,58 +247,53 @@ impl LanguageServer for KnotLanguageServer {
             )
             .await;
 
-        match params.command.as_str() {
-            "knot.cleanProject" => {
-                if let Some(arg) = params.arguments.first() {
-                    // 1. Try direct string
-                    let mut uri_str = arg.as_str().map(|s| s.to_string());
+        if params.command.as_str() == "knot.cleanProject" {
+            if let Some(arg) = params.arguments.first() {
+                // 1. Try direct string
+                let mut uri_str = arg.as_str().map(|s| s.to_string());
 
-                    // 2. Try Serde deserialization
-                    if uri_str.is_none() {
-                        if let Ok(vs_uri) = serde_json::from_value::<VsCodeUri>(arg.clone()) {
-                            uri_str = vs_uri.preferred_uri();
-                        }
+                // 2. Try Serde deserialization
+                if uri_str.is_none() {
+                    if let Ok(vs_uri) = serde_json::from_value::<VsCodeUri>(arg.clone()) {
+                        uri_str = vs_uri.preferred_uri();
                     }
+                }
 
-                    if let Some(s) = uri_str {
-                        self.client
-                            .log_message(MessageType::INFO, format!("LSP: Target URI: {}", s))
-                            .await;
-                        // Handle both URI string and raw path
-                        let url = Url::parse(&s).ok().or_else(|| Url::from_file_path(&s).ok());
+                if let Some(s) = uri_str {
+                    self.client
+                        .log_message(MessageType::INFO, format!("LSP: Target URI: {}", s))
+                        .await;
+                    // Handle both URI string and raw path
+                    let url = Url::parse(&s).ok().or_else(|| Url::from_file_path(&s).ok());
 
-                        if let Some(uri) = url {
-                            if let Ok(path) = uri.to_file_path() {
-                                if let Err(e) = knot_core::clean_project(Some(&path)) {
-                                    self.client
-                                        .log_message(
-                                            MessageType::ERROR,
-                                            format!("LSP: Clean failed: {}", e),
-                                        )
-                                        .await;
-                                    return Err(tower_lsp::jsonrpc::Error::invalid_params(
-                                        format!("Clean failed: {}", e),
-                                    ));
-                                }
+                    if let Some(uri) = url {
+                        if let Ok(path) = uri.to_file_path() {
+                            if let Err(e) = knot_core::clean_project(Some(&path)) {
                                 self.client
                                     .log_message(
-                                        MessageType::INFO,
-                                        "LSP: Project cleaned successfully",
+                                        MessageType::ERROR,
+                                        format!("LSP: Clean failed: {}", e),
                                     )
                                     .await;
-                                return Ok(Some(serde_json::json!({"status": "success"})));
+                                return Err(tower_lsp::jsonrpc::Error::invalid_params(format!(
+                                    "Clean failed: {}",
+                                    e
+                                )));
                             }
+                            self.client
+                                .log_message(MessageType::INFO, "LSP: Project cleaned successfully")
+                                .await;
+                            return Ok(Some(serde_json::json!({"status": "success"})));
                         }
                     }
-                    self.client
-                        .log_message(
-                            MessageType::WARNING,
-                            "LSP: Could not extract valid path from arguments",
-                        )
-                        .await;
                 }
+                self.client
+                    .log_message(
+                        MessageType::WARNING,
+                        "LSP: Could not extract valid path from arguments",
+                    )
+                    .await;
             }
-            _ => {}
         }
         Ok(None)
     }
@@ -312,6 +307,7 @@ impl KnotLanguageServer {
                 documents: self.state.documents.clone(),
                 mappers: self.state.mappers.clone(),
                 knot_diagnostics_cache: self.state.knot_diagnostics_cache.clone(),
+                tinymist_diagnostics_cache: self.state.tinymist_diagnostics_cache.clone(),
                 opened_in_tinymist: self.state.opened_in_tinymist.clone(),
                 document_versions: self.state.document_versions.clone(),
                 formatter: self.state.formatter.clone(),
@@ -325,6 +321,31 @@ impl KnotLanguageServer {
         })
     }
 
+    fn to_virtual_uri(&self, uri: &Url) -> Url {
+        let mut path = uri.path().to_string();
+        if !path.ends_with(".typ") {
+            path.push_str(".typ");
+        }
+        // Handle scheme/host manually to be safe, or just replace path
+        // Url::parse is safer but might lose some info.
+        // Simplest hack: string manipulation
+        let mut s = uri.to_string();
+        if !s.ends_with(".typ") {
+            s.push_str(".typ");
+        }
+        Url::parse(&s).unwrap_or(uri.clone())
+    }
+
+    fn resolve_virtual_uri(&self, uri: &Url) -> Url {
+        let s = uri.to_string();
+        if s.ends_with(".typ") && s.contains(".knot") {
+            if let Ok(u) = Url::parse(s.trim_end_matches(".typ")) {
+                return u;
+            }
+        }
+        uri.clone()
+    }
+
     async fn update_mapper(&self, uri: &Url, text: &str) {
         let typ_text = transform_to_typst(text);
         let mapper = PositionMapper::new(text, &typ_text);
@@ -334,9 +355,37 @@ impl KnotLanguageServer {
 
     async fn publish_diagnostics(&self, uri: &Url, text: &str) {
         let diagnostics = get_diagnostics(text);
+        {
+            let mut cache = self.state.knot_diagnostics_cache.write().await;
+            cache.insert(uri.clone(), diagnostics);
+        }
+        self.publish_combined_diagnostics(uri).await;
+    }
+
+    async fn publish_combined_diagnostics(&self, uri: &Url) {
+        let knot_diag = self
+            .state
+            .knot_diagnostics_cache
+            .read()
+            .await
+            .get(uri)
+            .cloned()
+            .unwrap_or_default();
+        let tiny_diag = self
+            .state
+            .tinymist_diagnostics_cache
+            .read()
+            .await
+            .get(uri)
+            .cloned()
+            .unwrap_or_default();
+
+        let mut combined = knot_diag;
+        combined.extend(tiny_diag);
+
         let _ = self
             .client
-            .publish_diagnostics(uri.clone(), diagnostics, None)
+            .publish_diagnostics(uri.clone(), combined, None)
             .await;
     }
 
@@ -348,6 +397,9 @@ impl KnotLanguageServer {
                 docs.get(uri).cloned().unwrap_or_default()
             };
 
+            // Use virtual URI to trick Tinymist
+            let virtual_uri = self.to_virtual_uri(uri);
+
             let mut opened_map = self.state.opened_in_tinymist.write().await;
             let mut versions = self.state.document_versions.write().await;
 
@@ -358,7 +410,7 @@ impl KnotLanguageServer {
             let params = if method == "textDocument/didOpen" || !is_opened {
                 serde_json::json!({
                     "textDocument": {
-                        "uri": uri,
+                        "uri": virtual_uri,
                         "languageId": "typst",
                         "version": version,
                         "text": transform_to_typst(&content)
@@ -367,7 +419,7 @@ impl KnotLanguageServer {
             } else {
                 serde_json::json!({
                     "textDocument": {
-                        "uri": uri,
+                        "uri": virtual_uri,
                         "version": version
                     },
                     "contentChanges": [{
@@ -383,10 +435,13 @@ impl KnotLanguageServer {
             };
 
             if let Err(e) = proxy.send_notification(actual_method, params).await {
-                let _ = self.client.log_message(
-                    MessageType::ERROR,
-                    format!("Failed to send to tinymist: {}", e),
-                ).await;
+                let _ = self
+                    .client
+                    .log_message(
+                        MessageType::ERROR,
+                        format!("Failed to send to tinymist: {}", e),
+                    )
+                    .await;
             } else if !is_opened {
                 opened_map.insert(uri.clone(), true);
             }
@@ -496,21 +551,50 @@ impl KnotLanguageServer {
         if let Some(method) = msg.get("method").and_then(|m| m.as_str()) {
             match method {
                 "textDocument/publishDiagnostics" => {
-                    // This is where diagnostics mapping logic will go.
-                    // 1. Extract Typst diagnostics from msg["params"]
-                    // 2. Map ranges (Typst -> Knot)
-                    // 3. Publish to client
-                    let _ = self.client.log_message(
-                        MessageType::LOG,
-                        "LSP: Received diagnostics from Tinymist (mapping logic needed)",
-                    ).await;
+                    if let Some(params) = msg.get("params") {
+                        if let (Some(uri_str), Some(diagnostics_val)) = (
+                            params.get("uri").and_then(|u| u.as_str()),
+                            params.get("diagnostics"),
+                        ) {
+                            if let (Ok(virtual_uri), Ok(mut diagnostics)) = (
+                                Url::parse(uri_str),
+                                serde_json::from_value::<Vec<Diagnostic>>(diagnostics_val.clone()),
+                            ) {
+                                // Convert back to real Knot URI
+                                let uri = self.resolve_virtual_uri(&virtual_uri);
+
+                                // Map positions (currently identity, but ready for future)
+                                let mappers = self.state.mappers.read().await;
+                                if let Some(mapper) = mappers.get(&uri) {
+                                    for d in &mut diagnostics {
+                                        if let (Some(start), Some(end)) = (
+                                            mapper.typ_to_knot_position(d.range.start),
+                                            mapper.typ_to_knot_position(d.range.end),
+                                        ) {
+                                            d.range = Range { start, end };
+                                        }
+                                    }
+                                }
+
+                                {
+                                    let mut cache =
+                                        self.state.tinymist_diagnostics_cache.write().await;
+                                    cache.insert(uri.clone(), diagnostics);
+                                }
+                                self.publish_combined_diagnostics(&uri).await;
+                            }
+                        }
+                    }
                 }
                 _ => {
                     // Log other notifications for development/debugging
-                    let _ = self.client.log_message(
-                        MessageType::LOG,
-                        format!("LSP: Received notification from Tinymist: {}", method),
-                    ).await;
+                    let _ = self
+                        .client
+                        .log_message(
+                            MessageType::LOG,
+                            format!("LSP: Received notification from Tinymist: {}", method),
+                        )
+                        .await;
                 }
             }
         }

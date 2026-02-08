@@ -21,6 +21,8 @@ use tokio_util::bytes::{Buf, BufMut, BytesMut};
 use tokio_util::codec::{Decoder, Encoder, FramedRead};
 use tower_lsp::lsp_types::Url;
 
+type PendingRequests = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value>>>>>;
+
 /// A codec for LSP messages (Content-Length + JSON-RPC)
 pub struct LspCodec;
 
@@ -29,31 +31,37 @@ impl Decoder for LspCodec {
     type Error = anyhow::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>> {
-        let src_str = std::str::from_utf8(src)?;
-        
-        // Find Content-Length header
-        let content_length_pos = src_str.find("Content-Length: ");
-        let header_end_pos = src_str.find("\r\n\r\n");
+        let src_buf = &src[..];
 
-        match (content_length_pos, header_end_pos) {
-            (Some(start), Some(end)) => {
-                let len_str = &src_str[start + 16..end].trim();
-                let content_length: usize = len_str.parse().context("Invalid Content-Length")?;
-                
-                let message_start = end + 4;
-                if src.len() >= message_start + content_length {
-                    // We have the full message
-                    src.advance(message_start);
-                    let data = src.split_to(content_length);
-                    let message: Value = serde_json::from_slice(&data)?;
-                    Ok(Some(message))
-                } else {
-                    // Not enough data yet
-                    Ok(None)
+        // 1. Find the double CRLF that separates headers from body
+        let header_end = src_buf.windows(4).position(|w| w == b"\r\n\r\n");
+
+        if let Some(end_pos) = header_end {
+            // 2. Parse Content-Length from headers
+            let headers = std::str::from_utf8(&src_buf[..end_pos])?;
+            let mut content_length = None;
+            for line in headers.lines() {
+                if line.to_lowercase().starts_with("content-length:") {
+                    if let Some(len_str) = line.split(':').nth(1) {
+                        content_length = Some(len_str.trim().parse::<usize>()?);
+                    }
                 }
             }
-            _ => Ok(None),
+
+            if let Some(len) = content_length {
+                let total_len = end_pos + 4 + len;
+                if src.len() >= total_len {
+                    // 3. We have the full message
+                    src.advance(end_pos + 4);
+                    let data = src.split_to(len);
+                    let message: Value = serde_json::from_slice(&data)?;
+                    return Ok(Some(message));
+                }
+            }
         }
+
+        // Not enough data yet
+        Ok(None)
     }
 }
 
@@ -63,11 +71,11 @@ impl Encoder<Value> for LspCodec {
     fn encode(&mut self, item: Value, dst: &mut BytesMut) -> Result<()> {
         let content = serde_json::to_string(&item)?;
         let header = format!("Content-Length: {}\r\n\r\n", content.len());
-        
+
         dst.reserve(header.len() + content.len());
         dst.put(header.as_bytes());
         dst.put(content.as_bytes());
-        
+
         Ok(())
     }
 }
@@ -81,7 +89,7 @@ pub struct TinymistProxy {
     /// Counter for request IDs
     request_id: Arc<AtomicU64>,
     /// Map of pending requests (ID -> Sender)
-    pending_requests: Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value>>>>>,
+    pending_requests: PendingRequests,
 }
 
 // ============================================================================
@@ -114,7 +122,7 @@ impl TinymistProxy {
 
         let stdin = child.stdin.take().context("Failed to get stdin")?;
         let stdout = child.stdout.take().context("Failed to get stdout")?;
-        
+
         let mut framed_read = FramedRead::new(stdout, LspCodec);
         let pending_requests = Arc::new(Mutex::new(HashMap::new()));
         let (notification_tx, notification_rx) = mpsc::channel(100);
@@ -126,7 +134,8 @@ impl TinymistProxy {
             while let Some(res) = framed_read.next().await {
                 match res {
                     Ok(message) => {
-                        Self::dispatch_message(message, &pending_requests_clone, &notification_tx).await;
+                        Self::dispatch_message(message, &pending_requests_clone, &notification_tx)
+                            .await;
                     }
                     Err(e) => {
                         eprintln!("Tinymist read error: {}", e);
@@ -150,7 +159,7 @@ impl TinymistProxy {
 
     async fn dispatch_message(
         message: Value,
-        pending_requests: &Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value>>>>>,
+        pending_requests: &PendingRequests,
         notification_tx: &mpsc::Sender<Value>,
     ) {
         if let Some(id) = message.get("id") {
@@ -158,7 +167,8 @@ impl TinymistProxy {
                 let mut map = pending_requests.lock().await;
                 if let Some(sender) = map.remove(&id_val) {
                     if message.get("error").is_some() {
-                        let _ = sender.send(Err(anyhow::anyhow!("LSP Error: {:?}", message["error"])));
+                        let _ =
+                            sender.send(Err(anyhow::anyhow!("LSP Error: {:?}", message["error"])));
                     } else {
                         let _ = sender.send(Ok(message));
                     }
@@ -175,7 +185,8 @@ impl TinymistProxy {
         let _ = self.send_notification("exit", Value::Null).await;
 
         if let Some(mut child) = self.child.take() {
-            let _ = tokio::time::timeout(std::time::Duration::from_millis(1000), child.wait()).await;
+            let _ =
+                tokio::time::timeout(std::time::Duration::from_millis(1000), child.wait()).await;
         }
 
         Ok(())
@@ -209,7 +220,8 @@ impl TinymistProxy {
             anyhow::bail!("tinymist initialize failed: {:?}", response);
         }
 
-        self.send_notification("initialized", serde_json::json!({})).await?;
+        self.send_notification("initialized", serde_json::json!({}))
+            .await?;
         Ok(())
     }
 

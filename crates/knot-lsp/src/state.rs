@@ -16,6 +16,8 @@ pub struct ServerState {
     pub mappers: Arc<RwLock<HashMap<Url, PositionMapper>>>,
     /// Cached Knot-specific diagnostics
     pub knot_diagnostics_cache: Arc<RwLock<HashMap<Url, Vec<Diagnostic>>>>,
+    /// Cached Tinymist-specific diagnostics (mapped to Knot positions)
+    pub tinymist_diagnostics_cache: Arc<RwLock<HashMap<Url, Vec<Diagnostic>>>>,
     /// Tracking which files are opened in the tinymist proxy
     pub opened_in_tinymist: Arc<RwLock<HashMap<Url, bool>>>,
     /// Tracking document versions for tinymist synchronization
@@ -39,6 +41,7 @@ impl ServerState {
             documents: Arc::new(RwLock::new(HashMap::new())),
             mappers: Arc::new(RwLock::new(HashMap::new())),
             knot_diagnostics_cache: Arc::new(RwLock::new(HashMap::new())),
+            tinymist_diagnostics_cache: Arc::new(RwLock::new(HashMap::new())),
             opened_in_tinymist: Arc::new(RwLock::new(HashMap::new())),
             document_versions: Arc::new(RwLock::new(HashMap::new())),
             formatter: Arc::new(RwLock::new(None)),
