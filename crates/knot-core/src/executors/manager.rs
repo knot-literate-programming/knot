@@ -90,7 +90,7 @@ impl ExecutorManager {
 
     /// Check if a language is supported
     pub fn is_supported(&self, lang: &str) -> bool {
-        matches!(lang, "r" | "python")
+        crate::defaults::Defaults::SUPPORTED_LANGUAGES.contains(&lang)
     }
 
     /// Get the number of initialized executors (for testing)

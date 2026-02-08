@@ -65,6 +65,9 @@ impl Defaults {
 
     /// Directory name for language-generated files (plots, CSVs)
     pub const LANGUAGE_FILES_DIR: &'static str = "_knot_files";
+
+    /// List of supported languages for code chunks
+    pub const SUPPORTED_LANGUAGES: &[&str] = &["r", "python"];
 }
 
 #[cfg(test)]

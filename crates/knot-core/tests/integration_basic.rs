@@ -120,7 +120,7 @@ fn test_chunk_with_dependencies() {
     let content = r#"
 ```{r load}
 #| eval: true
-#| depends: data.csv, script.R
+#| depends: [data.csv, script.R]
 data <- read_csv("data.csv")
 ```
 "#;

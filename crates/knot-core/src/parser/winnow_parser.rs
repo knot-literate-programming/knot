@@ -23,7 +23,7 @@
 //! errors and includes them in the AST nodes, allowing the compilation to continue
 //! while reporting issues to the user.
 
-use super::ast::{Chunk, Document, InlineExpr, InlineOptions, Position, Range};
+use super::ast::{Chunk, ChunkError, Document, InlineExpr, InlineOptions, Position, Range};
 use super::options::parse_options;
 use winnow::ModalResult;
 use winnow::Parser;
@@ -122,6 +122,16 @@ fn parse_chunk_internal<'i>(input: &mut Input<'i>) -> ModalResult<(Chunk, &'i st
     let _ = space0.parse_next(input)?;
 
     let lang = take_while(1.., |c: char| c.is_alphanumeric() || c == '_').parse_next(input)?;
+    let mut header_errors = Vec::new();
+
+    // Validate language
+    if !crate::defaults::Defaults::SUPPORTED_LANGUAGES.contains(&lang) {
+        header_errors.push(ChunkError::new(
+            format!("Unsupported language: '{}'", lang),
+            Some(0),
+        ));
+    }
+
     let _ = space0.parse_next(input)?;
 
     // Name
@@ -129,7 +139,17 @@ fn parse_chunk_internal<'i>(input: &mut Input<'i>) -> ModalResult<(Chunk, &'i st
     let name = if name_str.trim().is_empty() {
         None
     } else {
-        Some(name_str.trim().to_string())
+        let trimmed = name_str.trim();
+        if trimmed.contains(char::is_whitespace) {
+            header_errors.push(ChunkError::new(
+                format!(
+                    "Invalid chunk name: '{}' (names cannot contain spaces)",
+                    trimmed
+                ),
+                Some(0),
+            ));
+        }
+        Some(trimmed.to_string())
     };
 
     log::debug!("Parsed chunk header: lang='{}', name='{:?}'", lang, name);
@@ -163,7 +183,8 @@ fn parse_chunk_internal<'i>(input: &mut Input<'i>) -> ModalResult<(Chunk, &'i st
         }
     }
 
-    let (options, errors) = parse_options(&options_str);
+    let (options, mut errors) = parse_options(&options_str);
+    errors.extend(header_errors);
 
     // Body
     let code_slice = take_until(0.., "```").parse_next(input)?;
@@ -285,7 +306,7 @@ fn parse_inline_expr<'a>(
 }
 
 /// Parse inline options from a string like "echo=false, digits=3"
-fn parse_inline_options(options_str: &str) -> (InlineOptions, Vec<String>) {
+fn parse_inline_options(options_str: &str) -> (InlineOptions, Vec<ChunkError>) {
     let mut options = InlineOptions::default();
     let mut errors = Vec::new();
     let mut input = options_str.trim();
@@ -307,10 +328,10 @@ fn parse_inline_options(options_str: &str) -> (InlineOptions, Vec<String>) {
                 "output" => options.output = value == "true",
                 "digits" => match value.parse::<u32>() {
                     Ok(n) => options.digits = Some(n),
-                    Err(e) => errors.push(format!("Option 'digits': {}", e)),
+                    Err(e) => errors.push(ChunkError::new(format!("Option 'digits': {}", e), None)),
                 },
                 _ => {
-                    errors.push(format!("Unknown option: '{}'", key));
+                    errors.push(ChunkError::new(format!("Unknown option: '{}'", key), None));
                 }
             }
         }
@@ -377,7 +398,7 @@ mod tests {
     #[test]
     fn test_parse_chunk_with_name_and_dependencies() {
         let content = r###"```{r my-chunk}
-#| depends: data.csv, scripts/helper.R
+#| depends: [data.csv, scripts/helper.R]
 #| cache: false
 rnorm(10)
 ```
@@ -477,7 +498,7 @@ More text below."###;
         let doc = Document::parse(content.to_string()).unwrap();
         assert_eq!(doc.chunks.len(), 1);
         assert_eq!(doc.chunks[0].errors.len(), 1);
-        assert!(doc.chunks[0].errors[0].contains("Option 'eval'"));
+        assert!(doc.chunks[0].errors[0].message.contains("parsing error"));
     }
 
     #[test]
@@ -489,7 +510,7 @@ More text below."###;
         let doc = Document::parse(content.to_string()).unwrap();
         assert_eq!(doc.chunks.len(), 1);
         assert_eq!(doc.chunks[0].errors.len(), 1);
-        assert!(doc.chunks[0].errors[0].contains("Unknown option"));
+        assert!(doc.chunks[0].errors[0].message.contains("parsing error"));
     }
 
     #[test]
@@ -599,7 +620,11 @@ More text below."###;
         assert!(inline.options.echo);
         assert!(inline.options.eval); // default
         assert_eq!(inline.errors.len(), 1);
-        assert!(inline.errors[0].contains("Unknown option: 'unknown'"));
+        assert!(
+            inline.errors[0]
+                .message
+                .contains("Unknown option: 'unknown'")
+        );
     }
 
     #[test]
@@ -611,7 +636,7 @@ More text below."###;
         let inline = &doc.inline_exprs[0];
         assert_eq!(inline.options.digits, None); // Invalid value ignored
         assert_eq!(inline.errors.len(), 1);
-        assert!(inline.errors[0].contains("Option 'digits'"));
+        assert!(inline.errors[0].message.contains("Option 'digits'"));
     }
 
     #[test]

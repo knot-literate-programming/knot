@@ -39,7 +39,7 @@ impl Backend for TypstBackend {
         } else {
             // Only pass caption to code-chunk if there is no name wrapper (no figure)
             if let Some(caption) = &chunk.options.caption {
-                args.push(format!("caption: {}", caption));
+                args.push(format!("caption: [{}]", caption));
             }
         }
 
@@ -50,7 +50,7 @@ impl Backend for TypstBackend {
             let error_list = chunk
                 .errors
                 .iter()
-                .map(|e| format!("\"{}\"", e.replace('\"', "\\\"")))
+                .map(|e| format!("\"{}\"", e.message.replace('\"', "\\\"")))
                 .collect::<Vec<_>>()
                 .join(", ");
             args.push(format!("errors: ({})", error_list));
@@ -115,7 +115,7 @@ impl Backend for TypstBackend {
                 figure_named_args.push("supplement: \"Chunk\"".to_string());
 
                 if let Some(caption) = &chunk.options.caption {
-                    figure_named_args.push(format!("caption: {}", caption));
+                    figure_named_args.push(format!("caption: [{}]", caption));
                 }
 
                 let figure_call_start = format!("#figure({})", figure_named_args.join(", "));
@@ -191,8 +191,14 @@ mod tests {
     fn test_format_chunk_with_errors() {
         let backend = TypstBackend::new();
         let mut chunk = create_test_chunk("r", "1 + 1", None, true, true, None);
-        chunk.errors.push("Unknown option: 'foo'".to_string());
-        chunk.errors.push("Invalid value for 'eval'".to_string());
+        chunk.errors.push(crate::parser::ChunkError::new(
+            "Unknown option: 'foo'",
+            None,
+        ));
+        chunk.errors.push(crate::parser::ChunkError::new(
+            "Invalid value for 'eval'",
+            None,
+        ));
         let result = ExecutionResult::Text("[1] 2".to_string());
         let resolved = chunk.options.resolve();
 
@@ -264,7 +270,7 @@ mod tests {
         assert!(output.contains("#figure("));
         assert!(output.contains("kind: raw"));
         assert!(output.contains("supplement: \"Chunk\""));
-        assert!(output.contains("caption: [My Caption]"));
+        assert!(output.contains("caption: [[My Caption]]"));
         assert!(output.contains("<my-chunk>"));
     }
 
@@ -285,7 +291,7 @@ mod tests {
         let output = backend.format_chunk(&chunk, &resolved, &result);
 
         // Caption should be passed directly to code-chunk when no name
-        assert!(output.contains("caption: [My Caption]"));
+        assert!(output.contains("caption: [[My Caption]]"));
         assert!(!output.contains("#figure("));
     }
 

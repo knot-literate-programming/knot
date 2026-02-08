@@ -1,5 +1,5 @@
 use anyhow::Result;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 // NOTE : Ces structures sont basées sur la section 3.5 du document de référence.
@@ -22,7 +22,25 @@ pub struct Range {
     pub end: Position,
 }
 
-#[derive(Debug, Default, Clone, Serialize)]
+/// An error detected during chunk or inline expression parsing
+#[derive(Debug, Clone, Serialize)]
+pub struct ChunkError {
+    pub message: String,
+    /// Relative line offset within the chunk (0 = header line)
+    pub line_offset: Option<usize>,
+}
+
+impl ChunkError {
+    pub fn new(message: impl Into<String>, line_offset: Option<usize>) -> Self {
+        Self {
+            message: message.into(),
+            line_offset,
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct ChunkOptions {
     // Boolean options: None means "use defaults"
     pub eval: Option<bool>,
@@ -35,13 +53,18 @@ pub struct ChunkOptions {
     pub depends: Vec<PathBuf>,
 
     // Graphics options (Phase 4)
+    #[serde(rename = "fig-width")]
     pub fig_width: Option<f64>,
+    #[serde(rename = "fig-height")]
     pub fig_height: Option<f64>,
     pub dpi: Option<u32>,
+    #[serde(rename = "fig-format")]
     pub fig_format: Option<String>,
+    #[serde(rename = "fig-alt")]
     pub fig_alt: Option<String>,
 
     // Constant objects (Cache optimization)
+    #[serde(default)]
     pub constant: Vec<String>,
 }
 
@@ -146,7 +169,7 @@ pub struct Chunk {
     pub name: Option<String>,
     pub code: String,
     pub options: ChunkOptions,
-    pub errors: Vec<String>,
+    pub errors: Vec<ChunkError>,
     pub range: Range,      // Position du chunk entier (de ```{r}} à ```)
     pub code_range: Range, // Position du code seul à l'intérieur
     pub start_byte: usize,
@@ -185,7 +208,7 @@ pub struct InlineExpr {
     pub code_start_byte: usize,
     pub code_end_byte: usize,
     pub options: InlineOptions,
-    pub errors: Vec<String>,
+    pub errors: Vec<ChunkError>,
 }
 
 pub struct Document {

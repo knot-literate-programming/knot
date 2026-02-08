@@ -39,21 +39,31 @@ pub fn get_diagnostics(text: &str) -> Vec<Diagnostic> {
     // Check for errors in chunks
     for chunk in doc.chunks {
         for error in chunk.errors {
+            // Use precise line offset if available, otherwise highlight the header
+            let target_line = if let Some(offset) = error.line_offset {
+                chunk.range.start.line + offset
+            } else {
+                chunk.range.start.line
+            };
+
+            let line_text = text.lines().nth(target_line).unwrap_or("");
+            let line_len = line_text.len() as u32;
+
             diagnostics.push(Diagnostic {
                 range: Range {
                     start: Position {
-                        line: chunk.range.start.line as u32,
-                        character: chunk.range.start.column as u32,
+                        line: target_line as u32,
+                        character: 0,
                     },
                     end: Position {
-                        line: chunk.range.start.line as u32,
-                        character: (chunk.range.start.column + 3) as u32, // Highlight ```
+                        line: target_line as u32,
+                        character: line_len,
                     },
                 },
                 severity: Some(DiagnosticSeverity::ERROR),
                 code: None,
                 source: Some("knot".to_string()),
-                message: error,
+                message: error.message,
                 ..Diagnostic::default()
             });
         }
@@ -78,7 +88,7 @@ pub fn get_diagnostics(text: &str) -> Vec<Diagnostic> {
                 severity: Some(DiagnosticSeverity::ERROR),
                 code: None,
                 source: Some("knot".to_string()),
-                message: error,
+                message: error.message,
                 ..Diagnostic::default()
             });
         }

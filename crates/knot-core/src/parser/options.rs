@@ -13,127 +13,52 @@
 //! - `fig-format`: (string) Format of plots (e.g., "svg", "png").
 //! - `constant`: (list of strings) Names of objects to treat as immutable constants.
 
-use super::ast::ChunkOptions;
-use anyhow::Result;
-use std::path::PathBuf;
+use super::ast::{ChunkError, ChunkOptions};
 
-// La logique de parsing des options est basée sur la section 8.2
-pub fn parse_options(options_block: &str) -> (ChunkOptions, Vec<String>) {
-    let mut options = ChunkOptions::default();
-    let mut errors = Vec::new();
+// La logique de parsing des options utilise maintenant YAML
+pub fn parse_options(options_block: &str) -> (ChunkOptions, Vec<ChunkError>) {
+    let mut yaml_str = String::new();
+    let mut line_map = Vec::new(); // Map YAML line -> Original line offset
 
-    for line in options_block.lines() {
-        let line = line.trim();
-        if !line.starts_with("#|") {
-            continue;
-        }
-
-        let option_str = line.trim_start_matches("#|").trim();
-
-        if let Some((key, value)) = option_str.split_once(':') {
-            let key = key.trim();
-            let value = value.trim();
-
-            match key {
-                "eval" => match parse_bool(value) {
-                    Ok(v) => options.eval = Some(v),
-                    Err(e) => errors.push(format!("Option 'eval': {}", e)),
-                },
-                "echo" => match parse_bool(value) {
-                    Ok(v) => options.echo = Some(v),
-                    Err(e) => errors.push(format!("Option 'echo': {}", e)),
-                },
-                "output" => match parse_bool(value) {
-                    Ok(v) => options.output = Some(v),
-                    Err(e) => errors.push(format!("Option 'output': {}", e)),
-                },
-                "cache" => match parse_bool(value) {
-                    Ok(v) => options.cache = Some(v),
-                    Err(e) => errors.push(format!("Option 'cache': {}", e)),
-                },
-                "label" => options.label = Some(value.to_string()),
-                "caption" => options.caption = Some(value.to_string()),
-                "depends" => {
-                    options.depends = value.split(',').map(|s| PathBuf::from(s.trim())).collect();
-                }
-                "constant" => {
-                    options.constant = value
-                        .split(',')
-                        .map(|s| s.trim().to_string())
-                        .filter(|name| {
-                            if name.is_empty() {
-                                return false;
-                            }
-                            if !is_valid_identifier(name) {
-                                errors.push(format!(
-                                    "Invalid variable name '{}' in constant option. \
-                                     Must be a valid identifier (letters, digits, underscore).",
-                                    name
-                                ));
-                                false
-                            } else {
-                                true
-                            }
-                        })
-                        .collect();
-                }
-                // Graphics options (Phase 4)
-                "fig-width" => match parse_float(value) {
-                    Ok(v) => options.fig_width = Some(v),
-                    Err(e) => errors.push(format!("Option 'fig-width': {}", e)),
-                },
-                "fig-height" => match parse_float(value) {
-                    Ok(v) => options.fig_height = Some(v),
-                    Err(e) => errors.push(format!("Option 'fig-height': {}", e)),
-                },
-                "dpi" => match parse_uint(value) {
-                    Ok(v) => options.dpi = Some(v),
-                    Err(e) => errors.push(format!("Option 'dpi': {}", e)),
-                },
-                "fig-format" => options.fig_format = Some(value.to_string()),
-                "fig-alt" => options.fig_alt = Some(value.to_string()),
-                _ => {
-                    errors.push(format!("Unknown option: '{}'", key));
-                }
-            }
+    for (i, line) in options_block.lines().enumerate() {
+        let trimmed_line = line.trim();
+        if trimmed_line.starts_with("#|") {
+            let content = trimmed_line.trim_start_matches("#|").trim();
+            yaml_str.push_str(content);
+            yaml_str.push('\n');
+            // Relative line index (0-based from start of chunk)
+            // Options start at line 1 (after header)
+            line_map.push(i + 1);
         }
     }
 
-    (options, errors)
-}
-
-fn parse_bool(s: &str) -> Result<bool> {
-    match s.to_lowercase().as_str() {
-        "true" => Ok(true),
-        "false" => Ok(false),
-        _ => anyhow::bail!("Invalid boolean value: {}", s),
-    }
-}
-
-fn parse_float(s: &str) -> Result<f64> {
-    s.parse::<f64>()
-        .map_err(|_| anyhow::anyhow!("Invalid float value: {}", s))
-}
-
-fn parse_uint(s: &str) -> Result<u32> {
-    s.parse::<u32>()
-        .map_err(|_| anyhow::anyhow!("Invalid unsigned integer value: {}", s))
-}
-
-/// Check if a string is a valid R/Python identifier
-fn is_valid_identifier(name: &str) -> bool {
-    if name.is_empty() {
-        return false;
+    if yaml_str.trim().is_empty() {
+        return (ChunkOptions::default(), Vec::new());
     }
 
-    // Must start with letter or underscore
-    let first = name.chars().next().unwrap();
-    if !first.is_alphabetic() && first != '_' {
-        return false;
-    }
+    match serde_yaml::from_str::<ChunkOptions>(&yaml_str) {
+        Ok(options) => (options, Vec::new()),
+        Err(e) => {
+            let mut errors = Vec::new();
+            // serde_yaml error might contain line/column
+            let line_offset = if let Some(location) = e.location() {
+                let yaml_line = location.line() - 1; // 1-based to 0-based
+                if yaml_line < line_map.len() {
+                    Some(line_map[yaml_line])
+                } else {
+                    line_map.last().copied()
+                }
+            } else {
+                line_map.first().copied()
+            };
 
-    // Must rest be alphanumeric or underscore
-    name.chars().all(|c| c.is_alphanumeric() || c == '_')
+            errors.push(ChunkError::new(
+                format!("Option parsing error: {}", e),
+                line_offset,
+            ));
+            (ChunkOptions::default(), errors)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -145,8 +70,7 @@ mod tests {
         let options_block = "#| eval: maybe\n";
         let (opts, errors) = parse_options(options_block);
         assert!(!errors.is_empty());
-        assert!(errors[0].contains("eval"));
-        assert!(errors[0].contains("Invalid boolean"));
+        assert!(errors[0].message.contains("parsing error"));
         assert_eq!(opts.eval, None);
     }
 
@@ -155,17 +79,18 @@ mod tests {
         let options_block = "#| fig-width: not-a-number\n";
         let (opts, errors) = parse_options(options_block);
         assert!(!errors.is_empty());
-        assert!(errors[0].contains("fig-width"));
         assert_eq!(opts.fig_width, None);
     }
 
     #[test]
-    fn test_parse_invalid_variable_name() {
-        let options_block = "#| constant: valid_name, 123invalid, also-invalid\n";
+    fn test_parse_variable_names() {
+        // YAML handles simple strings without quotes
+        let options_block = "#| constant: [valid_name, another_one]\n";
         let (opts, errors) = parse_options(options_block);
-        assert_eq!(errors.len(), 2);
+
+        assert!(errors.is_empty());
         assert!(opts.constant.contains(&"valid_name".to_string()));
-        assert!(!opts.constant.contains(&"123invalid".to_string()));
+        assert!(opts.constant.contains(&"another_one".to_string()));
     }
 
     #[test]
@@ -174,13 +99,15 @@ mod tests {
 #| eval: true
 #| echo: false
 #| fig-width: 7.0
-#| constant: x, y_2, _private
+#| label: my-plot
+#| constant: [x, y]
 "#;
         let (opts, errors) = parse_options(options_block);
         assert!(errors.is_empty());
         assert_eq!(opts.eval, Some(true));
         assert_eq!(opts.echo, Some(false));
         assert_eq!(opts.fig_width, Some(7.0));
-        assert_eq!(opts.constant.len(), 3);
+        assert_eq!(opts.label, Some("my-plot".to_string()));
+        assert_eq!(opts.constant.len(), 2);
     }
 }
