@@ -207,10 +207,7 @@ async fn get_r_completion(
     let executor = manager.get_executor("r").ok()?;
 
     // Use the clean helper function
-    let code = format!(
-        "cat(get_completions('{}'))",
-        token.replace('\'', "\\'")
-    );
+    let code = format!("cat(get_completions('{}'))", token.replace('\'', "\\'"));
     let out = executor.query(&code).ok()?;
 
     let items = out

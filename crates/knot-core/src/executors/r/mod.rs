@@ -129,10 +129,7 @@ impl ConstantObjectHandler for RExecutor {
         let object_path = objects_dir.join(format!("{}.rds", hash));
         let path_str = escape_path_for_code(&object_path);
 
-        let code = format!(
-            "cat(save_constant('{}', '{}'))",
-            object_name, path_str
-        );
+        let code = format!("cat(save_constant('{}', '{}'))", object_name, path_str);
         self.query(&code)?;
 
         log::debug!(
@@ -162,10 +159,7 @@ impl ConstantObjectHandler for RExecutor {
         }
 
         let path_str = escape_path_for_code(&object_path);
-        let code = format!(
-            "cat(load_constant('{}', '{}'))",
-            object_name, path_str
-        );
+        let code = format!("cat(load_constant('{}', '{}'))", object_name, path_str);
         self.query(&code)?;
 
         log::debug!(

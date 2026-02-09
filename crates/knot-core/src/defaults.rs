@@ -30,7 +30,9 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(clippy::const_is_empty)]
     fn test_system_constants_not_empty() {
+        // Verify constants have expected non-empty values
         assert!(!Defaults::BOUNDARY_MARKER.is_empty());
         assert!(!Defaults::CACHE_DIR_NAME.is_empty());
     }

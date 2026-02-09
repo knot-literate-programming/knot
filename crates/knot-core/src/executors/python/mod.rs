@@ -187,7 +187,10 @@ impl ConstantObjectHandler for PythonExecutor {
 
     fn remove_from_env(&mut self, object_name: &str) -> Result<()> {
         // Delegate to Python helper function
-        let code = format!("print(remove_from_env('{}'))", object_name.replace('\'', "\\'"));
+        let code = format!(
+            "print(remove_from_env('{}'))",
+            object_name.replace('\'', "\\'")
+        );
         self.query(&code)?;
         log::debug!("🗑️  Removed '{}' from Python environment", object_name);
         Ok(())
