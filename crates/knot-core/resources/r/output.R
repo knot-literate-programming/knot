@@ -1,11 +1,45 @@
 # Knot R Output Formatting
 
-current_plot <- function() {
-  # Capture current base R plot using recordPlot()
-  if (grDevices::dev.cur() == 1) {
-    stop("No active graphics device. Create a plot first.")
+base_plot <- function(expr, width = NULL, height = NULL, dpi = NULL, format = NULL) {
+  # Get parameters from env vars or use provided values
+  width <- if (!is.null(width)) width else as.numeric(Sys.getenv("KNOT_FIG_WIDTH", "7"))
+  height <- if (!is.null(height)) height else as.numeric(Sys.getenv("KNOT_FIG_HEIGHT", "5"))
+  dpi <- if (!is.null(dpi)) dpi else as.integer(Sys.getenv("KNOT_FIG_DPI", "300"))
+  format <- if (!is.null(format)) format else Sys.getenv("KNOT_FIG_FORMAT", "pdf")
+
+  # Create file path
+  hash <- digest::digest(paste(Sys.time(), runif(1)), algo = "xxhash64")
+  filename <- sprintf("plot_%s.%s", hash, format)
+  filepath <- file.path(.get_base_dir(), filename)
+
+  # Open device
+  if (format == "svg") {
+    grDevices::svg(filepath, width = width, height = height)
+  } else if (format == "png") {
+    grDevices::png(filepath, width = width * dpi, height = height * dpi, res = dpi)
+  } else if (format == "pdf") {
+    grDevices::pdf(filepath, width = width, height = height)
+  } else {
+    stop(sprintf("Unsupported format: %s", format))
   }
-  grDevices::recordPlot()
+
+  # Evaluate expression on this device
+  tryCatch({
+    eval(substitute(expr), envir = parent.frame())
+  }, finally = {
+    grDevices::dev.off()
+  })
+
+  # Write metadata
+  metadata <- list(
+    type = "plot",
+    path = normalizePath(filepath, mustWork = FALSE),
+    format = format
+  )
+
+  .write_metadata(metadata)
+
+  invisible(filepath)
 }
 
 typst <- function(obj, ...) {
@@ -16,9 +50,7 @@ typst.ggplot <- function(obj, ...) {
   .save_plot(obj, ...)
 }
 
-typst.recordedplot <- function(obj, ...) {
-  .save_recordedplot(obj, ...)
-}
+# Note: base R plots should use current_plot() function
 
 typst.data.frame <- function(obj, ...) {
   .save_dataframe(obj, ...)
@@ -58,32 +90,30 @@ typst.default <- function(obj, ...) {
   invisible(plot_obj)
 }
 
-.save_recordedplot <- function(plot_obj, width = NULL, height = NULL, dpi = NULL, format = NULL) {
-  # Use provided values or fall back to environment variables
-  width <- if (!is.null(width)) width else as.numeric(Sys.getenv("KNOT_FIG_WIDTH", "7"))
-  height <- if (!is.null(height)) height else as.numeric(Sys.getenv("KNOT_FIG_HEIGHT", "5"))
-  dpi <- if (!is.null(dpi)) dpi else as.integer(Sys.getenv("KNOT_FIG_DPI", "300"))
-  format <- if (!is.null(format)) format else Sys.getenv("KNOT_FIG_FORMAT", "svg")
+.save_base_plot <- function(plot_obj, width = NULL, height = NULL, dpi = NULL, format = NULL) {
+  # Extract parameters from plot_obj or use provided values or fall back to env vars
+  width <- if (!is.null(width)) width else if (!is.null(plot_obj$width)) plot_obj$width else as.numeric(Sys.getenv("KNOT_FIG_WIDTH", "7"))
+  height <- if (!is.null(height)) height else if (!is.null(plot_obj$height)) plot_obj$height else as.numeric(Sys.getenv("KNOT_FIG_HEIGHT", "5"))
+  dpi <- if (!is.null(dpi)) dpi else if (!is.null(plot_obj$dpi)) plot_obj$dpi else as.integer(Sys.getenv("KNOT_FIG_DPI", "300"))
+  format <- if (!is.null(format)) format else if (!is.null(plot_obj$format)) plot_obj$format else Sys.getenv("KNOT_FIG_FORMAT", "svg")
 
-  # Create stable hash from the recorded plot
-  hash <- digest::digest(plot_obj, algo = "xxhash64")
+  # Create hash based on timestamp (can't easily hash the plot)
+  hash <- digest::digest(paste(Sys.time(), runif(1)), algo = "xxhash64")
   filename <- sprintf("plot_%s.%s", hash, format)
   filepath <- file.path(.get_base_dir(), filename)
 
-  # Open device based on format
+  # Copy current device to file
   if (format == "svg") {
-    grDevices::svg(filepath, width = width, height = height)
+    grDevices::dev.copy(grDevices::svg, file = filepath, width = width, height = height)
   } else if (format == "png") {
-    grDevices::png(filepath, width = width * dpi, height = height * dpi, res = dpi)
+    grDevices::dev.copy(grDevices::png, file = filepath,
+                       width = width * dpi, height = height * dpi, res = dpi)
   } else if (format == "pdf") {
-    grDevices::pdf(filepath, width = width, height = height)
+    grDevices::dev.copy(grDevices::pdf, file = filepath, width = width, height = height)
   } else {
     stop(sprintf("Unsupported format: %s", format))
   }
-
-  # Replay the plot on the new device
-  grDevices::replayPlot(plot_obj)
-  grDevices::dev.off()
+  grDevices::dev.off()  # Close the copy device
 
   metadata <- list(
     type = "plot",
@@ -92,10 +122,10 @@ typst.default <- function(obj, ...) {
   )
 
   if (!.write_metadata(metadata)) {
-    print(plot_obj)
+    warning("Could not write metadata, plot may not be included in document")
   }
 
-  invisible(plot_obj)
+  invisible(filepath)
 }
 
 .save_dataframe <- function(df) {
