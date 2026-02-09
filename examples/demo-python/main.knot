@@ -1,0 +1,41 @@
+// Import Knot helpers
+#import "lib/knot.typ": *
+
+= Python Graphics Test
+
+== Inline Expression
+
+Here is an inline Python expression: `{python} 2 + 3`.
+
+== Matplotlib Plot
+
+```{python}
+import matplotlib.pyplot as plt
+import numpy as np
+
+x = np.linspace(0, 2*np.pi, 100)
+y = np.sin(x)
+
+fig, ax = plt.subplots(figsize=(6, 4))
+ax.plot(x, y, 'b-', linewidth=2)
+ax.set_title('Sine Wave')
+ax.set_xlabel('x')
+ax.set_ylabel('sin(x)')
+ax.grid(True, alpha=0.3)
+
+typst(fig)
+```
+
+== DataFrame
+
+```{python}
+import pandas as pd
+
+df = pd.DataFrame({
+    'Name': ['Alice', 'Bob', 'Charlie'],
+    'Age': [25, 30, 35],
+    'Score': [85.5, 92.0, 78.5]
+})
+
+typst(df)
+```

@@ -1,0 +1,34 @@
+// Import Knot helpers for R code execution
+#import "lib/knot.typ": *
+#show: codly-init
+
+
+
+= My Document
+
+
+```{r setup}
+#| echo: false
+library(ggplot2)
+```
+
+Un peu de texte
+
+```{r}
+#| caption: "Voici un joli texte"
+
+x <- 1:10
+y <- 1:10
+df <- data.frame(x = x, y = y)
+gg <- ggplot(df, aes(x = x, y = y)) +
+  geom_point(size = 3, color = "steelblue") +
+  geom_line(color = "steelblue", alpha = 0.5) +
+  theme_minimal() +
+  labs(
+    title = "Simple Quadratic Function",
+    x = "x",
+    y = "y = x²"
+  )
+
+typst(gg, width = 6, height = 4)
+```

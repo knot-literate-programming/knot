@@ -1,0 +1,45 @@
+// Import Knot helpers for R code execution
+#import "lib/knot.typ": *
+#show: codly-init
+
+```{r setup}
+#| echo: false
+library(ggplot2)
+```
+
+= My Document
+
+Here is some text with an inline R expression: `{r} 1 + 1`.
+
+```{r}
+x <- 1:10
+y <- x^4
+
+# Display summary
+summary(x)
+```
+
+The mean of x is `{r} mean(x)`. We can also #emph[plot] the curve:
+
+```{r}
+base_plot({
+  plot(x, y, type ='l')
+})
+```
+
+```{r}
+# Create a simple plot
+df <- data.frame(x = x, y = y)
+gg <- ggplot(df, aes(x = x, y = y)) +
+  geom_point(size = 3, color = "steelblue") +
+  geom_line(color = "steelblue", alpha = 0.5) +
+  theme_minimal() +
+  labs(
+    title = "Simple Quadratic Function",
+    x = "x",
+    y = "y = x²"
+  )
+
+# Render the plot (requires knot.r.package)
+typst(gg, width = 6, height = 4)
+```

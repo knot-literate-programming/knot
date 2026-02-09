@@ -1,0 +1,29 @@
+// Import Knot helpers for R code execution
+#import "lib/knot.typ": *
+
+// ============================================
+// Document content
+// ============================================
+
+/* KNOT-INJECT-CHAPTERS */
+
+= My Document
+Here is some text with an inline R expression: `{r} 1 + 1`.
+
+```{r}
+# Create some data
+x <- 1:20
+y <- x^2
+
+cos
+
+# Display summary
+summary(x)
+```
+
+The mean of x is `{r} mean(x)`.
+
+```{r}
+y <- x^3
+typst(mean(x))
+```

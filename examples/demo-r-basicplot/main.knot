@@ -1,0 +1,26 @@
+// Import Knot helpers for R code execution
+#import "lib/knot.typ": *
+#show: codly-init
+
+
+// ============================================
+// Document content
+// ============================================
+
+= My Document
+
+Here is some text with an inline R expression: `{r} 1 + 1`.
+
+```{r}
+x <- seq(0, 2*pi, by = 0.01)
+y <- sin(x)
+```
+
+
+```{r}
+#|fig-height: 4
+#|fig-width: 3
+base_plot({
+    plot(x, y, type = 'l')
+})
+```

@@ -1,0 +1,11 @@
+# Knot generated files
+.*.typ
+
+# Generated figures by language
+generated-*-figures/
+
+# Knot cache
+.knot_cache/
+
+# PDF output
+*.pdf
