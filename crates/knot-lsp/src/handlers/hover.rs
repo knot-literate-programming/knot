@@ -144,7 +144,7 @@ async fn get_r_help(state: &ServerState, uri: &Url, token: &str) -> Option<Hover
     let executor = manager.get_executor("r").ok()?;
 
     // Use the clean helper function
-    let code = format!("cat(.knot_get_hover('{}'))", token.replace('\'', "\\'"));
+    let code = format!("cat(get_hover('{}'))", token.replace('\'', "\\'"));
     let out = executor.query(&code).ok()?;
 
     if out.trim().is_empty() {

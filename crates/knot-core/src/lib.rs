@@ -13,8 +13,23 @@ pub use defaults::Defaults;
 pub use graphics::{GraphicsDefaults, ResolvedGraphicsOptions, resolve_graphics_options};
 pub use parser::{Chunk, ChunkOptions, Document, InlineExpr, ResolvedChunkOptions};
 
-pub const R_HELPER_SCRIPT: &str = include_str!("../resources/typst.R");
-pub const PYTHON_HELPER_SCRIPT: &str = include_str!("../resources/typst.py");
+// R helper scripts (loaded in order)
+pub const R_HELPERS: &[(&str, &str)] = &[
+    ("helpers.R", include_str!("../resources/r/helpers.R")),
+    ("session.R", include_str!("../resources/r/session.R")),
+    ("constants.R", include_str!("../resources/r/constants.R")),
+    ("output.R", include_str!("../resources/r/output.R")),
+    ("lsp.R", include_str!("../resources/r/lsp.R")),
+];
+
+// Python helper scripts (loaded in order)
+pub const PYTHON_HELPERS: &[(&str, &str)] = &[
+    ("helpers.py", include_str!("../resources/python/helpers.py")),
+    ("session.py", include_str!("../resources/python/session.py")),
+    ("constants.py", include_str!("../resources/python/constants.py")),
+    ("output.py", include_str!("../resources/python/output.py")),
+    ("lsp.py", include_str!("../resources/python/lsp.py")),
+];
 
 use anyhow::{Context, Result};
 use std::fs;

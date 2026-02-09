@@ -45,9 +45,11 @@ impl LanguageExecutor for PythonExecutor {
     fn initialize(&mut self) -> Result<()> {
         self.process.initialize()?;
 
-        // Execute the helper script to define functions like typst() in the global scope
-        self.query(crate::PYTHON_HELPER_SCRIPT)?;
-        log::info!("✓ Loaded knot Python helper script");
+        // Execute all helper scripts to define functions like typst() in the global scope
+        for (_name, content) in crate::PYTHON_HELPERS {
+            self.query(content)?;
+        }
+        log::info!("✓ Loaded knot Python helper scripts");
 
         Ok(())
     }
@@ -117,38 +119,11 @@ impl KnotExecutor for PythonExecutor {
 
 impl ConstantObjectHandler for PythonExecutor {
     fn hash_object(&mut self, object_name: &str) -> Result<String> {
-        let code = format!(
-            r#"
-import os
-import pickle
-import hashlib
-try:
-    import xxhash
-    obj = globals().get("{object_name}")
-    if obj is None:
-        print('NONE')
-    else:
-        h = xxhash.xxh64(pickle.dumps(obj)).hexdigest()
-        print(h)
-except ImportError:
-    # Use fallback if xxhash is missing
-    obj = globals().get("{object_name}")
-    if obj is None:
-        print('NONE')
-    else:
-        h = hashlib.sha256(pickle.dumps(obj)).hexdigest()
-        print(h)
-except Exception as e:
-    print(f'ERROR: {{e}}')
-"#,
-            object_name = object_name.replace('"', "\\\"")
-        );
+        // Delegate to Python helper function
+        let code = format!("print(hash_object('{}'))", object_name.replace('\'', "\\'"));
         let out = self.query(&code)?;
         if out.trim() == "NONE" {
-            anyhow::bail!("Object not found");
-        }
-        if out.trim().starts_with("ERROR:") {
-            anyhow::bail!("Python error during hashing: {}", out.trim());
+            anyhow::bail!("Object '{}' not found", object_name);
         }
         Ok(out.trim().to_string())
     }
@@ -160,14 +135,11 @@ except Exception as e:
         let object_path = objects_dir.join(format!("{}.pkl", hash));
         let path_str = escape_path_for_code(&object_path);
 
+        // Delegate to Python helper function
         let code = format!(
-            r#"
-import pickle
-with open('{path_str}', 'wb') as f:
-    pickle.dump(globals()['{object_name}'], f)
-"#,
-            path_str = path_str,
-            object_name = object_name.replace('\'', "\\'")
+            "print(save_constant('{}', '{}'))",
+            object_name.replace('\'', "\\'"),
+            path_str
         );
         self.query(&code)?;
         log::debug!(
@@ -198,14 +170,11 @@ with open('{path_str}', 'wb') as f:
 
         let path_str = escape_path_for_code(&object_path);
 
+        // Delegate to Python helper function
         let code = format!(
-            r#"
-import pickle
-with open('{path_str}', 'rb') as f:
-    globals()['{object_name}'] = pickle.load(f)
-"#,
-            path_str = path_str,
-            object_name = object_name.replace('\'', "\\'")
+            "print(load_constant('{}', '{}'))",
+            object_name.replace('\'', "\\'"),
+            path_str
         );
         self.query(&code)?;
         log::debug!(
@@ -217,7 +186,8 @@ with open('{path_str}', 'rb') as f:
     }
 
     fn remove_from_env(&mut self, object_name: &str) -> Result<()> {
-        let code = format!("del globals()['{}']", object_name.replace('\'', "\\'"));
+        // Delegate to Python helper function
+        let code = format!("print(remove_from_env('{}'))", object_name.replace('\'', "\\'"));
         self.query(&code)?;
         log::debug!("🗑️  Removed '{}' from Python environment", object_name);
         Ok(())

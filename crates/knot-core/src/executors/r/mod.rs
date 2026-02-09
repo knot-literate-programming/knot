@@ -85,7 +85,7 @@ impl KnotExecutor for RExecutor {
     fn save_session(&mut self, path: &Path) -> Result<()> {
         // Delegate to R helper function
         let path_str = escape_path_for_code(path);
-        let code = format!("cat(.knot_save_session('{}'))", path_str);
+        let code = format!("cat(save_session('{}'))", path_str);
         let out = self.query(&code)?;
         if out.trim() == "TRUE" {
             Ok(())
@@ -97,7 +97,7 @@ impl KnotExecutor for RExecutor {
     fn load_session(&mut self, path: &Path) -> Result<()> {
         // Delegate to R helper function
         let path_str = escape_path_for_code(path);
-        let code = format!("cat(.knot_load_session('{}'))", path_str);
+        let code = format!("cat(load_session('{}'))", path_str);
         let out = self.query(&code)?;
         if out.trim() == "TRUE" {
             Ok(())
@@ -114,7 +114,7 @@ impl KnotExecutor for RExecutor {
 impl ConstantObjectHandler for RExecutor {
     fn hash_object(&mut self, object_name: &str) -> Result<String> {
         // Use R helper function
-        let code = format!("cat(.knot_hash_object('{}'))", object_name);
+        let code = format!("cat(hash_object('{}'))", object_name);
         let out = self.query(&code)?;
         if out.trim() == "NONE" {
             anyhow::bail!("Object '{}' not found", object_name);
@@ -130,7 +130,7 @@ impl ConstantObjectHandler for RExecutor {
         let path_str = escape_path_for_code(&object_path);
 
         let code = format!(
-            "cat(.knot_save_constant('{}', '{}'))",
+            "cat(save_constant('{}', '{}'))",
             object_name, path_str
         );
         self.query(&code)?;
@@ -163,7 +163,7 @@ impl ConstantObjectHandler for RExecutor {
 
         let path_str = escape_path_for_code(&object_path);
         let code = format!(
-            "cat(.knot_load_constant('{}', '{}'))",
+            "cat(load_constant('{}', '{}'))",
             object_name, path_str
         );
         self.query(&code)?;

@@ -208,7 +208,7 @@ async fn get_r_completion(
 
     // Use the clean helper function
     let code = format!(
-        "cat(.knot_get_completions('{}'))",
+        "cat(get_completions('{}'))",
         token.replace('\'', "\\'")
     );
     let out = executor.query(&code).ok()?;

@@ -50,13 +50,14 @@ impl RProcess {
         writeln!(stdin, "options(echo = FALSE)")?;
 
         // Load knot helper functions (stored in RProcess struct to keep it alive)
-        let helper_script = crate::R_HELPER_SCRIPT;
-        // Write to a temp file
+        // Combine all R helper files into one temp file
         let mut temp_file = tempfile::Builder::new().suffix(".R").tempfile()?;
-        write!(temp_file, "{}", helper_script)?;
+        for (_name, content) in crate::R_HELPERS {
+            writeln!(temp_file, "{}", content)?;
+        }
         let temp_path = temp_file.path().to_string_lossy().replace('\\', "\\\\");
 
-        // Source the temp file
+        // Source the combined temp file
         writeln!(stdin, "source(\"{}\")", temp_path)?;
 
         // Send boundary markers to signal end of initialization
