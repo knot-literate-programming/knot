@@ -31,15 +31,14 @@ pub fn execute(
         .as_mut()
         .context("R process stdin is not available")?;
 
-    // Set environment variables in the R process
+    // Set environment variables via setup_environment() function
     let meta_file = escape_path_for_code(channel.path());
     let cache_dir_str = escape_path_for_code(cache_dir);
-    writeln!(stdin, "Sys.setenv(KNOT_METADATA_FILE = '{}')", meta_file)?;
-    writeln!(stdin, "Sys.setenv(KNOT_FIG_WIDTH = '{}')", graphics.width)?;
-    writeln!(stdin, "Sys.setenv(KNOT_FIG_HEIGHT = '{}')", graphics.height)?;
-    writeln!(stdin, "Sys.setenv(KNOT_FIG_DPI = '{}')", graphics.dpi)?;
-    writeln!(stdin, "Sys.setenv(KNOT_FIG_FORMAT = '{}')", graphics.format)?;
-    writeln!(stdin, "Sys.setenv(KNOT_CACHE_DIR = '{}')", cache_dir_str)?;
+    writeln!(
+        stdin,
+        "setup_environment('{}', '{}', {}, {}, {}, '{}')",
+        meta_file, cache_dir_str, graphics.width, graphics.height, graphics.dpi, graphics.format
+    )?;
 
     // Write the code, followed by boundary markers
     writeln!(stdin, "{}", code)?;

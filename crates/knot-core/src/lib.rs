@@ -16,6 +16,7 @@ pub use parser::{Chunk, ChunkOptions, Document, InlineExpr, ResolvedChunkOptions
 // R helper scripts (loaded in order)
 pub const R_HELPERS: &[(&str, &str)] = &[
     ("helpers.R", include_str!("../resources/r/helpers.R")),
+    ("executor.R", include_str!("../resources/r/executor.R")),
     ("session.R", include_str!("../resources/r/session.R")),
     ("constants.R", include_str!("../resources/r/constants.R")),
     ("output.R", include_str!("../resources/r/output.R")),
@@ -25,6 +26,7 @@ pub const R_HELPERS: &[(&str, &str)] = &[
 // Python helper scripts (loaded in order)
 pub const PYTHON_HELPERS: &[(&str, &str)] = &[
     ("helpers.py", include_str!("../resources/python/helpers.py")),
+    ("executor.py", include_str!("../resources/python/executor.py")),
     ("session.py", include_str!("../resources/python/session.py")),
     ("constants.py", include_str!("../resources/python/constants.py")),
     ("output.py", include_str!("../resources/python/output.py")),

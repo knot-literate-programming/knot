@@ -22,18 +22,12 @@ pub fn execute(
     // Create side-channel for this chunk
     let channel = SideChannel::new()?;
 
-    // Set environment variables in the Python process
+    // Set environment variables via setup_environment() function
     let meta_file = escape_path_for_code(channel.path());
     let cache_dir_str = escape_path_for_code(cache_dir);
 
     let setup_code = format!(
-        "import os
-os.environ['KNOT_METADATA_FILE'] = '{}'
-os.environ['KNOT_CACHE_DIR'] = '{}'
-os.environ['KNOT_FIG_WIDTH'] = '{}'
-os.environ['KNOT_FIG_HEIGHT'] = '{}'
-os.environ['KNOT_FIG_DPI'] = '{}'
-os.environ['KNOT_FIG_FORMAT'] = '{}'",
+        "setup_environment('{}', '{}', {}, {}, {}, '{}')",
         meta_file, cache_dir_str, graphics.width, graphics.height, graphics.dpi, graphics.format
     );
 
