@@ -28,18 +28,12 @@ pub fn execute(
 
     let setup_code = format!(
         "import os
-
-         os.environ['KNOT_METADATA_FILE'] = '{}'
-
-         os.environ['KNOT_CACHE_DIR'] = '{}'
-
-         os.environ['KNOT_FIG_WIDTH'] = '{}'
-
-         os.environ['KNOT_FIG_HEIGHT'] = '{}'
-
-         os.environ['KNOT_FIG_DPI'] = '{}'
-
-         os.environ['KNOT_FIG_FORMAT'] = '{}'",
+os.environ['KNOT_METADATA_FILE'] = '{}'
+os.environ['KNOT_CACHE_DIR'] = '{}'
+os.environ['KNOT_FIG_WIDTH'] = '{}'
+os.environ['KNOT_FIG_HEIGHT'] = '{}'
+os.environ['KNOT_FIG_DPI'] = '{}'
+os.environ['KNOT_FIG_FORMAT'] = '{}'",
         meta_file, cache_dir_str, graphics.width, graphics.height, graphics.dpi, graphics.format
     );
 

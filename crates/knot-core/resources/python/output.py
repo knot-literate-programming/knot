@@ -48,7 +48,6 @@ def typst(obj: Any, **kwargs) -> Any:
 def _typst_matplotlib(fig, width=None, height=None, dpi=None, format=None):
     import io
     import matplotlib.pyplot as plt
-    from helpers import _get_base_dir, _write_metadata
 
     width = width or float(os.environ.get('KNOT_FIG_WIDTH', '7'))
     height = height or float(os.environ.get('KNOT_FIG_HEIGHT', '5'))
@@ -77,8 +76,6 @@ def _typst_plotnine(gg, **kwargs):
 
 
 def _typst_dataframe(df, index=False, **kwargs):
-    from helpers import _get_base_dir, _write_metadata
-
     df_string = df.to_string()
     df_hash = hashlib.sha256(df_string.encode()).hexdigest()[:16]
     filename = f"dataframe_{df_hash}.csv"
