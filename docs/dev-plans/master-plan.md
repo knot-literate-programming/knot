@@ -35,7 +35,7 @@ Close the loop between the source code and the generated PDF.
 - [x] YAML-based options parsing.
 - [x] Macro-based options definition.
 - [ ] Implement structured error handlers for all executors.
-- [ ] **Chunk display customization**: Flexible presentation options. See [chunk-customization.md](chunk-customization.md).
+- [x] **Chunk display customization**: Flexible presentation options. See [chunk-customization.md](chunk-customization.md).
 - [ ] Support for Julia executor.
 - [ ] Support for Content-Generators (Mermaid, LilyPond).
 
@@ -49,7 +49,7 @@ Close the loop between the source code and the generated PDF.
 ### Knot CLI
 - [x] Watch mode.
 - [ ] Improved error logging for CI/CD.
-- [ ] Built-in project initialization (`knot init`).
+- [x] Built-in project initialization (`knot init`).
 
 ---
 

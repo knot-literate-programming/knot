@@ -102,7 +102,9 @@ plot(x)
 
 ## 🏗️ Implementation Plan
 
-### Phase 1: Extend ChunkOptions (Rust)
+**Status:** ✅ **Completed** (commit 200e3f1, February 10, 2026)
+
+### Phase 1: Extend ChunkOptions (Rust) ✅
 
 **File:** `crates/knot-core/src/parser/ast.rs`
 
@@ -132,7 +134,7 @@ define_options! {
 }
 ```
 
-### Phase 2: Update knot.toml Support
+### Phase 2: Update knot.toml Support ✅
 
 **File:** `crates/knot-core/src/config.rs`
 
@@ -158,7 +160,7 @@ if self.code_background.is_none() { self.code_background = defaults.code_backgro
 // ... etc
 ```
 
-### Phase 3: Propagate Options to Typst
+### Phase 3: Propagate Options to Typst ✅
 
 **File:** `crates/knot-core/src/backend.rs`
 
@@ -185,7 +187,7 @@ if let Some(gutter) = &resolved.gutter {
 let chunk_call = format!("#code-chunk({})", chunk_args.join(", "));
 ```
 
-### Phase 4: Flexible Typst Template
+### Phase 4: Flexible Typst Template ✅
 
 **File:** `lib/knot.typ` (in project templates)
 
@@ -288,12 +290,27 @@ show-line-numbers = true
 
 ## ✅ Success Criteria
 
-- [ ] Users can set presentation options in chunk headers
-- [ ] Users can define project-wide defaults in `knot.toml`
-- [ ] Options follow the correct precedence order
-- [ ] `#code-chunk` template is flexible and customizable
-- [ ] Documentation includes examples of all presentation options
-- [ ] No breaking changes to existing `.knot` files (defaults preserve current behavior)
+- [x] Users can set presentation options in chunk headers
+- [x] Users can define project-wide defaults in `knot.toml`
+- [x] Options follow the correct precedence order
+- [x] `#code-chunk` template is flexible and customizable
+- [ ] Documentation includes examples of all presentation options (TODO: update user docs)
+- [x] No breaking changes to existing `.knot` files (defaults preserve current behavior)
+
+### Bonus Features Implemented
+
+Beyond the original plan, the implementation includes:
+
+- **Auto-generated OptionMetadata**: The `define_options!` macro now automatically generates an `option_metadata()` method that returns all option information (name, type, default, documentation).
+
+- **Dynamic knot.toml generation**: `knot init` now generates the `[defaults]` section dynamically using `ChunkOptions::option_metadata()`, ensuring the template is always synchronized with available options.
+
+- **Clear separation of concerns**:
+  - `lib/knot.typ` → utility functions only
+  - `main.knot` → document configuration (Codly setup, figure numbering)
+  - This makes the architecture cleaner and more maintainable.
+
+- **Example tool**: Added `crates/knot-core/examples/generate_defaults.rs` for development/debugging of option documentation generation.
 
 ## 🔗 Related Work
 
