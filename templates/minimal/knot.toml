@@ -2,13 +2,26 @@
 
 [document]
 main = "main.knot"
+# includes = ["chapter1.knot", "chapter2.knot"]
 
 [helpers]
 # Typst helper functions (for rendering R/Python output)
 typst = "lib/knot.typ"
 
-# Note: R and Python helper scripts are now embedded in the binary
-# and loaded automatically by the executors.
+# ============================================
+# Default values for chunk options
+# ============================================
+#
+# These defaults apply to all chunks unless overridden in
+# individual chunk headers using YAML syntax:
+#
+#   ```{r}
+#   #| echo: false
+#   #| fig-width: 10
+#   ...
+#   ```
+#
+# Uncomment and modify the options below to change defaults.
 
-# Future: Use published Typst package instead of local copy
-# typst = "@preview/knot"
+/* KNOT-INJECT-DEFAULTS */
+

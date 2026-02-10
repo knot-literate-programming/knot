@@ -73,6 +73,8 @@ fn main() -> Result<()> {
 
 /// Initialize a new knot project with the minimal template
 fn init(project_name: &PathBuf) -> Result<()> {
+    use knot_core::parser::ChunkOptions;
+
     // Create project directory
     if project_name.exists() {
         anyhow::bail!(
@@ -94,6 +96,21 @@ fn init(project_name: &PathBuf) -> Result<()> {
         .context("Failed to extract minimal template")?;
     println!("  ✓ Copied template files");
 
+    // Generate dynamic [defaults] section from ChunkOptions metadata
+    let options = ChunkOptions::option_metadata();
+    let defaults_section = generate_defaults_section(&options);
+
+    // Inject the [defaults] section into knot.toml
+    let knot_toml_path = project_name.join("knot.toml");
+    let mut knot_toml_content =
+        fs::read_to_string(&knot_toml_path).context("Failed to read knot.toml")?;
+
+    knot_toml_content = knot_toml_content.replace("/* KNOT-INJECT-DEFAULTS */", &defaults_section);
+
+    fs::write(&knot_toml_path, knot_toml_content)
+        .context("Failed to write knot.toml with defaults")?;
+    println!("  ✓ Generated knot.toml with {} options", options.len());
+
     // Create lib/ directory
     let lib_dir = project_name.join("lib");
     fs::create_dir_all(&lib_dir).context("Failed to create lib/ directory")?;
@@ -112,6 +129,105 @@ fn init(project_name: &PathBuf) -> Result<()> {
     println!("  knot compile main.knot");
 
     Ok(())
+}
+
+/// Generate the [defaults] section for knot.toml from ChunkOptions metadata
+fn generate_defaults_section(options: &[knot_core::parser::OptionMetadata]) -> String {
+    let mut output = String::new();
+
+    output.push_str("[defaults]\n\n");
+
+    // Group options by category
+    let mut execution_opts = Vec::new();
+    let mut graphics_opts = Vec::new();
+    let mut presentation_opts = Vec::new();
+
+    for opt in options {
+        // Only include [val] and [opt] options (configurable in knot.toml)
+        if opt.kind != "val" && opt.kind != "opt" {
+            continue;
+        }
+
+        if opt.name.starts_with("fig_") || opt.name == "dpi" {
+            graphics_opts.push(opt);
+        } else if opt.name.starts_with("code_")
+            || opt.name.starts_with("output_")
+            || opt.name == "layout"
+            || opt.name == "gutter"
+            || opt.name == "width_ratio"
+            || opt.name == "align"
+        {
+            presentation_opts.push(opt);
+        } else {
+            execution_opts.push(opt);
+        }
+    }
+
+    // Execution options
+    output.push_str("# === Execution Options ===\n\n");
+    for opt in &execution_opts {
+        add_option_to_output(&mut output, opt);
+    }
+
+    output.push_str("# === Graphics Options ===\n\n");
+    for opt in &graphics_opts {
+        add_option_to_output(&mut output, opt);
+    }
+
+    output.push_str("# === Presentation Options ===\n\n");
+    for opt in &presentation_opts {
+        add_option_to_output(&mut output, opt);
+    }
+
+    output
+}
+
+fn add_option_to_output(output: &mut String, opt: &knot_core::parser::OptionMetadata) {
+    // Add documentation
+    let doc = opt.doc.trim();
+    if !doc.is_empty() {
+        output.push_str(&format!("# {}\n", doc));
+    }
+
+    // Format default value
+    let formatted_default = format_default_value(opt.default_value, opt.name);
+
+    // Add commented option line
+    output.push_str(&format!("# {} = {}\n", opt.serde_name(), formatted_default));
+    output.push('\n');
+}
+
+fn format_default_value(default: &str, name: &str) -> String {
+    // Handle common cases
+    if default == "true" || default == "false" {
+        return default.to_string();
+    }
+
+    if default == "None" {
+        // For optional values, show reasonable examples based on field name
+        return match name {
+            "gutter" => "\"1em\"".to_string(),
+            "code_background" | "output_background" => "\"#f5f5f5\"".to_string(),
+            "code_stroke" | "output_stroke" => "\"1pt solid gray\"".to_string(),
+            "code_radius" | "output_radius" => "\"4pt\"".to_string(),
+            "code_inset" | "output_inset" => "\"8pt\"".to_string(),
+            "width_ratio" => "\"1:1\"".to_string(),
+            "align" => "\"left\"".to_string(),
+            _ => "\"value\"".to_string(),
+        };
+    }
+
+    // String literals
+    if default.ends_with(".to_string()") {
+        return default.replace(".to_string()", "");
+    }
+
+    // Numeric values
+    if default.parse::<f64>().is_ok() || default.parse::<u32>().is_ok() {
+        return default.to_string();
+    }
+
+    default.to_string()
 }
 
 /// Watch project and regenerate on changes

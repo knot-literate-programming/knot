@@ -1,5 +1,29 @@
-// Import Knot helpers for R code execution
+// Import Knot helpers
 #import "lib/knot.typ": *
+
+// ============================================
+// Codly Configuration (syntax highlighting)
+// ============================================
+#import "@preview/codly:1.3.0": *
+#show: codly-init
+
+#import "@preview/codly-languages:0.1.10": *
+#codly(languages: codly-languages)
+
+// Language-specific colors
+#codly(
+  languages: (
+    r: (name: "R", icon: "", color: rgb("#CE412B")),
+    python: (name: "Python", icon: "", color: rgb("#3572A5")),
+  ),
+)
+
+// ============================================
+// Document Settings
+// ============================================
+
+// Activate figure numbering
+#set figure(numbering: "1.")
 
 // ============================================
 // Optional: Import a Typst template
@@ -7,58 +31,29 @@
 //
 // Examples:
 // #import "@preview/charged-ieee": ieee
-// #import "@preview/drafting": *
-//
 // #show: ieee.with(
 //   title: [My Document],
 //   authors: [Your Name]
 // )
 
 // ============================================
-// Document content
+// Document Content
 // ============================================
 
 /* KNOT-INJECT-CHAPTERS */
 
 = My Document
 
-Here is some text with an inline R expression: `{r} 1 + 1`.
+This is a Knot document with embedded R/Python code.
+
+== Inline Expression
+
+You can embed code inline: `{r} 1 + 1`.
+
+== Code Chunk
 
 ```{r}
-#| eval: true
-#| echo: true
-#| output: true
-
-# Load libraries
-library(ggplot2)
-
-# Create some data
+# This is R code
 x <- 1:10
-y <- x^2
-
-# Display summary
 summary(x)
-```
-
-The mean of x is `{r} mean(x)`.
-
-```{r}
-#| eval: true
-#| echo: false
-#| output: true
-
-# Create a simple plot
-df <- data.frame(x = x, y = y)
-gg <- ggplot(df, aes(x = x, y = y)) +
-  geom_point(size = 3, color = "steelblue") +
-  geom_line(color = "steelblue", alpha = 0.5) +
-  theme_minimal() +
-  labs(
-    title = "Simple Quadratic Function",
-    x = "x",
-    y = "y = x²"
-  )
-
-# Render the plot (requires knot.r.package)
-typst(gg, width = 6, height = 4)
 ```
