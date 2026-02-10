@@ -1,5 +1,6 @@
 # Knot
 *.typ
+!**/lib/*.typ
 .*.typ
 *.pdf
 .knot_cache/
