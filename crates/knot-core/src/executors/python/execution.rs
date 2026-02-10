@@ -8,9 +8,9 @@
 
 use super::process::PythonProcess;
 use crate::executors::path_utils::escape_path_for_code;
-use crate::executors::{ExecutionResult, GraphicsOptions, OutputMetadata, SideChannel};
+use crate::executors::{ExecutionResult, GraphicsOptions, SideChannel};
 use anyhow::Result;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Executes a code chunk in the persistent Python process
 pub fn execute(
@@ -67,53 +67,7 @@ Error:
         );
     }
 
-    // Read metadata from side-channel
+    // Read metadata from side-channel and convert to ExecutionResult
     let metadata = channel.read_metadata()?;
-    metadata_to_execution_result(metadata, &stdout)
-}
-
-/// Convert side-channel metadata to ExecutionResult
-pub fn metadata_to_execution_result(
-    metadata: Vec<OutputMetadata>,
-    stdout_text: &str,
-) -> Result<ExecutionResult> {
-    let mut text_content = String::new();
-    let mut plot_path: Option<PathBuf> = None;
-    let mut dataframe_path: Option<PathBuf> = None;
-
-    for item in metadata {
-        match item {
-            OutputMetadata::Text { content } => {
-                if !text_content.is_empty() {
-                    text_content.push('\n');
-                }
-                text_content.push_str(&content);
-            }
-            OutputMetadata::Plot { path, .. } => {
-                plot_path = Some(path);
-            }
-            OutputMetadata::DataFrame { path } => {
-                dataframe_path = Some(path);
-            }
-        }
-    }
-
-    if text_content.is_empty() && !stdout_text.trim().is_empty() {
-        text_content = stdout_text.to_string();
-    }
-
-    match (text_content.is_empty(), dataframe_path, plot_path) {
-        (false, None, None) => Ok(ExecutionResult::Text(text_content)),
-        (_, Some(df), None) => Ok(ExecutionResult::DataFrame(df)),
-        (false, None, Some(plot)) => Ok(ExecutionResult::TextAndPlot {
-            text: text_content,
-            plot,
-        }),
-        (_, None, Some(plot)) => Ok(ExecutionResult::Plot(plot)),
-        (_, Some(df), Some(plot)) => Ok(ExecutionResult::DataFrameAndPlot {
-            dataframe: df,
-            plot,
-        }),
-        (true, None, None) => Ok(ExecutionResult::Text(String::new())),
-    }
+    crate::executors::metadata_to_execution_result(metadata, &stdout)
 }

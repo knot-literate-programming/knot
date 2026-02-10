@@ -30,6 +30,56 @@ pub struct GraphicsOptions {
     pub format: String,
 }
 
+/// Convert side-channel metadata to ExecutionResult
+///
+/// This is shared logic used by all language executors (Python, R, Julia...).
+/// It aggregates metadata items (text, plots, dataframes) and determines
+/// the appropriate ExecutionResult variant based on what was produced.
+pub fn metadata_to_execution_result(
+    metadata: Vec<OutputMetadata>,
+    stdout_text: &str,
+) -> Result<ExecutionResult> {
+    let mut text_content = String::new();
+    let mut plot_path: Option<PathBuf> = None;
+    let mut dataframe_path: Option<PathBuf> = None;
+
+    for item in metadata {
+        match item {
+            OutputMetadata::Text { content } => {
+                if !text_content.is_empty() {
+                    text_content.push('\n');
+                }
+                text_content.push_str(&content);
+            }
+            OutputMetadata::Plot { path, .. } => {
+                plot_path = Some(path);
+            }
+            OutputMetadata::DataFrame { path } => {
+                dataframe_path = Some(path);
+            }
+        }
+    }
+
+    if text_content.is_empty() && !stdout_text.trim().is_empty() {
+        text_content = stdout_text.to_string();
+    }
+
+    match (text_content.is_empty(), dataframe_path, plot_path) {
+        (false, None, None) => Ok(ExecutionResult::Text(text_content)),
+        (_, Some(df), None) => Ok(ExecutionResult::DataFrame(df)),
+        (false, None, Some(plot)) => Ok(ExecutionResult::TextAndPlot {
+            text: text_content,
+            plot,
+        }),
+        (_, None, Some(plot)) => Ok(ExecutionResult::Plot(plot)),
+        (_, Some(df), Some(plot)) => Ok(ExecutionResult::DataFrameAndPlot {
+            dataframe: df,
+            plot,
+        }),
+        (true, None, None) => Ok(ExecutionResult::Text(String::new())),
+    }
+}
+
 pub trait LanguageExecutor: Send + Sync {
     fn initialize(&mut self) -> Result<()>;
     fn execute(&mut self, code: &str, graphics: &GraphicsOptions) -> Result<ExecutionResult>;
