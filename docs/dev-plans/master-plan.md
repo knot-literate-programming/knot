@@ -35,6 +35,7 @@ Close the loop between the source code and the generated PDF.
 - [x] YAML-based options parsing.
 - [x] Macro-based options definition.
 - [ ] Implement structured error handlers for all executors.
+- [ ] **Chunk display customization**: Flexible presentation options. See [chunk-customization.md](chunk-customization.md).
 - [ ] Support for Julia executor.
 - [ ] Support for Content-Generators (Mermaid, LilyPond).
 
@@ -58,3 +59,4 @@ Close the loop between the source code and the generated PDF.
 - [sync-mapping.md](sync-mapping.md): PDF-to-Source synchronization plan.
 - [lsp-navigation.md](lsp-navigation.md): Roadmap for navigation features.
 - [formatters.md](formatters.md): Plan for Air (R) and Ruff (Python) integration.
+- [chunk-customization.md](chunk-customization.md): Flexible chunk presentation options.
