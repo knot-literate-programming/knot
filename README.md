@@ -194,6 +194,8 @@ Inspired by:
 - [Quarto](https://quarto.org/) — Modern scientific publishing
 - [Typst](https://typst.app/) — The future of typesetting
 
+Developed with the assistance of [Claude](https://claude.ai) (Anthropic) as a pair-programming tool for code generation and architecture design.
+
 ---
 
 **Ready to try it?** → [QUICKSTART.md](QUICKSTART.md)
