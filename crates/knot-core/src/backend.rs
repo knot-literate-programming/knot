@@ -105,6 +105,46 @@ impl Backend for TypstBackend {
             args.push("output: none".to_string());
         }
 
+        // Add presentation options
+        args.push(format!("layout: \"{}\"", resolved_options.layout));
+
+        if let Some(gutter) = &resolved_options.gutter {
+            args.push(format!("gutter: {}", gutter));
+        }
+
+        if let Some(code_bg) = &resolved_options.code_background {
+            args.push(format!("code-background: rgb(\"{}\")", code_bg));
+        }
+        if let Some(code_stroke) = &resolved_options.code_stroke {
+            args.push(format!("code-stroke: {}", code_stroke));
+        }
+        if let Some(code_radius) = &resolved_options.code_radius {
+            args.push(format!("code-radius: {}", code_radius));
+        }
+        if let Some(code_inset) = &resolved_options.code_inset {
+            args.push(format!("code-inset: {}", code_inset));
+        }
+
+        if let Some(output_bg) = &resolved_options.output_background {
+            args.push(format!("output-background: rgb(\"{}\")", output_bg));
+        }
+        if let Some(output_stroke) = &resolved_options.output_stroke {
+            args.push(format!("output-stroke: {}", output_stroke));
+        }
+        if let Some(output_radius) = &resolved_options.output_radius {
+            args.push(format!("output-radius: {}", output_radius));
+        }
+        if let Some(output_inset) = &resolved_options.output_inset {
+            args.push(format!("output-inset: {}", output_inset));
+        }
+
+        if let Some(width_ratio) = &resolved_options.width_ratio {
+            args.push(format!("width-ratio: \"{}\"", width_ratio));
+        }
+        if let Some(align) = &resolved_options.align {
+            args.push(format!("align: \"{}\"", align));
+        }
+
         let code_chunk_call = format!("#code-chunk({})", args.join(", "));
         let mut chunk_output_final = String::new();
 
@@ -176,6 +216,19 @@ mod tests {
                 fig_format: None,
                 fig_alt: None,
                 constant: vec![],
+                // Presentation options (use defaults for tests)
+                layout: None,
+                gutter: None,
+                code_background: None,
+                code_stroke: None,
+                code_radius: None,
+                code_inset: None,
+                output_background: None,
+                output_stroke: None,
+                output_radius: None,
+                output_inset: None,
+                width_ratio: None,
+                align: None,
             },
             errors: vec![],
             range: dummy_range.clone(),

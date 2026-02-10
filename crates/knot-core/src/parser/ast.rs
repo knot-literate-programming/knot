@@ -120,6 +120,20 @@ macro_rules! define_options {
                 if self.fig_height.is_none() { self.fig_height = defaults.fig_height; }
                 if self.dpi.is_none() { self.dpi = defaults.dpi; }
                 if self.fig_format.is_none() { self.fig_format = defaults.fig_format.clone(); }
+
+                // Apply presentation defaults
+                if self.layout.is_none() { self.layout = defaults.layout.clone(); }
+                if self.gutter.is_none() { self.gutter = defaults.gutter.clone(); }
+                if self.code_background.is_none() { self.code_background = defaults.code_background.clone(); }
+                if self.code_stroke.is_none() { self.code_stroke = defaults.code_stroke.clone(); }
+                if self.code_radius.is_none() { self.code_radius = defaults.code_radius.clone(); }
+                if self.code_inset.is_none() { self.code_inset = defaults.code_inset.clone(); }
+                if self.output_background.is_none() { self.output_background = defaults.output_background.clone(); }
+                if self.output_stroke.is_none() { self.output_stroke = defaults.output_stroke.clone(); }
+                if self.output_radius.is_none() { self.output_radius = defaults.output_radius.clone(); }
+                if self.output_inset.is_none() { self.output_inset = defaults.output_inset.clone(); }
+                if self.width_ratio.is_none() { self.width_ratio = defaults.width_ratio.clone(); }
+                if self.align.is_none() { self.align = defaults.align.clone(); }
             }
         }
     }
@@ -159,6 +173,45 @@ define_options! {
 
     /// Names of objects to treat as immutable constants
     [col] constant: Vec<String>, Vec::new(),
+
+    // === Presentation Options ===
+
+    /// Layout mode for chunk display
+    [val] layout: String, "horizontal".to_string(),
+    /// Space between input and output blocks (Typst length)
+    [opt] gutter: String, None,
+
+    /// Background color for code container (Typst color)
+    #[serde(rename = "code-background")]
+    [opt] code_background: String, None,
+    /// Border stroke for code container (Typst stroke)
+    #[serde(rename = "code-stroke")]
+    [opt] code_stroke: String, None,
+    /// Corner radius for code container (Typst length)
+    #[serde(rename = "code-radius")]
+    [opt] code_radius: String, None,
+    /// Internal padding for code container (Typst length)
+    #[serde(rename = "code-inset")]
+    [opt] code_inset: String, None,
+
+    /// Background color for output container (Typst color)
+    #[serde(rename = "output-background")]
+    [opt] output_background: String, None,
+    /// Border stroke for output container (Typst stroke)
+    #[serde(rename = "output-stroke")]
+    [opt] output_stroke: String, None,
+    /// Corner radius for output container (Typst length)
+    #[serde(rename = "output-radius")]
+    [opt] output_radius: String, None,
+    /// Internal padding for output container (Typst length)
+    #[serde(rename = "output-inset")]
+    [opt] output_inset: String, None,
+
+    /// Width ratio for horizontal layout (e.g., "1:1", "2:1")
+    #[serde(rename = "width-ratio")]
+    [opt] width_ratio: String, None,
+    /// Content alignment within containers
+    [opt] align: String, None,
 }
 
 #[derive(Debug)]

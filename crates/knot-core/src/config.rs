@@ -36,6 +36,29 @@ pub struct ChunkDefaults {
     pub dpi: Option<u32>,
     #[serde(rename = "fig-format")]
     pub fig_format: Option<String>,
+
+    // Presentation options
+    pub layout: Option<String>,
+    pub gutter: Option<String>,
+    #[serde(rename = "code-background")]
+    pub code_background: Option<String>,
+    #[serde(rename = "code-stroke")]
+    pub code_stroke: Option<String>,
+    #[serde(rename = "code-radius")]
+    pub code_radius: Option<String>,
+    #[serde(rename = "code-inset")]
+    pub code_inset: Option<String>,
+    #[serde(rename = "output-background")]
+    pub output_background: Option<String>,
+    #[serde(rename = "output-stroke")]
+    pub output_stroke: Option<String>,
+    #[serde(rename = "output-radius")]
+    pub output_radius: Option<String>,
+    #[serde(rename = "output-inset")]
+    pub output_inset: Option<String>,
+    #[serde(rename = "width-ratio")]
+    pub width_ratio: Option<String>,
+    pub align: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -161,7 +184,7 @@ mod tests {
 
     #[test]
     fn test_defaults_section() {
-        let toml = r#"
+        let toml = r##"
 [document]
 main = "main.knot"
 
@@ -173,7 +196,10 @@ fig-width = 8.0
 fig-height = 6.0
 dpi = 600
 fig-format = "png"
-"#;
+layout = "vertical"
+code-background = "#f5f5f5"
+gutter = "2em"
+"##;
 
         let config: Config = toml::from_str(toml).unwrap();
         assert_eq!(config.defaults.echo, Some(false));
@@ -183,6 +209,9 @@ fig-format = "png"
         assert_eq!(config.defaults.fig_height, Some(6.0));
         assert_eq!(config.defaults.dpi, Some(600));
         assert_eq!(config.defaults.fig_format, Some("png".to_string()));
+        assert_eq!(config.defaults.layout, Some("vertical".to_string()));
+        assert_eq!(config.defaults.code_background, Some("#f5f5f5".to_string()));
+        assert_eq!(config.defaults.gutter, Some("2em".to_string()));
     }
 
     #[test]
