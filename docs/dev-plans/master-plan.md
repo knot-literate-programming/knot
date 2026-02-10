@@ -8,24 +8,62 @@ This document tracks the high-level goals and roadmap for the Knot project. Deta
 - **LSP**: Language Server for IDE support (VS Code).
 - **CLI**: Command-line interface for batch processing and watch mode.
 
+## 📊 Current Status (Updated Feb 2026)
+
+**Maturity:** ~75% towards v1.0
+
+**Core:** ~85% complete
+- ✅ Parsing, execution, caching
+- ✅ Multi-language (R, Python)
+- ✅ Chunk customization with 12+ presentation options
+- ⏳ Structured error handling for R/Python (planned)
+
+**LSP:** ~70% complete
+- ✅ Hover (chunks, R, Python, Typst)
+- ✅ Completion (chunk options, R, Python, Typst)
+- ✅ Diagnostics (parsing errors, structure validation)
+- ✅ Document symbols
+- ⏳ Go to Definition
+- ⏳ Hybrid formatting (Air/Ruff)
+
+**CLI:** ~90% complete
+- ✅ Compile, watch, init
+- ✅ Dynamic knot.toml generation
+
+**Documentation:** ~40% complete
+- ✅ Dev plans (architecture, design docs)
+- ⏳ User documentation (getting started, tutorials)
+- ⏳ Example projects (reports, dashboards)
+
 ---
 
 ## 🎯 Current Priorities
 
 ### 1. Robustness & Error Handling (Core + LSP)
 Ensure that errors from R/Python are not just captured, but reported precisely in the editor.
-- [ ] **R Error Handling**: Implement structured detection. See [r-error-handling.md](r-error-handling.md).
+- [x] **Knot Structure Diagnostics**: Parse errors, invalid chunk options, malformed syntax.
+- [ ] **R Error Handling**: Implement structured detection with line numbers. See [r-error-handling.md](r-error-handling.md).
 - [ ] **Python Error Handling**: Reach parity with R. See [python-error-handling.md](python-error-handling.md).
-- [ ] **Live Diagnostics**: Feed executor errors back to the LSP for real-time red underlines.
+- [ ] **Live Diagnostics**: Feed executor errors back to the LSP for real-time red underlines in code chunks.
 
 ### 2. Standard IDE Navigation (LSP)
 Make Knot feel like a native editor for both Typst and the embedded languages.
-- [ ] **Navigation**: Go to Definition, Hover, and References. See [lsp-navigation.md](lsp-navigation.md).
-- [ ] **Completion**: Enhance Typst and multi-language autocompletion.
+- [x] **Hover**: Implemented for Knot chunks, R, Python, and Typst (via Tinymist proxy).
+- [x] **Completion**: Implemented for chunk options, R, Python, and Typst (via Tinymist proxy).
+- [ ] **Go to Definition**: Navigate to function/variable definitions.
+- [ ] **References**: Find all references to symbols.
 
-### 3. Integrated Workflow (Sync Mapping)
-Close the loop between the source code and the generated PDF.
+### 3. Documentation & Examples
+Make Knot accessible and showcase its capabilities.
+- [ ] **User Guide**: Getting started, installation, basic usage
+- [ ] **Tutorial**: Step-by-step walkthrough of features
+- [ ] **Example Projects**: Scientific report, data dashboard, technical book
+- [ ] **API Documentation**: Document all chunk options and their effects
+
+### 4. Advanced Features (Future)
 - [ ] **Sync Mapping**: Bidirectional click (Source ↔ PDF). See [sync-mapping.md](sync-mapping.md).
+- [ ] **Julia Support**: Extend to Julia language
+- [ ] **Content Generators**: Mermaid diagrams, LilyPond music notation
 
 ---
 
@@ -34,17 +72,23 @@ Close the loop between the source code and the generated PDF.
 ### Knot Core
 - [x] YAML-based options parsing.
 - [x] Macro-based options definition.
-- [ ] Implement structured error handlers for all executors.
 - [x] **Chunk display customization**: Flexible presentation options. See [chunk-customization.md](chunk-customization.md).
-- [ ] Support for Julia executor.
-- [ ] Support for Content-Generators (Mermaid, LilyPond).
+- [x] Dynamic knot.toml generation with OptionMetadata.
+- [ ] Structured error handlers for R/Python executors.
+- [ ] (Future) Support for Julia executor.
+- [ ] (Future) Support for Content-Generators (Mermaid, LilyPond).
 
 ### Knot LSP
 - [x] Bi-directional diagnostics tunnel for Typst.
 - [x] Precise line-offset for Knot structure errors.
-- [ ] **Phase 2**: Navigation features (Hover, Definition).
-- [ ] **Phase 3**: Hybrid Formatting (Air/Ruff + Tinymist).
-- [ ] **Phase 4**: Variable Explorer (Dynamic introspection).
+- [x] **Hover**: For chunks, R/Python code, and Typst (via Tinymist proxy).
+- [x] **Completion**: For chunk options, R/Python code, and Typst.
+- [x] **Document Symbols**: Structure outline.
+- [x] **Position Mapping**: Knot ↔ Typst coordinate translation.
+- [ ] **Go to Definition**: Navigate to symbols across languages.
+- [ ] **References**: Find all uses of a symbol.
+- [ ] **Hybrid Formatting**: Air (R) + Ruff (Python) + Tinymist (Typst).
+- [ ] **Variable Explorer**: Dynamic introspection of R/Python sessions.
 
 ### Knot CLI
 - [x] Watch mode.
