@@ -21,6 +21,21 @@ Language support for Knot files (`.knot`) - Literate programming with R and Typs
   - Hover information
   - Completion for chunk options
 
+## Installation
+
+### From GitHub Releases (Recommended for testing)
+
+1. Download the latest `.vsix` file from [GitHub Releases](https://github.com/knot-literate-programming/knot/releases)
+2. Install in VS Code:
+   ```bash
+   code --install-extension knot-0.1.0.vsix
+   ```
+   Or via VS Code UI: `Extensions` → `⋯` → `Install from VSIX...`
+
+### From VS Code Marketplace (Coming soon)
+
+Search for "Knot" in the VS Code Extensions marketplace.
+
 ## Requirements
 
 - **Air** formatter for R code formatting (optional but recommended)
@@ -28,7 +43,8 @@ Language support for Knot files (`.knot`) - Literate programming with R and Typs
   - Or via Homebrew: `brew install posit-dev/tap/air`
 
 - **knot-lsp** for language server features (optional)
-  - Built from source: `cargo build --release -p knot-lsp`
+  - Download from [GitHub Releases](https://github.com/knot-literate-programming/knot/releases)
+  - Or build from source: `cargo build --release -p knot-lsp`
 
 ## Extension Settings
 

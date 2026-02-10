@@ -47,3 +47,28 @@ jobs:
 
       - name: Run tests
         run: cargo test --workspace --exclude knot-cli # knot-cli has integration tests that might need R/Python
+
+  vscode-extension:
+    name: VS Code Extension
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        working-directory: editors/vscode
+        run: npm ci
+
+      - name: Compile extension
+        working-directory: editors/vscode
+        run: npm run compile
+
+      - name: Verify package can be created
+        working-directory: editors/vscode
+        run: |
+          npm install -g @vscode/vsce
+          vsce package --out test.vsix
