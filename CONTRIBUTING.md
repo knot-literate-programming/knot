@@ -40,7 +40,7 @@ See **Development Setup** below to get started.
 ### Prerequisites
 
 - **Rust** 1.70+ — [Install from rustup.rs](https://rustup.rs/)
-- **Node.js** 18+ — [Install from nodejs.org](https://nodejs.org/)
+- **Node.js** 20+ — [Install from nodejs.org](https://nodejs.org/)
 - **Typst CLI** — [Install from typst.app](https://github.com/typst/typst#installation)
 - **R** (optional) — For testing R executor
 - **Python 3.8+** (optional) — For testing Python executor
