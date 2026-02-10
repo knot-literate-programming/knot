@@ -18,17 +18,66 @@
 #let code-chunk(
   input: none,
   output: none,
-  .. // Catch all other arguments
+  layout: "horizontal",
+  gutter: 1em,
+  code-background: none,
+  code-stroke: none,
+  code-radius: 0pt,
+  code-inset: 0pt,
+  output-background: rgb(244, 244, 244),
+  output-stroke: none,
+  output-radius: 4pt,
+  output-inset: 8pt,
+  width-ratio: "1:1",
+  align: none,
+  ..rest
 ) = {
-  // Just generate the grid layout
-  grid(
-    columns: (1fr, 1fr),
-    gutter: 1em,
-    input,
-    if output != none {
-      block(fill: luma(244), radius: 4pt, inset: 8pt, width: 100%)[#output]
-    } else {
-      []
-    },
-  )
+  // Parse width-ratio for horizontal layout
+  let ratio-parts = width-ratio.split(":")
+  let left-ratio = if ratio-parts.len() >= 1 { float(ratio-parts.at(0)) } else { 1.0 }
+  let right-ratio = if ratio-parts.len() >= 2 { float(ratio-parts.at(1)) } else { 1.0 }
+
+  // Wrap input in styled block
+  let code-block = if input != none {
+    block(
+      fill: code-background,
+      stroke: code-stroke,
+      radius: code-radius,
+      inset: code-inset,
+      width: 100%
+    )[#input]
+  } else { none }
+
+  // Wrap output in styled block
+  let output-block = if output != none {
+    block(
+      fill: output-background,
+      stroke: output-stroke,
+      radius: output-radius,
+      inset: output-inset,
+      width: 100%
+    )[#output]
+  } else { none }
+
+  // Layout based on mode
+  if layout == "vertical" {
+    stack(
+      dir: ttb,
+      spacing: gutter,
+      code-block,
+      output-block
+    )
+  } else if layout == "input-only" {
+    code-block
+  } else if layout == "output-only" {
+    output-block
+  } else {
+    // horizontal (default)
+    grid(
+      columns: (left-ratio * 1fr, right-ratio * 1fr),
+      gutter: gutter,
+      code-block,
+      output-block
+    )
+  }
 }
