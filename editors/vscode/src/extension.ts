@@ -19,40 +19,23 @@ import {
     TransportKind,
     ExecuteCommandRequest,
 } from 'vscode-languageclient/node';
+import { KnotProjectProvider } from './projectExplorer';
+import { resolveBinaryPath, findProjectRoot } from './utils';
 
 let client: LanguageClient | undefined;
 let watchProcesses: Map<string, ChildProcess> = new Map();
 
-/**
- * Resolve a binary path by looking in common locations (bin, .cargo/bin, workspace)
- */
-function resolveBinaryPath(name: string, outputChannel: any): string {
-    const homeBin = path.join(os.homedir(), 'bin', name);
-    const cargoBin = path.join(os.homedir(), '.cargo', 'bin', name);
-    
-    let workspaceBin: string | undefined;
-    if (workspace.workspaceFolders && workspace.workspaceFolders.length > 0) {
-        workspaceBin = path.join(workspace.workspaceFolders[0].uri.fsPath, 'target', 'release', name);
-    }
-
-    if (fs.existsSync(homeBin)) {
-        outputChannel.appendLine(`Found ${name} in ~/bin: ${homeBin}`);
-        return homeBin;
-    } else if (fs.existsSync(cargoBin)) {
-        outputChannel.appendLine(`Found ${name} in ~/.cargo/bin: ${cargoBin}`);
-        return cargoBin;
-    } else if (workspaceBin && fs.existsSync(workspaceBin)) {
-        outputChannel.appendLine(`Found ${name} in workspace target/release: ${workspaceBin}`);
-        return workspaceBin;
-    } else {
-        outputChannel.appendLine(`${name} not found in common locations, relying on system PATH`);
-        return name;
-    }
-}
-
 export async function activate(context: ExtensionContext) {
     const outputChannel = window.createOutputChannel('Knot Extension');
     outputChannel.appendLine('Activating Knot extension...');
+
+    // Register Knot Project View
+    const knotProjectProvider = new KnotProjectProvider();
+    window.registerTreeDataProvider('knotExplorer', knotProjectProvider);
+    
+    context.subscriptions.push(
+        commands.registerCommand('knot.refreshProjectView', () => knotProjectProvider.refresh())
+    );
 
     const config = workspace.getConfiguration('knot');
     const lspEnabled = config.get<boolean>('lsp.enabled', true);
@@ -251,13 +234,4 @@ async function openPreview(outputChannel: any): Promise<void> {
 
     const pdfUri = Uri.file(pdfPath);
     await commands.executeCommand('vscode.open', pdfUri, { viewColumn: 2 });
-}
-
-function findProjectRoot(startDir: string): string | null {
-    let currentDir = startDir;
-    while (currentDir !== path.dirname(currentDir)) {
-        if (fs.existsSync(path.join(currentDir, 'knot.toml'))) return currentDir;
-        currentDir = path.dirname(currentDir);
-    }
-    return fs.existsSync(path.join(currentDir, 'knot.toml')) ? currentDir : null;
 }

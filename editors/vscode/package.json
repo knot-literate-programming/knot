@@ -24,9 +24,18 @@
   },
   "main": "./out/extension.js",
   "activationEvents": [
-    "onLanguage:knot"
+    "onLanguage:knot",
+    "onView:knotExplorer"
   ],
   "contributes": {
+    "views": {
+      "explorer": [
+        {
+          "id": "knotExplorer",
+          "name": "Knot Project"
+        }
+      ]
+    },
     "languages": [
       {
         "id": "knot",
