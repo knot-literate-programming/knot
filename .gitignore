@@ -12,3 +12,9 @@ Cargo.lock
 .RData
 .Rhistory
 _knot_files/
+
+# macOS
+.DS_Store
+
+# Test files
+examples/test-error-context.knot
