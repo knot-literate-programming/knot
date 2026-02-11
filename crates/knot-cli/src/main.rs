@@ -309,12 +309,12 @@ fn watch() -> Result<()> {
 
     std::env::set_current_dir(original_dir)?;
 
-    // Step 5: Determine .typ output path for typst watch
+    // Step 5: Determine .typ output path for typst watch (without dot prefix)
     let typ_output_path = {
         let stem = main_file
             .file_stem()
             .unwrap_or(std::ffi::OsStr::new("main"));
-        project_root.join(format!(".{}.typ", stem.to_string_lossy()))
+        project_root.join(format!("{}.typ", stem.to_string_lossy()))
     };
 
     // Step 6: Launch typst watch in background
@@ -481,7 +481,27 @@ fn install_vscode() -> Result<()> {
     }
     println!("  ✓ TypeScript compiled");
 
-    // Step 3: npm run package (creates .vsix)
+    // Step 3: Clean up old .vsix files to avoid confusion
+    println!("\n🧹 Cleaning up old .vsix files...");
+    let old_vsix_files: Vec<_> = fs::read_dir(&vscode_dir)?
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry
+                .path()
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| ext == "vsix")
+                .unwrap_or(false)
+        })
+        .collect();
+
+    for entry in old_vsix_files {
+        let path = entry.path();
+        fs::remove_file(&path)?;
+        println!("  ✓ Removed old package: {:?}", path.file_name().unwrap());
+    }
+
+    // Step 4: npm run package (creates .vsix)
     println!("\n📦 Packaging extension...");
     let npm_package = Command::new("npm")
         .arg("run")
@@ -495,7 +515,7 @@ fn install_vscode() -> Result<()> {
     }
     println!("  ✓ Extension packaged");
 
-    // Step 4: Find the .vsix file
+    // Step 5: Find the .vsix file (should be only one after cleanup)
     let vsix_files: Vec<_> = fs::read_dir(&vscode_dir)?
         .filter_map(|entry| entry.ok())
         .filter(|entry| {
@@ -515,7 +535,7 @@ fn install_vscode() -> Result<()> {
     let vsix_path = vsix_files[0].path();
     println!("\n📦 Found package: {:?}", vsix_path.file_name().unwrap());
 
-    // Step 5: Install with code --install-extension
+    // Step 6: Install with code --install-extension
     println!("\n🚀 Installing extension in VSCode...");
     let install_output = Command::new("code")
         .arg("--install-extension")

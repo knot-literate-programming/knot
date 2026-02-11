@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 /// - Reads main file and chapters from knot.toml
 /// - Compiles all chapters to .typ
 /// - Compiles main file to .typ
-/// - Injects #include directives for chapters into main .typ file
+/// - Injects chapter content directly into main .typ file (preserving imports scope)
 /// - Compiles final PDF with typst (using --root for imports)
 pub fn build_project() -> Result<()> {
     use knot_core::config::Config;
@@ -43,6 +43,12 @@ pub fn build_project() -> Result<()> {
             main_file_name
         );
     }
+
+    // Extract stem from main file (e.g., "main.knot" -> "main", "thesis.knot" -> "thesis")
+    let main_stem = main_file
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| anyhow::anyhow!("Invalid main filename: {}", main_file_name))?;
 
     info!("📄 Main file: {}", main_file.display());
     info!("📁 Project root: {}", project_root.display());
@@ -80,26 +86,47 @@ pub fn build_project() -> Result<()> {
             let compiled_path = compile_file(&include_path, None)
                 .with_context(|| format!("Failed to compile included file: {}", include_name))?;
 
-            // Add include directive using relative path from project root
-            let relative_path =
-                pathdiff::diff_paths(&compiled_path, &project_root).ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "Failed to compute relative path from {:?} to {:?}",
-                        project_root,
-                        compiled_path
-                    )
-                })?;
+            // Read and inject content directly instead of using #include
+            // This preserves the import scope from main.typ, allowing included content
+            // to use functions imported in main (like #code-chunk from lib/knot.typ)
+            let chapter_content = fs::read_to_string(&compiled_path)
+                .with_context(|| format!("Failed to read compiled file: {:?}", compiled_path))?;
 
-            generated_includes.push_str(&format!("#include \"{}\"\n", relative_path.display()));
+            generated_includes.push_str(&format!(
+                "// ============================================\n\
+                 // Content from: {}\n\
+                 // ============================================\n\
+                 {}\n\n",
+                include_name,
+                chapter_content.trim()
+            ));
+
+            // Delete intermediate .typ file after reading its content
+            // These files are regenerated on each build and no longer needed after injection
+            fs::remove_file(&compiled_path).with_context(|| {
+                format!("Failed to delete intermediate file: {:?}", compiled_path)
+            })?;
+            info!("✓ Cleaned up intermediate file: {:?}", compiled_path);
         }
     }
 
     // Step 4: Compile main file
     let main_typ_path = compile_file(&main_file, None)?;
 
+    // Rename .{stem}.typ to {stem}.typ (remove dot prefix for main file)
+    // e.g., .main.typ -> main.typ, .thesis.typ -> thesis.typ
+    let final_main_typ_path = {
+        let parent = main_typ_path.parent().unwrap_or(std::path::Path::new("."));
+        let new_path = parent.join(format!("{}.typ", main_stem));
+        fs::rename(&main_typ_path, &new_path)
+            .with_context(|| format!("Failed to rename {:?} to {:?}", main_typ_path, new_path))?;
+        info!("✓ Generated {}.typ", main_stem);
+        new_path
+    };
+
     // Step 5: Inject includes into main file
     if !generated_includes.is_empty() {
-        let mut main_content = fs::read_to_string(&main_typ_path)?;
+        let mut main_content = fs::read_to_string(&final_main_typ_path)?;
 
         // Placeholder is mandatory when includes are present
         if !main_content.contains("/* KNOT-INJECT-CHAPTERS */") {
@@ -111,18 +138,13 @@ pub fn build_project() -> Result<()> {
         }
 
         main_content = main_content.replace("/* KNOT-INJECT-CHAPTERS */", &generated_includes);
-        fs::write(&main_typ_path, main_content)?;
+        fs::write(&final_main_typ_path, main_content)?;
         info!("✓ Injected included files into main file");
     }
 
-    // Step 6: Determine PDF output path (named after project directory)
-    let pdf_output_path = {
-        let project_name = project_root
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("output");
-        project_root.join(format!("{}.pdf", project_name))
-    };
+    // Step 6: Determine PDF output path (named after main file from knot.toml)
+    // e.g., main.knot -> main.pdf, thesis.knot -> thesis.pdf
+    let pdf_output_path = project_root.join(format!("{}.pdf", main_stem));
 
     // Step 7: Compile PDF with typst (with --root for imports)
     info!("📦 Compiling PDF with Typst...");
@@ -131,7 +153,7 @@ pub fn build_project() -> Result<()> {
         .arg("compile")
         .arg("--root")
         .arg(&project_root)
-        .arg(&main_typ_path)
+        .arg(&final_main_typ_path)
         .arg(&pdf_output_path)
         .output()
         .context("Failed to execute typst command. Is Typst installed and in your PATH?")?;

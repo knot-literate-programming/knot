@@ -97,7 +97,33 @@ pub fn clean_project(start_path: Option<&Path>) -> Result<()> {
         );
     }
 
-    // 4. Remove hidden .*.typ and .*.pdf files in the project root
+    // 4. Remove generated .typ and .pdf files
+    // Read knot.toml to get the main filename and derive stem
+    let (config, _) = config::Config::find_and_load(&project_root)?;
+    if let Some(main_file_name) = config.document.main {
+        let main_stem = Path::new(&main_file_name)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("main");
+
+        // Remove {stem}.typ and {stem}.pdf (e.g., main.typ, main.pdf)
+        let typ_file = project_root.join(format!("{}.typ", main_stem));
+        let pdf_file = project_root.join(format!("{}.pdf", main_stem));
+
+        if typ_file.exists() {
+            fs::remove_file(&typ_file)
+                .with_context(|| format!("Failed to remove file: {:?}", typ_file))?;
+            info!("  ✓ Removed {}.typ", main_stem);
+        }
+
+        if pdf_file.exists() {
+            fs::remove_file(&pdf_file)
+                .with_context(|| format!("Failed to remove file: {:?}", pdf_file))?;
+            info!("  ✓ Removed {}.pdf", main_stem);
+        }
+    }
+
+    // Also remove any hidden .*.typ and .*.pdf files (legacy or intermediate files)
     let entries = fs::read_dir(&project_root)?;
     for entry in entries.flatten() {
         let path = entry.path();
@@ -109,7 +135,7 @@ pub fn clean_project(start_path: Option<&Path>) -> Result<()> {
             {
                 fs::remove_file(&path)
                     .with_context(|| format!("Failed to remove file: {:?}", path))?;
-                info!("  ✓ Removed generated file: {}", name);
+                info!("  ✓ Removed legacy file: {}", name);
             }
             _ => {}
         }

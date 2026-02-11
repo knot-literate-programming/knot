@@ -101,25 +101,35 @@ fn test_successful_build_with_includes() {
     // Check that build succeeded
     assert!(result.is_ok(), "Build should succeed: {:?}", result.err());
 
-    // Verify that generated files exist
+    // Verify that main.typ exists (named after main file in knot.toml)
     assert!(
-        project_root.join(".main.typ").exists(),
-        "Main .typ file should be generated"
-    );
-    assert!(
-        project_root.join("chapters/.01-intro.typ").exists(),
-        "Chapter 01 .typ should be generated"
-    );
-    assert!(
-        project_root.join("chapters/.02-results.typ").exists(),
-        "Chapter 02 .typ should be generated"
+        project_root.join("main.typ").exists(),
+        "main.typ should be generated (from main.knot in knot.toml)"
     );
 
-    // Verify that includes were injected
-    let main_typ_content = fs::read_to_string(project_root.join(".main.typ")).unwrap();
+    // Intermediate chapter .typ files should NOT exist (deleted after injection)
     assert!(
-        main_typ_content.contains("#include"),
-        "Main .typ should contain #include directives"
+        !project_root.join("chapters/.01-intro.typ").exists(),
+        "Chapter .typ files should be deleted after injection"
+    );
+    assert!(
+        !project_root.join("chapters/.02-results.typ").exists(),
+        "Chapter .typ files should be deleted after injection"
+    );
+
+    // Verify that content was injected directly (not using #include)
+    let main_typ_content = fs::read_to_string(project_root.join("main.typ")).unwrap();
+    assert!(
+        main_typ_content.contains("// Content from: chapters/01-intro.knot"),
+        "Main .typ should contain injected content from chapter 1"
+    );
+    assert!(
+        main_typ_content.contains("= Introduction"),
+        "Main .typ should contain chapter 1 content"
+    );
+    assert!(
+        main_typ_content.contains("= Results"),
+        "Main .typ should contain chapter 2 content"
     );
     assert!(
         !main_typ_content.contains("/* KNOT-INJECT-CHAPTERS */"),
