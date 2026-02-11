@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
+pub mod error_utils;
 pub mod manager;
 pub mod path_utils;
 pub mod python;

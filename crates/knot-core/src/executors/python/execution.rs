@@ -7,6 +7,7 @@
 // Uses side-channel (via KNOT_METADATA_FILE) for robust communication.
 
 use super::process::PythonProcess;
+use crate::executors::error_utils::format_code_with_context;
 use crate::executors::path_utils::escape_path_for_code;
 use crate::executors::{ExecutionResult, GraphicsOptions, SideChannel};
 use anyhow::Result;
@@ -39,20 +40,7 @@ pub fn execute(
     let (stdout, stderr) = process.read_until_boundary()?;
 
     if !stderr.is_empty() && stderr.to_lowercase().contains("traceback") {
-        let code_preview = if code.lines().count() > 5 {
-            let lines: Vec<&str> = code.lines().take(5).collect();
-            format!(
-                "{}
-... ({} lines truncated)",
-                lines.join(
-                    "
-"
-                ),
-                code.lines().count() - 5
-            )
-        } else {
-            code.to_string()
-        };
+        let code_preview = format_code_with_context(code, &stderr, 3);
 
         anyhow::bail!(
             "Python execution failed.

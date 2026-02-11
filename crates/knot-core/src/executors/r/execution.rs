@@ -8,6 +8,7 @@
 // If no metadata is provided, stdout text is used as fallback.
 
 use super::{BOUNDARY, RExecutor, formatters, process::RProcess};
+use crate::executors::error_utils::format_code_with_context;
 use crate::executors::path_utils::escape_path_for_code;
 use crate::executors::{ExecutionResult, GraphicsOptions, LanguageExecutor, SideChannel};
 use anyhow::{Context, Result};
@@ -57,16 +58,7 @@ pub fn execute(
             || stderr_lower.contains("objet") && stderr_lower.contains("introuvable");
 
         if is_error {
-            let code_preview = if code.lines().count() > 5 {
-                let lines: Vec<&str> = code.lines().take(5).collect();
-                format!(
-                    "{}\n... ({} lines truncated)",
-                    lines.join("\n"),
-                    code.lines().count() - 5
-                )
-            } else {
-                code.to_string()
-            };
+            let code_preview = format_code_with_context(code, &stderr_output, 3);
 
             anyhow::bail!(
                 "R execution failed.\n\nCode:\n{}\n\nError:\n{}",
