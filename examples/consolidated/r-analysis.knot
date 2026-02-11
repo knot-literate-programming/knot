@@ -114,10 +114,11 @@ Finally, let's examine the relationship between temperature and rainfall:
 #| output: true
 #| fig-width: 4
 #| fig-height: 4
-#| layout: "horizontal"
+#| layout: 'horizontal'
 #| gutter: 2em
-#| code-stroke: 1pt + rgb("#CE412B")
-#| output-stroke: 1pt + rgb("#CE412B")
+#| codly-stroke: '1pt + rgb("#CE412B")'
+#| codly-lang-radius: 10pt
+#| output-stroke: '1pt + rgb("#CE412B")'
 
 # Scatter plot with regression line
 correlation_plot <- ggplot(climate_data, aes(x = temperature, y = rainfall)) +
