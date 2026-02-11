@@ -5,6 +5,7 @@
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Deserialize, Default)]
@@ -15,13 +16,16 @@ pub struct Config {
     pub helpers: HelpersConfig,
     #[serde(default)]
     pub defaults: ChunkDefaults,
+    /// Codly configuration options (passed to #codly() during initialization)
+    #[serde(default)]
+    pub codly: HashMap<String, toml::Value>,
 }
 
 /// Default values for chunk options, configurable in knot.toml
 ///
 /// All fields are optional to allow partial configuration.
 /// Priority: chunk options > knot.toml defaults > hardcoded defaults
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Clone)]
 pub struct ChunkDefaults {
     pub eval: Option<bool>,
     pub echo: Option<bool>,
@@ -40,14 +44,6 @@ pub struct ChunkDefaults {
     // Presentation options
     pub layout: Option<String>,
     pub gutter: Option<String>,
-    #[serde(rename = "code-background")]
-    pub code_background: Option<String>,
-    #[serde(rename = "code-stroke")]
-    pub code_stroke: Option<String>,
-    #[serde(rename = "code-radius")]
-    pub code_radius: Option<String>,
-    #[serde(rename = "code-inset")]
-    pub code_inset: Option<String>,
     #[serde(rename = "output-background")]
     pub output_background: Option<String>,
     #[serde(rename = "output-stroke")]
@@ -197,7 +193,6 @@ fig-height = 6.0
 dpi = 600
 fig-format = "png"
 layout = "vertical"
-code-background = "#f5f5f5"
 gutter = "2em"
 "##;
 
@@ -210,7 +205,6 @@ gutter = "2em"
         assert_eq!(config.defaults.dpi, Some(600));
         assert_eq!(config.defaults.fig_format, Some("png".to_string()));
         assert_eq!(config.defaults.layout, Some("vertical".to_string()));
-        assert_eq!(config.defaults.code_background, Some("#f5f5f5".to_string()));
         assert_eq!(config.defaults.gutter, Some("2em".to_string()));
     }
 
