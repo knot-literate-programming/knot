@@ -1,5 +1,6 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 // NOTE : Ces structures sont basées sur la section 3.5 du document de référence.
@@ -163,7 +164,7 @@ macro_rules! define_options {
     ) => {
         /// ChunkOptions with optional fields for YAML parsing.
         #[derive(Debug, Default, Clone, Serialize, Deserialize)]
-        #[serde(default, deny_unknown_fields)]
+        #[serde(default)]
         pub struct ChunkOptions {
             $(
                 $(#[doc = $doc])*
@@ -272,18 +273,6 @@ define_options! {
     /// Space between input and output blocks (Typst length)
     [opt] gutter: String, None,
 
-    /// Background color for code container (Typst color)
-    #[serde(rename = "code-background")]
-    [opt] code_background: String, None,
-    /// Border stroke for code container (Typst stroke)
-    #[serde(rename = "code-stroke")]
-    [opt] code_stroke: String, None,
-    /// Corner radius for code container (Typst length)
-    #[serde(rename = "code-radius")]
-    [opt] code_radius: String, None,
-    /// Internal padding for code container (Typst length)
-    #[serde(rename = "code-inset")]
-    [opt] code_inset: String, None,
 
     /// Background color for output container (Typst color)
     #[serde(rename = "output-background")]
@@ -311,6 +300,7 @@ pub struct Chunk {
     pub name: Option<String>,
     pub code: String,
     pub options: ChunkOptions,
+    pub codly_options: HashMap<String, String>,
     pub errors: Vec<ChunkError>,
     pub range: Range,      // Position du chunk entier (de ```{r}} à ```)
     pub code_range: Range, // Position du code seul à l'intérieur

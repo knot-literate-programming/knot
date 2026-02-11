@@ -183,7 +183,7 @@ fn parse_chunk_internal<'i>(input: &mut Input<'i>) -> ModalResult<(Chunk, &'i st
         }
     }
 
-    let (options, mut errors) = parse_options(&options_str);
+    let (options, codly_options, mut errors) = parse_options(&options_str);
     errors.extend(header_errors);
 
     // Body
@@ -196,6 +196,7 @@ fn parse_chunk_internal<'i>(input: &mut Input<'i>) -> ModalResult<(Chunk, &'i st
         name,
         code: code_slice.to_string(),
         options,
+        codly_options,
         errors,
         range: Range::default(),
         code_range: Range::default(),
@@ -503,14 +504,19 @@ More text below."###;
 
     #[test]
     fn test_parse_unknown_option() {
+        // Unknown options are now silently ignored (no deny_unknown_fields)
+        // This allows forward compatibility and custom options like codly-*
         let content = r###"```{r}
 #| unknown-opt: 42
 1 + 1
 ```"###;
         let doc = Document::parse(content.to_string()).unwrap();
         assert_eq!(doc.chunks.len(), 1);
-        assert_eq!(doc.chunks[0].errors.len(), 1);
-        assert!(doc.chunks[0].errors[0].message.contains("parsing error"));
+        assert_eq!(
+            doc.chunks[0].errors.len(),
+            0,
+            "Unknown options should be silently ignored"
+        );
     }
 
     #[test]

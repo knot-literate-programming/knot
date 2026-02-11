@@ -142,6 +142,34 @@ pub fn build_project() -> Result<()> {
         info!("✓ Injected included files into main file");
     }
 
+    // Step 5.5: Inject codly configuration if present (optional placeholder)
+    if !config.codly.is_empty() {
+        let mut main_content = fs::read_to_string(&final_main_typ_path)?;
+
+        if main_content.contains("/* KNOT-CODLY-INIT */") {
+            // Convert TOML values to Typst syntax (pass values as-is)
+            let codly_args: Vec<String> = config
+                .codly
+                .iter()
+                .map(|(key, value)| {
+                    let value_str = match value {
+                        toml::Value::String(s) => s.clone(),
+                        toml::Value::Boolean(b) => b.to_string(),
+                        toml::Value::Integer(i) => i.to_string(),
+                        toml::Value::Float(f) => f.to_string(),
+                        _ => toml::to_string(value).unwrap_or_default().trim().to_string(),
+                    };
+                    format!("{}: {}", key, value_str)
+                })
+                .collect();
+
+            let codly_init = format!("#codly({})", codly_args.join(", "));
+            main_content = main_content.replace("/* KNOT-CODLY-INIT */", &codly_init);
+            fs::write(&final_main_typ_path, main_content)?;
+            info!("✓ Injected codly configuration from knot.toml");
+        }
+    }
+
     // Step 6: Determine PDF output path (named after main file from knot.toml)
     // e.g., main.knot -> main.pdf, thesis.knot -> thesis.pdf
     let pdf_output_path = project_root.join(format!("{}.pdf", main_stem));

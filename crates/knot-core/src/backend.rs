@@ -112,19 +112,6 @@ impl Backend for TypstBackend {
             args.push(format!("gutter: {}", gutter));
         }
 
-        if let Some(code_bg) = &resolved_options.code_background {
-            args.push(format!("code-background: {}", code_bg));
-        }
-        if let Some(code_stroke) = &resolved_options.code_stroke {
-            args.push(format!("code-stroke: {}", code_stroke));
-        }
-        if let Some(code_radius) = &resolved_options.code_radius {
-            args.push(format!("code-radius: {}", code_radius));
-        }
-        if let Some(code_inset) = &resolved_options.code_inset {
-            args.push(format!("code-inset: {}", code_inset));
-        }
-
         if let Some(output_bg) = &resolved_options.output_background {
             args.push(format!("output-background: {}", output_bg));
         }
@@ -147,6 +134,16 @@ impl Backend for TypstBackend {
 
         let code_chunk_call = format!("#code-chunk({})", args.join(", "));
         let mut chunk_output_final = String::new();
+
+        // Add codly() call if there are codly options from the chunk
+        if !chunk.codly_options.is_empty() {
+            let codly_args: Vec<String> = chunk
+                .codly_options
+                .iter()
+                .map(|(key, value)| format!("{}: {}", key, value))
+                .collect();
+            chunk_output_final.push_str(&format!("#codly({})\n", codly_args.join(", ")));
+        }
 
         if let Some(name) = &chunk.name {
             if !name.trim().is_empty() {
@@ -219,10 +216,6 @@ mod tests {
                 // Presentation options (use defaults for tests)
                 layout: None,
                 gutter: None,
-                code_background: None,
-                code_stroke: None,
-                code_radius: None,
-                code_inset: None,
                 output_background: None,
                 output_stroke: None,
                 output_radius: None,
@@ -230,6 +223,7 @@ mod tests {
                 width_ratio: None,
                 align: None,
             },
+            codly_options: std::collections::HashMap::new(),
             errors: vec![],
             range: dummy_range.clone(),
             code_range: dummy_range,
