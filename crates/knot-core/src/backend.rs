@@ -113,7 +113,7 @@ impl Backend for TypstBackend {
         }
 
         if let Some(code_bg) = &resolved_options.code_background {
-            args.push(format!("code-background: rgb(\"{}\")", code_bg));
+            args.push(format!("code-background: {}", code_bg));
         }
         if let Some(code_stroke) = &resolved_options.code_stroke {
             args.push(format!("code-stroke: {}", code_stroke));
@@ -126,7 +126,7 @@ impl Backend for TypstBackend {
         }
 
         if let Some(output_bg) = &resolved_options.output_background {
-            args.push(format!("output-background: rgb(\"{}\")", output_bg));
+            args.push(format!("output-background: {}", output_bg));
         }
         if let Some(output_stroke) = &resolved_options.output_stroke {
             args.push(format!("output-stroke: {}", output_stroke));

@@ -46,7 +46,15 @@ impl SnapshotManager {
             let snapshot_path = cache.get_snapshot_path(previous_hash, ext);
 
             if snapshot_path.exists() {
-                log::debug!("Restoring state for {} from {}", lang, &previous_hash[..8]);
+                log::debug!(
+                    "Restoring state for {} from {}",
+                    lang,
+                    if previous_hash.is_empty() {
+                        "N/A"
+                    } else {
+                        &previous_hash[..8]
+                    }
+                );
 
                 // Load the session snapshot
                 exec.load_session(&snapshot_path).context(format!(
@@ -125,7 +133,11 @@ impl SnapshotManager {
 
             log::debug!(
                 "💾 Saved lightweight snapshot for node {} (lang: {})",
-                &node_hash[..8],
+                if node_hash.is_empty() {
+                    "N/A"
+                } else {
+                    &node_hash[..8]
+                },
                 lang
             );
 
@@ -138,8 +150,16 @@ impl SnapshotManager {
             // We do NOTHING here. loaded_snapshot_per_lang remains `previous_hash`.
             log::debug!(
                 "⚡ Chunk {} cached. Executor stays at state {}.",
-                &node_hash[..8],
-                &previous_hash[..8]
+                if node_hash.is_empty() {
+                    "N/A"
+                } else {
+                    &node_hash[..8]
+                },
+                if previous_hash.is_empty() {
+                    "N/A"
+                } else {
+                    &previous_hash[..8]
+                }
             );
         }
 

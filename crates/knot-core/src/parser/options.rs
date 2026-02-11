@@ -37,7 +37,10 @@ pub fn parse_options(options_block: &str) -> (ChunkOptions, Vec<ChunkError>) {
     }
 
     match serde_yaml::from_str::<ChunkOptions>(&yaml_str) {
-        Ok(options) => (options, Vec::new()),
+        Ok(options) => {
+            log::debug!("Parsed ChunkOptions: {:?}", options);
+            (options, Vec::new())
+        }
         Err(e) => {
             let mut errors = Vec::new();
             // serde_yaml error might contain line/column
