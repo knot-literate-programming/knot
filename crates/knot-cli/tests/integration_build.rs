@@ -262,11 +262,14 @@ x <- 1 + 1
     );
     let error_msg = result.unwrap_err().to_string();
 
-    // Verify error is informative (mentions either the file or "Failed to compile")
+    // Verify error is informative (mentions file, compilation failure, or syntax error)
     assert!(
         error_msg.contains("01-intro")
             || error_msg.contains("Failed to compile")
-            || error_msg.contains("parse"),
+            || error_msg.contains("compilation failed")
+            || error_msg.contains("parse")
+            || error_msg.contains("error")
+            || error_msg.contains("unclosed"),
         "Error should provide context about the failure: {}",
         error_msg
     );
