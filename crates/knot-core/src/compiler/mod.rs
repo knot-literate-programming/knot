@@ -140,7 +140,7 @@ impl Compiler {
                         &mut self.executor_manager,
                         &mut cache,
                         &previous_hash,
-                        &self.config.defaults,
+                        &self.config,
                     )?;
 
                     // Handle constant objects declared in this chunk

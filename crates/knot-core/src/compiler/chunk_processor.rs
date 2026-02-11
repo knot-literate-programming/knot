@@ -10,7 +10,7 @@
 
 use crate::backend::{Backend, TypstBackend};
 use crate::cache::{Cache, hash_dependencies};
-use crate::config::ChunkDefaults;
+use crate::config::Config;
 use crate::executors::ExecutionResult;
 use crate::executors::{ExecutorManager, GraphicsOptions};
 use crate::parser::Chunk;
@@ -23,11 +23,18 @@ pub fn process_chunk(
     executor_manager: &mut ExecutorManager,
     cache: &mut Cache,
     previous_hash: &str,
-    config_defaults: &ChunkDefaults,
+    config: &Config,
 ) -> Result<(String, String)> {
     // Apply config defaults to chunk options and resolve to concrete values
     let mut chunk_options = chunk.options.clone();
-    chunk_options.apply_config_defaults(config_defaults);
+
+    // Priority 1: Apply global [defaults]
+    chunk_options.apply_config_defaults(&config.defaults);
+
+    // Priority 2: Apply language-specific [{lang}-chunks] if present
+    if let Some(lang_defaults) = config.get_language_defaults(&chunk.language) {
+        chunk_options.apply_config_defaults(lang_defaults);
+    }
     let resolved_options = chunk_options.resolve(); // Convert Option<bool> to bool
     let chunk_name = chunk
         .name
@@ -183,6 +190,10 @@ mod tests {
         (temp_dir, manager)
     }
 
+    fn setup_test_config() -> crate::config::Config {
+        crate::config::Config::default()
+    }
+
     #[test]
     fn test_process_chunk_eval_false() {
         let chunk = create_test_chunk("r", "x <- 1", None, false, true);
@@ -194,7 +205,7 @@ mod tests {
             &mut manager,
             &mut cache,
             "prev_hash",
-            &ChunkDefaults::default(),
+            &setup_test_config(),
         )
         .unwrap();
 
@@ -214,7 +225,7 @@ mod tests {
             &mut manager,
             &mut cache,
             "prev_hash",
-            &ChunkDefaults::default(),
+            &setup_test_config(),
         )
         .unwrap();
     }
@@ -230,7 +241,7 @@ mod tests {
             &mut manager,
             &mut cache,
             "prev_hash",
-            &ChunkDefaults::default(),
+            &setup_test_config(),
         )
         .unwrap();
 
@@ -250,7 +261,7 @@ mod tests {
             &mut manager,
             &mut cache,
             "prev_hash",
-            &ChunkDefaults::default(),
+            &setup_test_config(),
         )
         .unwrap();
 
@@ -260,7 +271,7 @@ mod tests {
             &mut manager,
             &mut cache,
             "prev_hash",
-            &ChunkDefaults::default(),
+            &setup_test_config(),
         )
         .unwrap();
 
@@ -281,7 +292,7 @@ mod tests {
             &mut manager,
             &mut cache,
             "prev_hash",
-            &ChunkDefaults::default(),
+            &setup_test_config(),
         )
         .unwrap();
         let (_output2, hash2) = process_chunk(
@@ -289,7 +300,7 @@ mod tests {
             &mut manager,
             &mut cache,
             "prev_hash",
-            &ChunkDefaults::default(),
+            &setup_test_config(),
         )
         .unwrap();
 
@@ -308,7 +319,7 @@ mod tests {
             &mut manager,
             &mut cache,
             "prev_hash_1",
-            &ChunkDefaults::default(),
+            &setup_test_config(),
         )
         .unwrap();
         let (_output2, hash2) = process_chunk(
@@ -316,7 +327,7 @@ mod tests {
             &mut manager,
             &mut cache,
             "prev_hash_2",
-            &ChunkDefaults::default(),
+            &setup_test_config(),
         )
         .unwrap();
 
@@ -335,7 +346,7 @@ mod tests {
             &mut manager,
             &mut cache,
             "prev_hash",
-            &ChunkDefaults::default(),
+            &setup_test_config(),
         );
 
         // Should fail with unsupported language
@@ -374,7 +385,7 @@ mod tests {
             &mut manager,
             &mut cache,
             "prev_hash",
-            &ChunkDefaults::default(),
+            &setup_test_config(),
         )
         .unwrap();
 
@@ -388,7 +399,7 @@ mod tests {
             &mut manager,
             &mut cache,
             "prev_hash",
-            &ChunkDefaults::default(),
+            &setup_test_config(),
         )
         .unwrap();
 
@@ -406,7 +417,7 @@ mod tests {
             &mut manager,
             &mut cache,
             "prev_hash",
-            &ChunkDefaults::default(),
+            &setup_test_config(),
         )
         .unwrap();
 
@@ -425,11 +436,151 @@ mod tests {
             &mut manager,
             &mut cache,
             "prev_hash",
-            &ChunkDefaults::default(),
+            &setup_test_config(),
         )
         .unwrap();
 
         // Output should indicate language
         assert!(output.contains("lang: \"r\""));
+    }
+
+    #[test]
+    fn test_process_chunk_language_specific_defaults() {
+        use crate::config::{ChunkDefaults, Config};
+        use crate::parser::{ChunkOptions, Position, Range};
+
+        // Create a chunk with minimal explicit options (echo is None)
+        let dummy_range = Range {
+            start: Position { line: 0, column: 0 },
+            end: Position { line: 0, column: 0 },
+        };
+
+        let chunk = Chunk {
+            language: "r".to_string(),
+            code: "x <- 1".to_string(),
+            name: None,
+            options: ChunkOptions {
+                eval: None,      // Will use language default
+                echo: None,      // Will use language default
+                output: None,    // Will use language default
+                cache: None,     // Will use language default
+                fig_width: None, // Will use language default
+                ..Default::default()
+            },
+            codly_options: std::collections::HashMap::new(),
+            errors: vec![],
+            range: dummy_range.clone(),
+            code_range: dummy_range,
+            start_byte: 100,
+            end_byte: 200,
+            code_start_byte: 110,
+            code_end_byte: 190,
+        };
+
+        let (_temp_dir_cache, mut cache) = setup_test_cache();
+        let (_temp_dir_mgr, mut manager) = setup_test_manager();
+
+        // Create config with language-specific defaults for R
+        let config = Config {
+            r_chunks: Some(ChunkDefaults {
+                echo: Some(false),
+                eval: Some(true),
+                output: Some(true),
+                cache: Some(true),
+                fig_width: Some(10.0),
+                fig_height: Some(8.0),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let (output, _hash) =
+            process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &config).unwrap();
+
+        // Verify that language-specific defaults were applied
+        assert!(output.contains("echo: false"));
+    }
+
+    #[test]
+    fn test_process_chunk_language_defaults_priority() {
+        use crate::config::{ChunkDefaults, Config};
+
+        // Create a chunk with some explicit options
+        let mut chunk = create_test_chunk("python", "x = 1", None, false, false);
+        chunk.options.echo = Some(true); // Override with chunk-specific option
+
+        let (_temp_dir_cache, mut cache) = setup_test_cache();
+        let (_temp_dir_mgr, mut manager) = setup_test_manager();
+
+        // Create config with both global and language-specific defaults
+        let config = Config {
+            defaults: ChunkDefaults {
+                echo: Some(false), // Global default
+                ..Default::default()
+            },
+            python_chunks: Some(ChunkDefaults {
+                echo: Some(false), // Language-specific default
+                fig_width: Some(6.0),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let (output, _hash) =
+            process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &config).unwrap();
+
+        // Chunk-specific option should override everything
+        assert!(output.contains("echo: true"));
+    }
+
+    #[test]
+    fn test_process_chunk_global_defaults_fallback() {
+        use crate::config::{ChunkDefaults, Config};
+        use crate::parser::{ChunkOptions, Position, Range};
+
+        // Create a Python chunk (supported language) without language-specific defaults
+        let dummy_range = Range {
+            start: Position { line: 0, column: 0 },
+            end: Position { line: 0, column: 0 },
+        };
+
+        let chunk = Chunk {
+            language: "python".to_string(),
+            code: "x = 1".to_string(),
+            name: None,
+            options: ChunkOptions {
+                eval: None, // Will use global default
+                echo: None, // Will use global default
+                ..Default::default()
+            },
+            codly_options: std::collections::HashMap::new(),
+            errors: vec![],
+            range: dummy_range.clone(),
+            code_range: dummy_range,
+            start_byte: 100,
+            end_byte: 200,
+            code_start_byte: 110,
+            code_end_byte: 190,
+        };
+
+        let (_temp_dir_cache, mut cache) = setup_test_cache();
+        let (_temp_dir_mgr, mut manager) = setup_test_manager();
+
+        // Create config with only global defaults (no python-chunks defined)
+        let config = Config {
+            defaults: ChunkDefaults {
+                echo: Some(false),
+                eval: Some(true),
+                ..Default::default()
+            },
+            // Note: python_chunks is None, so global defaults should be used
+            ..Default::default()
+        };
+
+        let (output, _hash) =
+            process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &config).unwrap();
+
+        // Should use global defaults since no language-specific defaults exist for Python
+        assert!(output.contains("echo: false"));
     }
 }

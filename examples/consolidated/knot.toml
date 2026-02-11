@@ -44,3 +44,15 @@ layout = "horizontal"              # Layout: "horizontal", "vertical", "input-on
 # output-inset = "0.5em"           # Output block padding (Typst length)
 # width-ratio = "1:1"              # Width ratio for horizontal layout
 # align = "left"                   # Content alignment within containers
+
+# Language-specific chunk defaults (optional)
+# These override global [defaults] for specific languages
+[r-chunks]
+echo = false                # Don't show R source code by default
+fig-width = 8.0             # Larger figures for R plots
+fig-height = 6.0
+
+[python-chunks]
+echo = true                 # Show Python source code by default
+fig-width = 6.0             # Smaller figures for Python plots
+dpi = 300

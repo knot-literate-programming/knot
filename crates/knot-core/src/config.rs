@@ -19,6 +19,14 @@ pub struct Config {
     /// Codly configuration options (passed to #codly() during initialization)
     #[serde(default)]
     pub codly: HashMap<String, toml::Value>,
+
+    // Language-specific chunk templates
+    /// R-specific chunk defaults ([r-chunks] in knot.toml)
+    #[serde(default, rename = "r-chunks")]
+    pub r_chunks: Option<ChunkDefaults>,
+    /// Python-specific chunk defaults ([python-chunks] in knot.toml)
+    #[serde(default, rename = "python-chunks")]
+    pub python_chunks: Option<ChunkDefaults>,
 }
 
 /// Default values for chunk options, configurable in knot.toml
@@ -145,6 +153,25 @@ impl Config {
     pub fn typst_helper_path(&self, project_root: &Path) -> Option<PathBuf> {
         self.helpers.typst.as_ref().map(|t| project_root.join(t))
     }
+
+    /// Get language-specific chunk defaults for a given language
+    ///
+    /// Returns the language-specific defaults if defined in knot.toml,
+    /// otherwise returns None.
+    ///
+    /// # Example
+    /// ```toml
+    /// [r-chunks]
+    /// echo = false
+    /// fig-width = 8.0
+    /// ```
+    pub fn get_language_defaults(&self, lang: &str) -> Option<&ChunkDefaults> {
+        match lang {
+            "r" => self.r_chunks.as_ref(),
+            "python" => self.python_chunks.as_ref(),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -221,5 +248,58 @@ fig-width = 10.0
         assert_eq!(config.defaults.fig_width, Some(10.0));
         assert!(config.defaults.eval.is_none());
         assert!(config.defaults.cache.is_none());
+    }
+
+    #[test]
+    fn test_language_specific_templates() {
+        let toml = r##"
+[document]
+main = "main.knot"
+
+[defaults]
+echo = true
+fig-width = 7.0
+
+[r-chunks]
+echo = false
+fig-width = 8.0
+fig-height = 6.0
+
+[python-chunks]
+echo = true
+fig-width = 6.0
+dpi = 300
+"##;
+
+        let config: Config = toml::from_str(toml).unwrap();
+
+        // Test R-specific defaults
+        let r_defaults = config.get_language_defaults("r");
+        assert!(r_defaults.is_some());
+        let r_defaults = r_defaults.unwrap();
+        assert_eq!(r_defaults.echo, Some(false));
+        assert_eq!(r_defaults.fig_width, Some(8.0));
+        assert_eq!(r_defaults.fig_height, Some(6.0));
+
+        // Test Python-specific defaults
+        let python_defaults = config.get_language_defaults("python");
+        assert!(python_defaults.is_some());
+        let python_defaults = python_defaults.unwrap();
+        assert_eq!(python_defaults.echo, Some(true));
+        assert_eq!(python_defaults.fig_width, Some(6.0));
+        assert_eq!(python_defaults.dpi, Some(300));
+
+        // Test unsupported language returns None
+        let julia_defaults = config.get_language_defaults("julia");
+        assert!(julia_defaults.is_none());
+    }
+
+    #[test]
+    fn test_get_language_defaults_none() {
+        let config = Config::default();
+
+        // Should return None when no language-specific templates are defined
+        assert!(config.get_language_defaults("r").is_none());
+        assert!(config.get_language_defaults("python").is_none());
     }
 }
