@@ -1,0 +1,52 @@
+#import "lib/knot.typ": *
+
+// Codly configuration (syntax highlighting)
+#import "@preview/codly:1.3.0": *
+#show: codly-init
+#import "@preview/codly-languages:0.1.10": *
+#codly(languages: codly-languages)
+#codly(
+  languages: (
+    r: (name: "R", icon: "", color: rgb("#CE412B")),
+    python: (name: "Python", icon: "", color: rgb("#3572A5")),
+  ),
+)
+
+// Figure numbering
+#set figure(numbering: "1.")
+
+// Global title (without section marker)
+#align(center)[
+  #text(size: 24pt, weight: "bold")[
+    Climate Data Analysis with Knot
+  ]
+
+  #v(0.5em)
+
+  #text(size: 14pt)[
+    A Comprehensive Example of Literate Programming
+  ]
+
+  #text(size: 12pt, style: "italic")[
+    Demonstrating R and Python Integration
+  ]
+]
+
+#v(2em)
+
+// Chapter injection point
+/* KNOT-INJECT-CHAPTERS */
+
+= Conclusion
+
+This document demonstrates Knot's capabilities for reproducible research:
+- Multi-language support (R and Python)
+- Flexible chunk presentation options
+- Data interchange between languages
+- Rich graphics output with ggplot2 and matplotlib
+
+#align(center)[
+  #text(style: "italic")[
+    Generated with Knot — Modern literate programming for Typst
+  ]
+]

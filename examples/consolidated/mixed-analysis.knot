@@ -1,0 +1,258 @@
+= Multi-Language Integration
+
+This chapter demonstrates that R and Python can coexist in the same document, and data can be shared between them.
+
+== Generating Data with R
+
+Let's create a more complex dataset in R and export it to CSV:
+
+```{r}
+#| echo: true
+#| output: true
+#| layout: horizontal
+#| gutter: "1.5em"
+
+# Create a detailed weather dataset
+set.seed(123)
+n_days <- 365
+
+weather_detailed <- data.frame(
+  day = 1:n_days,
+  month = rep(1:12, length.out = n_days),
+  temperature = 15 + 10 * sin(2 * pi * (1:n_days) / 365) + rnorm(n_days, 0, 3),
+  pressure = 1013 + rnorm(n_days, 0, 10),
+  wind_speed = abs(rnorm(n_days, 15, 5))
+)
+
+# Add seasonal labels
+weather_detailed$season <- cut(weather_detailed$month,
+  breaks = c(0, 3, 6, 9, 12),
+  labels = c("Winter", "Spring", "Summer", "Fall")
+)
+
+# Display first few rows
+head(weather_detailed, 10)
+
+# Summary statistics
+cat("\nDataset summary:\n")
+cat("Total days:", nrow(weather_detailed), "\n")
+cat("Temperature range:", round(min(weather_detailed$temperature), 1),
+    "to", round(max(weather_detailed$temperature), 1), "°C\n")
+```
+
+== Exporting Data to CSV
+
+Now let's save this dataset to share it with Python:
+
+```{r}
+#| echo: true
+#| output: true
+#| layout: horizontal
+
+# Export to CSV
+csv_path <- "weather_data.csv"
+write.csv(weather_detailed, csv_path, row.names = FALSE)
+
+cat("Data exported to:", csv_path, "\n")
+cat("File size:", file.info(csv_path)$size, "bytes\n")
+```
+
+✅ Data successfully exported! The file contains `{r} nrow(weather_detailed)` observations.
+
+== Reading Data with Python
+
+Let's switch to Python to read and analyze the exported data:
+
+```{python}
+#| echo: true
+#| output: true
+#| layout: horizontal
+
+import pandas as pd
+import numpy as np
+
+# Read the CSV file created by R
+weather_df = pd.read_csv('weather_data.csv')
+
+print("Data loaded successfully!")
+print(f"\nShape: {weather_df.shape}")
+print(f"\nColumns: {list(weather_df.columns)}")
+print(f"\nFirst few rows:")
+print(weather_df.head())
+```
+
+== Visualizing with Python
+
+Now let's create a comprehensive visualization using matplotlib:
+
+```{python}
+#| echo: true
+#| output: true
+#| fig-width: 10
+#| fig-height: 8
+#| layout: vertical
+#| code-background: "rgb(\"#f5f5f5\")"
+#| output-background: "rgb(\"#e8f4f8\")"
+#| gutter: "2em"
+
+import matplotlib.pyplot as plt
+from matplotlib.gridspec import GridSpec
+
+# Create a complex figure with GridSpec for flexible layout
+fig = plt.figure(figsize=(10, 8))
+gs = GridSpec(3, 2, figure=fig, hspace=0.3, wspace=0.3)
+
+# Main plot: Temperature over the year
+ax1 = fig.add_subplot(gs[0, :])
+ax1.plot(weather_df['day'], weather_df['temperature'],
+         color='#fd8d3c', linewidth=1, alpha=0.7, label='Daily Temperature')
+# Add rolling mean
+rolling_mean = weather_df['temperature'].rolling(window=30, center=True).mean()
+ax1.plot(weather_df['day'], rolling_mean,
+         color='#CE412B', linewidth=2, label='30-day Moving Average')
+ax1.set_xlabel('Day of Year', fontweight='bold')
+ax1.set_ylabel('Temperature (°C)', fontweight='bold')
+ax1.set_title('Annual Temperature Pattern (Data from R)', fontsize=14, fontweight='bold')
+ax1.legend()
+ax1.grid(True, alpha=0.3)
+
+# Seasonal box plots
+ax2 = fig.add_subplot(gs[1, 0])
+season_order = ['Winter', 'Spring', 'Summer', 'Fall']
+seasonal_data = [weather_df[weather_df['season'] == s]['temperature'].values
+                 for s in season_order]
+bp = ax2.boxplot(seasonal_data, labels=season_order,
+                 patch_artist=True,
+                 boxprops=dict(facecolor='#74c476', alpha=0.7))
+ax2.set_ylabel('Temperature (°C)', fontweight='bold')
+ax2.set_title('Temperature by Season', fontweight='bold')
+ax2.grid(True, alpha=0.3, axis='y')
+
+# Pressure distribution
+ax3 = fig.add_subplot(gs[1, 1])
+ax3.hist(weather_df['pressure'], bins=30,
+         color='#6baed6', alpha=0.7, edgecolor='black')
+ax3.axvline(weather_df['pressure'].mean(), color='red',
+            linestyle='--', linewidth=2, label='Mean')
+ax3.set_xlabel('Pressure (hPa)', fontweight='bold')
+ax3.set_ylabel('Frequency', fontweight='bold')
+ax3.set_title('Pressure Distribution', fontweight='bold')
+ax3.legend()
+
+# Wind speed vs Temperature
+ax4 = fig.add_subplot(gs[2, 0])
+scatter = ax4.scatter(weather_df['temperature'], weather_df['wind_speed'],
+                      c=weather_df['day'], cmap='viridis',
+                      alpha=0.5, s=20)
+ax4.set_xlabel('Temperature (°C)', fontweight='bold')
+ax4.set_ylabel('Wind Speed (km/h)', fontweight='bold')
+ax4.set_title('Temperature vs Wind Speed', fontweight='bold')
+cbar = plt.colorbar(scatter, ax=ax4)
+cbar.set_label('Day of Year')
+
+# Monthly averages
+ax5 = fig.add_subplot(gs[2, 1])
+monthly_avg = weather_df.groupby('month')['temperature'].mean()
+ax5.bar(monthly_avg.index, monthly_avg.values,
+        color='#fd8d3c', alpha=0.7, edgecolor='black')
+ax5.set_xlabel('Month', fontweight='bold')
+ax5.set_ylabel('Avg Temperature (°C)', fontweight='bold')
+ax5.set_title('Monthly Average Temperature', fontweight='bold')
+ax5.set_xticks(range(1, 13))
+
+# Overall title
+fig.suptitle('Comprehensive Weather Analysis (R → Python Pipeline)',
+             fontsize=16, fontweight='bold', y=0.995)
+
+typst(fig)
+```
+
+== Summary Statistics
+
+Let's compute some summary statistics in Python from the R-generated data:
+
+```{python}
+#| echo: true
+#| output: true
+#| layout: horizontal
+#| output-background: "rgb(\"#d4edda\")"
+
+# Compute comprehensive statistics
+print("=" * 50)
+print("WEATHER DATA SUMMARY (365 days)")
+print("=" * 50)
+
+print(f"\nTemperature:")
+print(f"  Mean: {weather_df['temperature'].mean():.2f}°C")
+print(f"  Std:  {weather_df['temperature'].std():.2f}°C")
+print(f"  Min:  {weather_df['temperature'].min():.2f}°C")
+print(f"  Max:  {weather_df['temperature'].max():.2f}°C")
+
+print(f"\nPressure:")
+print(f"  Mean: {weather_df['pressure'].mean():.2f} hPa")
+print(f"  Std:  {weather_df['pressure'].std():.2f} hPa")
+
+print(f"\nWind Speed:")
+print(f"  Mean: {weather_df['wind_speed'].mean():.2f} km/h")
+print(f"  Max:  {weather_df['wind_speed'].max():.2f} km/h")
+
+print(f"\nSeasonal Temperature Averages:")
+for season in season_order:
+    avg_temp = weather_df[weather_df['season'] == season]['temperature'].mean()
+    print(f"  {season:8s}: {avg_temp:5.2f}°C")
+```
+
+== Back to R for Final Visualization
+
+We can even switch back to R and reload the data:
+
+```{r}
+#| echo: true
+#| output: true
+#| fig-width: 8
+#| fig-height: 5
+#| layout: horizontal
+
+# Read back the data (demonstrating round-trip)
+data_reloaded <- read.csv("weather_data.csv")
+
+# Create a ggplot visualization
+library(ggplot2)
+final_plot <- ggplot(data_reloaded, aes(x = day, y = pressure, color = season)) +
+  geom_point(alpha = 0.6, size = 2) +
+  geom_smooth(method = "loess", se = FALSE, size = 1) +
+  scale_color_manual(values = c(
+    "Winter" = "#6baed6",
+    "Spring" = "#74c476",
+    "Summer" = "#fd8d3c",
+    "Fall" = "#d6604d"
+  )) +
+  labs(
+    title = "Atmospheric Pressure Throughout the Year",
+    subtitle = "Data: R → CSV → Python → CSV → R",
+    x = "Day of Year",
+    y = "Pressure (hPa)",
+    color = "Season"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(face = "italic", size = 10)
+  )
+
+typst(final_plot, width = 8, height = 5)
+```
+
+#pagebreak()
+
+== Key Takeaways
+
+This chapter demonstrated:
+
+1. *Language Interoperability*: R and Python can coexist in the same document
+2. *Data Sharing*: CSV files enable seamless data exchange between languages
+3. *Flexible Workflows*: Start with R, analyze with Python, finish with R
+4. *Rich Visualizations*: Both ggplot2 and matplotlib produce publication-quality figures
+5. *Chunk Options*: Different presentation styles for different needs
+
+The pipeline: R (data generation) → CSV → Python (advanced analysis) → Visualization demonstrates a realistic research workflow where each language's strengths are leveraged.

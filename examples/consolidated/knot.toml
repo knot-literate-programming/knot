@@ -1,0 +1,46 @@
+# Knot Project Configuration
+#
+# This file defines the structure and compilation settings for your Knot document.
+# Learn more: https://github.com/knot-literate-programming/knot
+
+[document]
+# Main entry point (required)
+main = "main.knot"
+
+# Additional files to include in order (optional)
+# These will be injected at the /* KNOT-INJECT-CHAPTERS */ placeholder
+includes = ["r-analysis.knot"]# , "python-analysis.knot", "mixed-analysis.knot"]
+
+[helpers]
+# Typst helper functions (required)
+# This file contains utility functions for rendering code chunks
+typst = "lib/knot.typ"
+
+# Global chunk defaults (all options are optional)
+# These can be overridden in individual chunks with #| option: value
+[defaults]
+# Execution options
+eval = true          # Execute code chunks
+echo = true          # Show source code
+output = true        # Show execution results
+cache = true         # Enable caching
+
+# Graphics options
+fig-width = 7.0      # Figure width in inches
+fig-height = 5.0     # Figure height in inches
+dpi = 300            # Resolution for raster graphics
+fig-format = "svg"   # Output format: "svg" or "png"
+
+# Presentation options
+layout = "horizontal"              # Layout: "horizontal", "vertical", "input-only", "output-only"
+# gutter = "1em"                   # Space between input and output
+# code-background = ""             # Code block background color (Typst color)
+# output-background = ""           # Output block background color (Typst color)
+# code-stroke = "1pt + gray"       # Code block border (Typst stroke: "thickness + color")
+# output-stroke = "1pt + gray"     # Output block border (Typst stroke)
+# code-radius = "4pt"              # Code block corner radius (Typst length)
+# output-radius = "4pt"            # Output block corner radius (Typst length)
+# code-inset = "0.5em"             # Code block padding (Typst length)
+# output-inset = "0.5em"           # Output block padding (Typst length)
+# width-ratio = "1:1"              # Width ratio for horizontal layout
+# align = "left"                   # Content alignment within containers

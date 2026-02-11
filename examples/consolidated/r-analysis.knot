@@ -1,0 +1,144 @@
+= Data Analysis with R
+
+In this chapter, we explore temperature data using R and ggplot2.
+
+== Data Preparation
+
+Let's start by creating a synthetic dataset of monthly temperatures:
+
+```{r}
+#| echo: true
+#| output: true
+#| layout: horizontal
+
+# Load required libraries
+library(ggplot2)
+library(dplyr)
+
+# Create synthetic temperature data
+set.seed(42)
+months <- month.name
+temperature <- c(5, 7, 12, 16, 21, 25, 28, 27, 23, 17, 11, 6) + rnorm(12, 0, 2)
+rainfall <- c(80, 65, 70, 55, 60, 45, 30, 35, 50, 75, 85, 90) + rnorm(12, 0, 10)
+
+climate_data <- data.frame(
+  month = factor(months, levels = months),
+  temperature = temperature,
+  rainfall = rainfall,
+  season = rep(c("Winter", "Spring", "Summer", "Fall"), each = 3)
+)
+
+# Display summary
+summary(climate_data[, c("temperature", "rainfall")])
+```
+
+The dataset contains `{r} nrow(climate_data)` observations with average temperature of `{r} round(mean(climate_data$temperature), 1)`°C.
+
+== Temperature Trends
+
+Now let's visualize the temperature trends throughout the year:
+
+```{r}
+#| echo: true
+#| output: false
+#| fig-width: 8
+#| fig-height: 5
+#| layout: vertical
+#| code-background: "rgb(\"#f8f9fa\")"
+
+# Create temperature plot
+temp_plot <- ggplot(climate_data, aes(x = month, y = temperature, group = 1)) +
+  geom_line(color = "#CE412B", size = 1.2) +
+  geom_point(size = 3, color = "#CE412B") +
+  labs(
+    title = "Monthly Temperature Variation",
+    x = "Month",
+    y = "Temperature (°C)"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(face = "bold", size = 14)
+  )
+
+typst(temp_plot, width = 8, height = 5)
+```
+
+== Seasonal Analysis
+
+Let's create a more complex visualization showing temperature by season:
+
+```{r}
+#| echo: false
+#| output: true
+#| fig-width: 8
+#| fig-height: 6
+#| layout: output-only
+#| output-background: rgb("#e8f4f8")
+#| output-stroke: 2pt + rgb("#3572A5")
+
+# Box plot by season
+seasonal_plot <- ggplot(climate_data, aes(x = season, y = temperature, fill = season)) +
+  geom_boxplot(alpha = 0.7) +
+  geom_jitter(width = 0.2, alpha = 0.5) +
+  scale_fill_manual(values = c(
+    "Winter" = "#6baed6",
+    "Spring" = "#74c476",
+    "Summer" = "#fd8d3c",
+    "Fall" = "#d6604d"
+  )) +
+  labs(
+    title = "Temperature Distribution by Season",
+    x = "Season",
+    y = "Temperature (°C)"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(face = "bold", size = 14)
+  )
+
+typst(seasonal_plot, width = 8, height = 6)
+```
+
+#align(center)[
+  _Figure: Temperature distribution across seasons (code hidden)_
+]
+
+== Correlation Analysis
+
+Finally, let's examine the relationship between temperature and rainfall:
+
+```{r}
+#| echo: true
+#| output: true
+#| fig-width: 7
+#| fig-height: 6
+#| layout: "horizontal"
+#| gutter: 2em
+#| code-stroke: 1pt + rgb("#CE412B")
+#| output-stroke: 1pt + rgb("#CE412B")
+
+# Scatter plot with regression line
+correlation_plot <- ggplot(climate_data, aes(x = temperature, y = rainfall)) +
+  geom_point(aes(color = season), size = 4, alpha = 0.7) +
+  geom_smooth(method = "lm", se = TRUE, color = "black", linetype = "dashed") +
+  scale_color_manual(values = c(
+    "Winter" = "#6baed6",
+    "Spring" = "#74c476",
+    "Summer" = "#fd8d3c",
+    "Fall" = "#d6604d"
+  )) +
+  labs(
+    title = "Temperature vs Rainfall",
+    x = "Temperature (°C)",
+    y = "Rainfall (mm)",
+    color = "Season"
+  ) +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", size = 14))
+
+typst(correlation_plot, width = 7, height = 6)
+```
+
+The correlation between temperature and rainfall is `{r} cor_value <- cor(climate_data$temperature, climate_data$rainfall); round(cor_value, 3)`, indicating a negative relationship: warmer months tend to have less rainfall.

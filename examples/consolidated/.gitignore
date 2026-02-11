@@ -1,0 +1,10 @@
+# Generated files (but not lib/)
+/*.typ
+/*.pdf
+
+# Cache directories
+.knot_cache/
+_knot_files/
+
+# Temporary files
+*.log
