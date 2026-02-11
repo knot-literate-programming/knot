@@ -7,6 +7,7 @@ pub mod executors;
 pub mod graphics;
 pub mod parser;
 
+pub use backend::format_codly_call;
 pub use compiler::Compiler;
 pub use config::{ChunkDefaults, Config};
 pub use defaults::Defaults;

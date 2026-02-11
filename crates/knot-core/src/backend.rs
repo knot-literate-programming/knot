@@ -1,5 +1,23 @@
 use crate::executors::ExecutionResult;
 use crate::parser::{Chunk, ResolvedChunkOptions};
+use std::collections::HashMap;
+
+/// Formats a HashMap of codly options into a Typst #codly() function call.
+///
+/// # Example
+/// ```
+/// let mut options = HashMap::new();
+/// options.insert("lang-radius".to_string(), "10pt".to_string());
+/// let result = format_codly_call(&options);
+/// // result: "#codly(lang-radius: 10pt)"
+/// ```
+pub fn format_codly_call(options: &HashMap<String, String>) -> String {
+    let args: Vec<String> = options
+        .iter()
+        .map(|(key, value)| format!("{}: {}", key, value))
+        .collect();
+    format!("#codly({})", args.join(", "))
+}
 
 pub trait Backend {
     /// Formats a processed chunk into the target document syntax.
@@ -137,12 +155,7 @@ impl Backend for TypstBackend {
 
         // Add codly() call if there are codly options from the chunk
         if !chunk.codly_options.is_empty() {
-            let codly_args: Vec<String> = chunk
-                .codly_options
-                .iter()
-                .map(|(key, value)| format!("{}: {}", key, value))
-                .collect();
-            chunk_output_final.push_str(&format!("#codly({})\n", codly_args.join(", ")));
+            chunk_output_final.push_str(&format!("{}\n", format_codly_call(&chunk.codly_options)));
         }
 
         if let Some(name) = &chunk.name {
@@ -181,6 +194,30 @@ mod tests {
     use super::*;
     use crate::parser::{Chunk, ChunkOptions, Position, Range};
     use std::path::PathBuf;
+
+    #[test]
+    fn test_format_codly_call() {
+        let mut options = std::collections::HashMap::new();
+        options.insert("lang-radius".to_string(), "10pt".to_string());
+        options.insert("stroke".to_string(), "1pt + rgb(\"#CE412B\")".to_string());
+
+        let result = format_codly_call(&options);
+
+        // Check that it starts with #codly(
+        assert!(result.starts_with("#codly("));
+        assert!(result.ends_with(")"));
+
+        // Check that both options are present
+        assert!(result.contains("lang-radius: 10pt"));
+        assert!(result.contains("stroke: 1pt + rgb(\"#CE412B\")"));
+    }
+
+    #[test]
+    fn test_format_codly_call_empty() {
+        let options = std::collections::HashMap::new();
+        let result = format_codly_call(&options);
+        assert_eq!(result, "#codly()");
+    }
 
     fn create_test_chunk(
         language: &str,

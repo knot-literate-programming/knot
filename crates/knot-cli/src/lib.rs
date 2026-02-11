@@ -147,8 +147,8 @@ pub fn build_project() -> Result<()> {
         let mut main_content = fs::read_to_string(&final_main_typ_path)?;
 
         if main_content.contains("/* KNOT-CODLY-INIT */") {
-            // Convert TOML values to Typst syntax (pass values as-is)
-            let codly_args: Vec<String> = config
+            // Convert TOML values to strings first
+            let codly_options: std::collections::HashMap<String, String> = config
                 .codly
                 .iter()
                 .map(|(key, value)| {
@@ -157,13 +157,17 @@ pub fn build_project() -> Result<()> {
                         toml::Value::Boolean(b) => b.to_string(),
                         toml::Value::Integer(i) => i.to_string(),
                         toml::Value::Float(f) => f.to_string(),
-                        _ => toml::to_string(value).unwrap_or_default().trim().to_string(),
+                        _ => toml::to_string(value)
+                            .unwrap_or_default()
+                            .trim()
+                            .to_string(),
                     };
-                    format!("{}: {}", key, value_str)
+                    (key.clone(), value_str)
                 })
                 .collect();
 
-            let codly_init = format!("#codly({})", codly_args.join(", "));
+            // Use the shared helper function to format the codly call
+            let codly_init = knot_core::format_codly_call(&codly_options);
             main_content = main_content.replace("/* KNOT-CODLY-INIT */", &codly_init);
             fs::write(&final_main_typ_path, main_content)?;
             info!("✓ Injected codly configuration from knot.toml");
