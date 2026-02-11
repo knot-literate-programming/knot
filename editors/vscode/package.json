@@ -86,19 +86,19 @@
     "menus": {
       "editor/title": [
         {
-          "command": "knot.openPreview",
-          "when": "resourceLangId == knot",
-          "group": "navigation"
-        },
-        {
           "command": "knot.cleanProject",
           "when": "resourceLangId == knot",
-          "group": "navigation"
+          "group": "navigation@3"
+        },
+        {
+          "command": "knot.openPreview",
+          "when": "resourceLangId == knot",
+          "group": "navigation@0"
         },
         {
           "command": "knot.stopWatch",
           "when": "resourceLangId == knot",
-          "group": "navigation"
+          "group": "navigation@1"
         }
       ]
     },

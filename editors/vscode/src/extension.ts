@@ -10,7 +10,7 @@
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
-import { workspace, ExtensionContext, window, commands, Uri } from 'vscode';
+import { workspace, ExtensionContext, window, commands, Uri, ProgressLocation, StatusBarAlignment, StatusBarItem } from 'vscode';
 import { ChildProcess, spawn } from 'child_process';
 import {
     LanguageClient,
@@ -20,14 +20,19 @@ import {
     ExecuteCommandRequest,
 } from 'vscode-languageclient/node';
 import { KnotProjectProvider } from './projectExplorer';
-import { resolveBinaryPath, findProjectRoot } from './utils';
+import { resolveBinaryPath, findProjectRoot, parseMainFromToml } from './utils';
 
 let client: LanguageClient | undefined;
 let watchProcesses: Map<string, ChildProcess> = new Map();
+let compilationStatusBar: StatusBarItem;
 
 export async function activate(context: ExtensionContext) {
     const outputChannel = window.createOutputChannel('Knot Extension');
     outputChannel.appendLine('Activating Knot extension...');
+
+    // Create status bar item for compilation feedback
+    compilationStatusBar = window.createStatusBarItem(StatusBarAlignment.Left, 100);
+    context.subscriptions.push(compilationStatusBar);
 
     // Register Knot Project View
     const knotProjectProvider = new KnotProjectProvider();
@@ -203,35 +208,80 @@ async function openPreview(outputChannel: any): Promise<void> {
         return;
     }
 
-    const projectName = path.basename(projectRoot);
-    const pdfPath = path.join(projectRoot, `${projectName}.pdf`);
+    // Read main file from knot.toml and extract stem (e.g., "main.knot" -> "main")
+    const tomlPath = path.join(projectRoot, 'knot.toml');
+    const mainFile = parseMainFromToml(tomlPath);
+    const mainStem = path.basename(mainFile, path.extname(mainFile));
+    const pdfPath = path.join(projectRoot, `${mainStem}.pdf`);
 
-    if (!watchProcesses.has(projectRoot)) {
-        outputChannel.appendLine('Starting knot watch...');
-        const knotBinary = resolveBinaryPath('knot', outputChannel);
-        try {
-            const watchProcess = spawn(knotBinary, ['watch'], {
-                cwd: projectRoot,
-                stdio: ['ignore', 'pipe', 'pipe']
-            });
-            watchProcess.stdout?.on('data', (data) => outputChannel.appendLine(`[knot watch] ${data.toString().trim()}`));
-            watchProcess.stderr?.on('data', (data) => outputChannel.appendLine(`[knot watch stderr] ${data.toString().trim()}`));
-            watchProcess.on('exit', () => watchProcesses.delete(projectRoot));
-            watchProcesses.set(projectRoot, watchProcess);
-            await new Promise(resolve => setTimeout(resolve, 1000));
-        } catch (error) {
-            outputChannel.appendLine(`Error starting knot watch: ${error}`);
-            return;
-        }
+    // Show status bar indicator (more visible than notification)
+    outputChannel.appendLine(`DEBUG: Starting compilation for ${mainStem}.pdf`);
+    compilationStatusBar.text = '$(sync~spin) Compiling Knot...';
+    compilationStatusBar.show();
+    outputChannel.appendLine('DEBUG: Status bar shown');
+
+    try {
+        // Also show progress notification
+        await window.withProgress(
+            {
+                location: ProgressLocation.Notification,
+                title: 'Compiling Knot document...',
+                cancellable: false
+            },
+            async (progress) => {
+                if (!watchProcesses.has(projectRoot)) {
+                    outputChannel.appendLine('Starting knot watch...');
+                    const knotBinary = resolveBinaryPath('knot', outputChannel);
+                    try {
+                        const watchProcess = spawn(knotBinary, ['watch'], {
+                            cwd: projectRoot,
+                            stdio: ['ignore', 'pipe', 'pipe']
+                        });
+                        watchProcess.stdout?.on('data', (data) => outputChannel.appendLine(`[knot watch] ${data.toString().trim()}`));
+                        watchProcess.stderr?.on('data', (data) => outputChannel.appendLine(`[knot watch stderr] ${data.toString().trim()}`));
+                        watchProcess.on('exit', () => watchProcesses.delete(projectRoot));
+                        watchProcesses.set(projectRoot, watchProcess);
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                    } catch (error) {
+                        outputChannel.appendLine(`Error starting knot watch: ${error}`);
+                        compilationStatusBar.hide();
+                        return;
+                    }
+                }
+
+                progress.report({ message: 'Waiting for PDF generation...' });
+                compilationStatusBar.text = '$(sync~spin) Waiting for PDF...';
+
+                const maxWaitTime = 10000;
+                const startTime = Date.now();
+                while (!fs.existsSync(pdfPath)) {
+                    if (Date.now() - startTime > maxWaitTime) {
+                        compilationStatusBar.hide();
+                        return;
+                    }
+                    await new Promise(resolve => setTimeout(resolve, 200));
+                }
+
+                progress.report({ message: 'Opening PDF preview...' });
+                compilationStatusBar.text = '$(check) Compilation complete!';
+
+                outputChannel.appendLine(`DEBUG: Opening PDF at ${pdfPath}`);
+                const pdfUri = Uri.file(pdfPath);
+                outputChannel.appendLine(`DEBUG: PDF URI: ${pdfUri.toString()}`);
+
+                await commands.executeCommand('vscode.open', pdfUri, { viewColumn: 2 });
+                outputChannel.appendLine('DEBUG: PDF opened successfully');
+
+                // Hide status bar after a short delay
+                setTimeout(() => {
+                    compilationStatusBar.hide();
+                    outputChannel.appendLine('DEBUG: Status bar hidden');
+                }, 2000);
+            }
+        );
+    } catch (error) {
+        outputChannel.appendLine(`ERROR in openPreview: ${error}`);
+        compilationStatusBar.hide();
+        throw error;
     }
-
-    const maxWaitTime = 10000;
-    const startTime = Date.now();
-    while (!fs.existsSync(pdfPath)) {
-        if (Date.now() - startTime > maxWaitTime) { return; }
-        await new Promise(resolve => setTimeout(resolve, 200));
-    }
-
-    const pdfUri = Uri.file(pdfPath);
-    await commands.executeCommand('vscode.open', pdfUri, { viewColumn: 2 });
 }
