@@ -21,8 +21,7 @@ typst = "lib/knot.typ"
 [defaults]
 # Execution options
 eval = true          # Execute code chunks
-echo = true          # Show source code
-output = true        # Show execution results
+show = "both"        # What to show: "both", "input", or "output"
 cache = true         # Enable caching
 
 # Graphics options
@@ -32,7 +31,7 @@ dpi = 300            # Resolution for raster graphics
 fig-format = "svg"   # Output format: "svg" or "png"
 
 # Presentation options
-layout = "horizontal"              # Layout: "horizontal", "vertical", "input-only", "output-only"
+layout = "horizontal"              # Layout when show=both: "horizontal" or "vertical"
 # gutter = "1em"                   # Space between input and output
 #output-background = "[]"           # Output block background color (Typst color)
 #output-stroke = "[]"     # Output block border (Typst stroke)
@@ -51,6 +50,6 @@ output-stroke = '1pt + rgb("#CE412B")'
 output-background = 'rgb("#ffffff")'
 
 [python-chunks]
-echo = true                 # Show Python source code by default
+show = "both"               # Show both code and output by default
 fig-width = 6.0             # Smaller figures for Python plots
 dpi = 300

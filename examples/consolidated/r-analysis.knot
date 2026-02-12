@@ -37,12 +37,10 @@ The dataset contains `{r} nrow(climate_data)` observations with average temperat
 Now let's visualize the temperature trends throughout the year:
 
 ```{r}
-#| echo: true
-#| output: false
+#| show: input
 #| fig-width: 8
 #| fig-height: 5
 #| layout: vertical
-#| code-background: 'rgb("#f8f9fa")'
 
 # Create temperature plot
 temp_plot <- ggplot(climate_data, aes(x = month, y = temperature, group = 1)) +
@@ -67,11 +65,9 @@ typst(temp_plot, width = 8, height = 5)
 Let's create a more complex visualization showing temperature by season:
 
 ```{r}
-#| echo: false
-#| output: true
+#| show: output
 #| fig-width: 8
 #| fig-height: 6
-#| layout: output-only
 #| output-background: rgb("#e8f4f8")
 #| output-stroke: 2pt + rgb("#3572A5")
 
@@ -108,11 +104,9 @@ typst(seasonal_plot, width = 8, height = 6)
 Finally, let's examine the relationship between temperature and rainfall:
 
 ```{r}
-#| echo: true
-#| output: true
 #| fig-width: 4
 #| fig-height: 4
-#| layout: 'horizontal'
+#| layout: horizontal
 #| gutter: 2em
 
 # Scatter plot with regression line

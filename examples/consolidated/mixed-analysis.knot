@@ -7,8 +7,6 @@ This chapter demonstrates that R and Python can coexist in the same document, an
 Let's create a more complex dataset in R and export it to CSV:
 
 ```{r}
-#| echo: true
-#| output: true
 #| layout: horizontal
 #| gutter: "1.5em"
 
@@ -45,8 +43,6 @@ cat("Temperature range:", round(min(weather_detailed$temperature), 1),
 Now let's save this dataset to share it with Python:
 
 ```{r}
-#| echo: true
-#| output: true
 #| layout: horizontal
 
 # Export to CSV
@@ -64,8 +60,6 @@ cat("File size:", file.info(csv_path)$size, "bytes\n")
 Let's switch to Python to read and analyze the exported data:
 
 ```{python}
-#| echo: true
-#| output: true
 #| layout: horizontal
 
 import pandas as pd
@@ -86,12 +80,9 @@ print(weather_df.head())
 Now let's create a comprehensive visualization using matplotlib:
 
 ```{python}
-#| echo: true
-#| output: true
 #| fig-width: 10
 #| fig-height: 8
 #| layout: vertical
-#| code-background: "rgb(\"#f5f5f5\")"
 #| output-background: "rgb(\"#e8f4f8\")"
 #| gutter: "2em"
 
@@ -172,8 +163,6 @@ typst(fig)
 Let's compute some summary statistics in Python from the R-generated data:
 
 ```{python}
-#| echo: true
-#| output: true
 #| layout: horizontal
 #| output-background: "rgb(\"#d4edda\")"
 
@@ -207,8 +196,6 @@ for season in season_order:
 We can even switch back to R and reload the data:
 
 ```{r}
-#| echo: true
-#| output: true
 #| fig-width: 8
 #| fig-height: 5
 #| layout: horizontal

@@ -7,8 +7,6 @@ This chapter demonstrates Python's matplotlib for scientific visualization using
 First, let's import the necessary libraries and create a similar dataset:
 
 ```{python}
-#| echo: true
-#| output: true
 #| layout: horizontal
 
 import numpy as np
@@ -41,13 +39,10 @@ Dataset dimensions: `{python} weather_data.shape[0]` months × `{python} weather
 Using matplotlib's object-oriented interface for better control:
 
 ```{python}
-#| echo: true
-#| output: false
+#| show: input
 #| fig-width: 8
 #| fig-height: 5
-#| layout: "vertical"
-#| code-background: rgb("#f0f0f0")"
-#| code-inset: 1em
+#| layout: vertical
 
 # Create figure and axis objects
 fig, ax = plt.subplots(figsize=(8, 5))
@@ -79,13 +74,9 @@ typst(fig)
 Creating a sophisticated multi-panel figure with subplots:
 
 ```{python}
-#| echo: true
-#| output: true
+#| show: input
 #| fig-width: 10
 #| fig-height: 6
-#| layout: "input-only"
-#| code-stroke: 2pt + rgb("#3572A5")
-#| code-radius: 6pt
 
 # Create a 2x2 subplot layout
 fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(10, 6))
@@ -133,11 +124,9 @@ typst(fig)
 Let's add a regression analysis with confidence intervals:
 
 ```{python}
-#| echo: false
-#| output: true
+#| show: output
 #| fig-width: 7
 #| fig-height: 6
-#| layout: "output-only"
 #| output-background: rgb("#fff3cd")
 #| output-inset: 1.5em
 
