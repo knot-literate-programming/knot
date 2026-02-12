@@ -328,12 +328,13 @@ fn parse_inline_options(options_str: &str) -> (InlineOptions, Vec<ChunkError>) {
                 "show" => {
                     options.show = match value {
                         "output" => Some(Show::Output),
-                        "input" => Some(Show::Input),
+                        "code" => Some(Show::Code),
                         "both" => Some(Show::Both),
+                        "none" => Some(Show::None),
                         _ => {
                             errors.push(ChunkError::new(
                                 format!(
-                                    "Invalid show value '{}'. Expected: output, input, or both",
+                                    "Invalid show value '{}'. Expected: output, code, both, or none",
                                     value
                                 ),
                                 None,
@@ -615,26 +616,26 @@ More text below."###;
     #[test]
     fn test_parse_inline_options_with_spaces() {
         // Options can have spaces around them
-        let content = "`{r  show=input   eval=true  } sqrt(2)` is root 2";
+        let content = "`{r  show=code   eval=true  } sqrt(2)` is root 2";
         let doc = Document::parse(content.to_string()).unwrap();
         assert_eq!(doc.inline_exprs.len(), 1);
         let inline = &doc.inline_exprs[0];
         let resolved = inline.options.resolve();
         assert_eq!(inline.code, "sqrt(2)");
-        assert_eq!(resolved.show, Show::Input);
+        assert_eq!(resolved.show, Show::Code);
         assert!(resolved.eval);
     }
 
     #[test]
     fn test_parse_inline_options_with_spaces_around_equals() {
         // Options can have spaces around the '=' sign
-        let content = "`{r show = input , eval  =  true} sqrt(2)` is root 2";
+        let content = "`{r show = code , eval  =  true} sqrt(2)` is root 2";
         let doc = Document::parse(content.to_string()).unwrap();
         assert_eq!(doc.inline_exprs.len(), 1);
         let inline = &doc.inline_exprs[0];
         let resolved = inline.options.resolve();
         assert_eq!(inline.code, "sqrt(2)");
-        assert_eq!(resolved.show, Show::Input);
+        assert_eq!(resolved.show, Show::Code);
         assert!(resolved.eval);
     }
 

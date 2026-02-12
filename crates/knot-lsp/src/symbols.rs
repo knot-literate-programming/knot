@@ -53,8 +53,9 @@ pub fn get_document_symbols(text: &str) -> Option<Vec<DocumentSymbol>> {
         if let Some(show) = &chunk.options.show {
             use knot_core::parser::Show;
             match show {
-                Show::Input => details.push("show: input".to_string()),
+                Show::Code => details.push("show: code".to_string()),
                 Show::Output => details.push("show: output".to_string()),
+                Show::None => details.push("show: none".to_string()),
                 Show::Both => {} // default, don't show
             }
         }

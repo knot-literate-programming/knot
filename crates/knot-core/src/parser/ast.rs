@@ -11,16 +11,18 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Show {
-    /// Display both input code and output
+    /// Display both code and output
     #[default]
     Both,
-    /// Display only input code
-    Input,
+    /// Display only code
+    Code,
     /// Display only output
     Output,
+    /// Display nothing (useful for setup chunks)
+    None,
 }
 
-/// How to layout input and output when both are displayed
+/// How to layout code and output when both are displayed
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Layout {
@@ -283,7 +285,7 @@ macro_rules! define_options {
 define_options! {
     /// Whether to evaluate the chunk
     [val] eval: bool, true,
-    /// What to display in the output (both, input, or output)
+    /// What to display in the output (both, code, or output)
     [val] show: Show, Show::Both,
     /// Whether to cache the results
     [val] cache: bool, true,
@@ -310,35 +312,35 @@ define_options! {
 
     // === Presentation Options ===
 
-    /// How to layout input and output when both are displayed (horizontal or vertical)
+    /// How to layout code and output when both are displayed (horizontal or vertical)
     [val] layout: Layout, Layout::Horizontal,
-    /// Space between input and output blocks (Typst length)
+    /// Space between code and output blocks (Typst length)
     [opt] gutter: String, None,
 
-    /// Background color for code/input container (Typst color)
+    /// Background color for code container (Typst color)
     #[serde(rename = "code-background")]
     [opt] code_background: String, None,
-    /// Border stroke for code/input container (Typst stroke)
-    #[serde(rename = "code-stroke")]
+    /// Border stroke for code container (Typst stroke)
+    #[serde(rename = "code-stroke", alias = "code-border")]
     [opt] code_stroke: String, None,
-    /// Corner radius for code/input container (Typst length)
+    /// Corner radius for code container (Typst length)
     #[serde(rename = "code-radius")]
     [opt] code_radius: String, None,
-    /// Internal padding for code/input container (Typst length)
-    #[serde(rename = "code-inset")]
+    /// Internal padding for code container (Typst length)
+    #[serde(rename = "code-inset", alias = "code-padding")]
     [opt] code_inset: String, None,
 
     /// Background color for output container (Typst color)
     #[serde(rename = "output-background")]
     [opt] output_background: String, None,
     /// Border stroke for output container (Typst stroke)
-    #[serde(rename = "output-stroke")]
+    #[serde(rename = "output-stroke", alias = "output-border")]
     [opt] output_stroke: String, None,
     /// Corner radius for output container (Typst length)
     #[serde(rename = "output-radius")]
     [opt] output_radius: String, None,
     /// Internal padding for output container (Typst length)
-    #[serde(rename = "output-inset")]
+    #[serde(rename = "output-inset", alias = "output-padding")]
     [opt] output_inset: String, None,
 
     /// Width ratio for horizontal layout (e.g., "1:1", "2:1")
@@ -418,7 +420,7 @@ macro_rules! define_inline_options {
 define_inline_options! {
     /// Evaluate the code
     eval: bool = true,
-    /// What to display (output is default for inline, both/input rarely used)
+    /// What to display (output is default for inline, both/code rarely used)
     show: Show = Show::Output,
     /// Number of digits for numeric formatting
     digits: Option<u32> = None,

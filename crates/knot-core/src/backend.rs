@@ -74,6 +74,11 @@ impl Backend for TypstBackend {
         resolved_options: &ResolvedChunkOptions,
         result: &ExecutionResult,
     ) -> String {
+        // If show is none, return empty string immediately
+        if matches!(resolved_options.show, Show::None) {
+            return String::new();
+        }
+
         let mut args = vec![];
         args.push(format!("lang: \"{}\"", chunk.language));
         if let Some(name) = &chunk.name {
@@ -84,8 +89,6 @@ impl Backend for TypstBackend {
                 args.push(format!("caption: [{}]", caption));
             }
         }
-
-        // echo is now handled by the show option in generate input/output logic below
 
         // Include errors as a special argument to code-chunk (if any)
         if !chunk.errors.is_empty() {
@@ -98,12 +101,12 @@ impl Backend for TypstBackend {
             args.push(format!("errors: ({})", error_list));
         }
 
-        // Generate input based on show option
-        let should_show_input = matches!(resolved_options.show, Show::Both | Show::Input);
+        // Generate code based on show option
+        let should_show_code = matches!(resolved_options.show, Show::Both | Show::Code);
 
-        if should_show_input {
+        if should_show_code {
             // Use #local() for chunk-specific codly options (local scope)
-            let input_str = if !chunk.codly_options.is_empty() {
+            let code_str = if !chunk.codly_options.is_empty() {
                 let local_call = format_local_call(&chunk.codly_options);
                 format!(
                     "[{}[```{}\n{}```]]",
@@ -114,9 +117,9 @@ impl Backend for TypstBackend {
             } else {
                 format!("[```{}\n{}```]", chunk.language, chunk.code.trim())
             };
-            args.push(format!("input: {}", input_str));
+            args.push(format!("code: {}", code_str));
         } else {
-            args.push("input: none".to_string());
+            args.push("code: none".to_string());
         }
 
         // Generate output based on show option
@@ -165,7 +168,7 @@ impl Backend for TypstBackend {
         }
 
         // Add presentation options
-        // Only add layout when showing both input and output
+        // Only add layout when showing both code and output
         if matches!(resolved_options.show, Show::Both) {
             let layout_str = match resolved_options.layout {
                 Layout::Horizontal => "horizontal",
@@ -296,7 +299,7 @@ mod tests {
                 eval: Some(true),
                 show: Some(match (echo, output) {
                     (true, true) => Show::Both,
-                    (true, false) => Show::Input,
+                    (true, false) => Show::Code,
                     (false, true) => Show::Output,
                     (false, false) => Show::Output, // fallback to output
                 }),
@@ -365,7 +368,7 @@ mod tests {
         let output = backend.format_chunk(&chunk, &resolved, &result);
 
         assert!(output.contains("lang: \"r\""));
-        assert!(output.contains("input: [```r\nx <- 1:10\nmean(x)```]"));
+        assert!(output.contains("code: [```r\nx <- 1:10\nmean(x)```]"));
         assert!(output.contains("output: [```output\n[1] 5.5```]"));
         assert!(output.starts_with("#code-chunk("));
     }
@@ -379,7 +382,7 @@ mod tests {
 
         let output = backend.format_chunk(&chunk, &resolved, &result);
 
-        assert!(output.contains("input: none"));
+        assert!(output.contains("code: none"));
         assert!(output.contains("output: [```output\n[1] 5.5```]"));
     }
 
@@ -574,8 +577,8 @@ mod tests {
         // Without codly options, should NOT have #local()
         assert!(!output.contains("#local("));
 
-        // Should have simple input
-        assert!(output.contains("input: [```r"));
+        // Should have simple code
+        assert!(output.contains("code: [```r"));
     }
 
     #[test]

@@ -59,7 +59,7 @@ pub fn process_inline_expr(
     // Determine what to display based on show option
     let final_result = match resolved_options.show {
         crate::parser::Show::Output | crate::parser::Show::Both => result,
-        crate::parser::Show::Input => String::new(), // Input not shown for inline (just evaluates)
+        crate::parser::Show::Code | crate::parser::Show::None => String::new(),
     };
 
     // Cache the result (either the actual result or empty string)
@@ -159,7 +159,7 @@ mod tests {
         let inline_output_false = create_inline_expr(
             "x <- 1",
             crate::parser::InlineOptions {
-                show: Some(crate::parser::Show::Input),
+                show: Some(crate::parser::Show::Code),
                 ..Default::default()
             },
         );
@@ -232,7 +232,7 @@ mod tests {
             "library(dplyr)",
             crate::parser::InlineOptions {
                 eval: Some(false),
-                show: Some(crate::parser::Show::Input),
+                show: Some(crate::parser::Show::Code),
                 digits: Some(Some(3)),
             },
         );
@@ -241,7 +241,7 @@ mod tests {
         assert_eq!(inline.language, "r");
         assert_eq!(inline.code, "library(dplyr)");
         assert!(!resolved.eval);
-        assert_eq!(resolved.show, crate::parser::Show::Input);
+        assert_eq!(resolved.show, crate::parser::Show::Code);
         assert_eq!(resolved.digits, Some(3));
     }
 
