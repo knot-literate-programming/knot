@@ -13,9 +13,9 @@ mod storage;
 pub use hashing::hash_dependencies;
 pub use metadata::{CacheMetadata, ChunkCacheEntry, ConstantObjectInfo, InlineCacheEntry};
 
-use crate::executors::ExecutionResult;
+use crate::executors::ExecutionOutput;
 use crate::parser::ChunkOptions;
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use chrono::Utc;
 use std::fs;
 use std::path::PathBuf;
@@ -110,7 +110,7 @@ impl Cache {
     }
 
     /// Get cached chunk result
-    pub fn get_cached_result(&self, hash: &str) -> Result<ExecutionResult> {
+    pub fn get_cached_result(&self, hash: &str) -> Result<ExecutionOutput> {
         storage::get_cached_result(&self.cache_dir, hash, &self.metadata)
     }
 
@@ -121,7 +121,7 @@ impl Cache {
         chunk_name: Option<String>,
         language: String,
         hash: String,
-        result: &ExecutionResult,
+        output: &ExecutionOutput,
         dependencies: Vec<PathBuf>,
     ) -> Result<()> {
         let files_to_cache = storage::save_result(
@@ -129,7 +129,7 @@ impl Cache {
             chunk_index,
             chunk_name.clone(),
             hash.clone(),
-            result,
+            output,
             dependencies.clone(),
         )?;
 
@@ -141,6 +141,7 @@ impl Cache {
             language,
             hash,
             files_to_cache,
+            output.warnings.clone(),
             dependencies,
         );
 

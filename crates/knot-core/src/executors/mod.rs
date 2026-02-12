@@ -9,7 +9,7 @@ pub mod r;
 pub mod side_channel;
 
 pub use manager::ExecutorManager;
-pub use side_channel::{OutputMetadata, SideChannel};
+use side_channel::{KnotMetadata, OutputMetadata, RuntimeWarning, SideChannel};
 
 // From section 3.3 of the reference document
 
@@ -22,6 +22,13 @@ pub enum ExecutionResult {
     DataFrameAndPlot { dataframe: PathBuf, plot: PathBuf },
 }
 
+/// Aggregated output of a code execution
+#[derive(Debug)]
+pub struct ExecutionOutput {
+    pub result: ExecutionResult,
+    pub warnings: Vec<RuntimeWarning>,
+}
+
 /// Graphics options for code execution
 #[derive(Debug, Clone)]
 pub struct GraphicsOptions {
@@ -31,20 +38,20 @@ pub struct GraphicsOptions {
     pub format: String,
 }
 
-/// Convert side-channel metadata to ExecutionResult
+/// Convert side-channel metadata to ExecutionOutput
 ///
 /// This is shared logic used by all language executors (Python, R, Julia...).
 /// It aggregates metadata items (text, plots, dataframes) and determines
 /// the appropriate ExecutionResult variant based on what was produced.
 pub fn metadata_to_execution_result(
-    metadata: Vec<OutputMetadata>,
+    metadata: KnotMetadata,
     stdout_text: &str,
-) -> Result<ExecutionResult> {
+) -> Result<ExecutionOutput> {
     let mut text_content = String::new();
     let mut plot_path: Option<PathBuf> = None;
     let mut dataframe_path: Option<PathBuf> = None;
 
-    for item in metadata {
+    for item in metadata.results {
         match item {
             OutputMetadata::Text { content } => {
                 if !text_content.is_empty() {
@@ -65,25 +72,30 @@ pub fn metadata_to_execution_result(
         text_content = stdout_text.to_string();
     }
 
-    match (text_content.is_empty(), dataframe_path, plot_path) {
-        (false, None, None) => Ok(ExecutionResult::Text(text_content)),
-        (_, Some(df), None) => Ok(ExecutionResult::DataFrame(df)),
-        (false, None, Some(plot)) => Ok(ExecutionResult::TextAndPlot {
+    let result = match (text_content.is_empty(), dataframe_path, plot_path) {
+        (false, None, None) => ExecutionResult::Text(text_content),
+        (_, Some(df), None) => ExecutionResult::DataFrame(df),
+        (false, None, Some(plot)) => ExecutionResult::TextAndPlot {
             text: text_content,
             plot,
-        }),
-        (_, None, Some(plot)) => Ok(ExecutionResult::Plot(plot)),
-        (_, Some(df), Some(plot)) => Ok(ExecutionResult::DataFrameAndPlot {
+        },
+        (_, None, Some(plot)) => ExecutionResult::Plot(plot),
+        (_, Some(df), Some(plot)) => ExecutionResult::DataFrameAndPlot {
             dataframe: df,
             plot,
-        }),
-        (true, None, None) => Ok(ExecutionResult::Text(String::new())),
-    }
+        },
+        (true, None, None) => ExecutionResult::Text(String::new()),
+    };
+
+    Ok(ExecutionOutput {
+        result,
+        warnings: metadata.warnings,
+    })
 }
 
 pub trait LanguageExecutor: Send + Sync {
     fn initialize(&mut self) -> Result<()>;
-    fn execute(&mut self, code: &str, graphics: &GraphicsOptions) -> Result<ExecutionResult>;
+    fn execute(&mut self, code: &str, graphics: &GraphicsOptions) -> Result<ExecutionOutput>;
     fn execute_inline(&mut self, code: &str) -> Result<String>;
     /// Execute a lightweight query and return raw stdout (no formatting)
     fn query(&mut self, code: &str) -> Result<String>;

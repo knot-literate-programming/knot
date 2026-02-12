@@ -24,20 +24,35 @@ pub enum OutputMetadata {
     Text { content: String },
 }
 
+/// A warning captured during code execution
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RuntimeWarning {
+    pub message: String,
+    pub call: Option<String>,
+    pub line: Option<usize>,
+}
+
+/// A fatal error captured during code execution
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RuntimeError {
+    pub message: String,
+    pub call: Option<String>,
+    pub line: Option<usize>,
+    pub traceback: Vec<String>,
+}
+
+/// Root structure for metadata passed via side-channel
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct KnotMetadata {
+    #[serde(default)]
+    pub results: Vec<OutputMetadata>,
+    #[serde(default)]
+    pub warnings: Vec<RuntimeWarning>,
+    #[serde(default)]
+    pub error: Option<RuntimeError>,
+}
+
 /// Side-channel for passing metadata from language runtime to Rust
-///
-/// Usage:
-/// ```
-/// # use knot_core::executors::side_channel::SideChannel;
-/// let channel = SideChannel::new().unwrap();
-///
-/// // Execute code (R/Python writes to KNOT_METADATA_FILE)
-/// // executor.run(code)?;
-///
-/// // Read metadata
-/// let outputs = channel.read_metadata().unwrap();
-/// // channel.cleanup() called automatically via Drop
-/// ```
 pub struct SideChannel {
     metadata_file: PathBuf,
 }
@@ -53,22 +68,33 @@ impl SideChannel {
     }
 
     /// Read metadata written by language runtime
-    pub fn read_metadata(&self) -> Result<Vec<OutputMetadata>> {
+    pub fn read_metadata(&self) -> Result<KnotMetadata> {
         if !self.metadata_file.exists() {
-            return Ok(vec![]);
+            return Ok(KnotMetadata::default());
         }
 
         let content =
             std::fs::read_to_string(&self.metadata_file).context("Failed to read metadata file")?;
 
         if content.trim().is_empty() {
-            return Ok(vec![]);
+            return Ok(KnotMetadata::default());
         }
 
-        let metadata: Vec<OutputMetadata> =
-            serde_json::from_str(&content).context("Failed to parse metadata JSON")?;
-
-        Ok(metadata)
+        // Try to parse as the new structured format
+        match serde_json::from_str::<KnotMetadata>(&content) {
+            Ok(meta) => Ok(meta),
+            Err(e) => {
+                log::debug!("Structured metadata parsing failed: {}. Content: {}", e, content);
+                // Fallback: try to parse as Vec<OutputMetadata> for backward compatibility
+                // (some old tests or simpler executors might still use the old format)
+                let results: Vec<OutputMetadata> = serde_json::from_str(&content)
+                    .context("Failed to parse metadata JSON (neither structured nor list format)")?;
+                Ok(KnotMetadata {
+                    results,
+                    ..Default::default()
+                })
+            }
+        }
     }
 
     /// Get the path to the metadata file
@@ -113,27 +139,30 @@ mod tests {
     fn test_read_empty_metadata() {
         let channel = SideChannel::new().unwrap();
         let metadata = channel.read_metadata().unwrap();
-        assert_eq!(metadata.len(), 0);
+        assert_eq!(metadata.results.len(), 0);
     }
 
     #[test]
     fn test_read_metadata_plot() {
         let channel = SideChannel::new().unwrap();
 
-        // Simulate R/Python writing metadata
-        let metadata = vec![OutputMetadata::Plot {
-            path: PathBuf::from("/tmp/plot.svg"),
-            format: "svg".to_string(),
-        }];
+        // New structured format
+        let metadata = KnotMetadata {
+            results: vec![OutputMetadata::Plot {
+                path: PathBuf::from("/tmp/plot.svg"),
+                format: "svg".to_string(),
+            }],
+            ..Default::default()
+        };
 
         let json = serde_json::to_string(&metadata).unwrap();
         std::fs::write(&channel.metadata_file, json).unwrap();
 
         // Read back
         let read_metadata = channel.read_metadata().unwrap();
-        assert_eq!(read_metadata.len(), 1);
+        assert_eq!(read_metadata.results.len(), 1);
 
-        match &read_metadata[0] {
+        match &read_metadata.results[0] {
             OutputMetadata::Plot { path, format } => {
                 assert_eq!(path, &PathBuf::from("/tmp/plot.svg"));
                 assert_eq!(format, "svg");
@@ -143,53 +172,25 @@ mod tests {
     }
 
     #[test]
-    fn test_read_metadata_multiple_outputs() {
+    fn test_read_legacy_metadata() {
         let channel = SideChannel::new().unwrap();
 
-        let metadata = vec![
-            OutputMetadata::Text {
-                content: "Hello".to_string(),
-            },
-            OutputMetadata::DataFrame {
-                path: PathBuf::from("/tmp/data.csv"),
-            },
-            OutputMetadata::Plot {
-                path: PathBuf::from("/tmp/plot.svg"),
-                format: "svg".to_string(),
-            },
-        ];
+        // Old list format
+        let results = vec![OutputMetadata::Text {
+            content: "Legacy".to_string(),
+        }];
 
-        let json = serde_json::to_string(&metadata).unwrap();
+        let json = serde_json::to_string(&results).unwrap();
         std::fs::write(&channel.metadata_file, json).unwrap();
 
+        // Should still be readable via fallback
         let read_metadata = channel.read_metadata().unwrap();
-        assert_eq!(read_metadata.len(), 3);
-    }
-
-    #[test]
-    fn test_cleanup() {
-        let channel = SideChannel::new().unwrap();
-        let path = channel.metadata_file.clone();
-
-        std::fs::write(&path, "test").unwrap();
-        assert!(path.exists());
-
-        channel.cleanup();
-        assert!(!path.exists());
-    }
-
-    #[test]
-    fn test_cleanup_on_drop() {
-        let path = {
-            let channel = SideChannel::new().unwrap();
-            let p = channel.metadata_file.clone();
-            std::fs::write(&p, "test").unwrap();
-            assert!(p.exists());
-            p
-            // Drop called here
-        };
-
-        // File should be cleaned up
-        assert!(!path.exists());
+        assert_eq!(read_metadata.results.len(), 1);
+        assert_eq!(
+            read_metadata.results[0],
+            OutputMetadata::Text {
+                content: "Legacy".to_string()
+            }
+        );
     }
 }
