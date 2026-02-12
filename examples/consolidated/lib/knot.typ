@@ -12,6 +12,8 @@
 #let code-chunk(
   code: none,
   output: none,
+  warnings: (),
+  errors: (),
   layout: none, // Optional: only used when both code and output are present
   gutter: 0.5em,
   code-background: none,
@@ -54,7 +56,7 @@
   } else { none }
 
   // Layout based on what's being displayed
-  if code == none and output != none {
+  let main-content = if code == none and output != none {
     // Only output: single column
     output-block
   } else if output == none and code != none {
@@ -77,6 +79,36 @@
         code-block, output-block,
       )
     }
+  } else { none }
+
+  // Assemble final content with warnings and errors
+  if main-content == none and warnings.len() == 0 and errors.len() == 0 {
+    return none
   }
-  // If both are none, display nothing
+
+  stack(
+    dir: ttb,
+    spacing: 0.5em,
+    main-content,
+    ..warnings.map(w => block(
+      fill: rgb("#fff4ce"),
+      stroke: 1pt + rgb("#facc15"),
+      radius: 2pt,
+      inset: 0.5em,
+      width: 100%,
+    )[
+      #set text(fill: rgb("#854d0e"), size: 0.85em)
+      *Warning:* #w
+    ]),
+    ..errors.map(e => block(
+      fill: rgb("#fee2e2"),
+      stroke: 1pt + rgb("#ef4444"),
+      radius: 2pt,
+      inset: 0.5em,
+      width: 100%,
+    )[
+      #set text(fill: rgb("#991b1b"), size: 0.85em)
+      *Error:* #e
+    ])
+  )
 }

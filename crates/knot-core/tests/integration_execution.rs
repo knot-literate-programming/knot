@@ -43,11 +43,11 @@ fn test_simple_r_execution() {
     let graphics = default_graphics();
 
     let code = "x <- 1 + 1\nprint(x)";
-    let result = executor
+    let output = executor
         .execute(code, &graphics)
         .expect("Failed to execute R code");
 
-    match result {
+    match output.result {
         ExecutionResult::Text(output) => {
             assert!(
                 output.contains("2"),
@@ -55,7 +55,7 @@ fn test_simple_r_execution() {
                 output
             );
         }
-        _ => panic!("Expected Text result, got: {:?}", result),
+        _ => panic!("Expected Text result, got: {:?}", output.result),
     }
 }
 
@@ -88,11 +88,11 @@ typst(df)
 "#;
     let graphics = default_graphics();
 
-    let result = executor
+    let output = executor
         .execute(code, &graphics)
         .expect("Failed to execute");
 
-    match result {
+    match output.result {
         ExecutionResult::DataFrame(path) => {
             assert!(path.exists(), "DataFrame CSV should exist");
             let content = fs::read_to_string(&path).expect("Failed to read CSV");
@@ -104,7 +104,7 @@ typst(df)
                 content
             );
         }
-        _ => panic!("Expected DataFrame result, got: {:?}", result),
+        _ => panic!("Expected DataFrame result, got: {:?}", output.result),
     }
 }
 
@@ -121,11 +121,11 @@ typst(gg)
 "#;
     let graphics = default_graphics();
 
-    let result = executor
+    let output = executor
         .execute(code, &graphics)
         .expect("Failed to execute");
 
-    match result {
+    match output.result {
         ExecutionResult::Plot(path) => {
             assert!(path.exists(), "Plot file should exist");
             assert!(
@@ -139,7 +139,7 @@ typst(gg)
                 "Plot file should have reasonable size"
             );
         }
-        _ => panic!("Expected Plot result, got: {:?}", result),
+        _ => panic!("Expected Plot result, got: {:?}", output.result),
     }
 }
 
@@ -159,11 +159,11 @@ typst(gg)
 "#;
     let graphics = default_graphics();
 
-    let result = executor
+    let output = executor
         .execute(code, &graphics)
         .expect("Failed to execute");
 
-    match result {
+    match output.result {
         ExecutionResult::DataFrameAndPlot { dataframe, plot } => {
             assert!(dataframe.exists(), "DataFrame should exist");
             assert!(plot.exists(), "Plot should exist");
@@ -175,7 +175,7 @@ typst(gg)
                 csv_content
             );
         }
-        _ => panic!("Expected DataFrameAndPlot result, got: {:?}", result),
+        _ => panic!("Expected DataFrameAndPlot result, got: {:?}", output.result),
     }
 }
 
@@ -191,11 +191,11 @@ fn test_r_session_persistence() {
         .expect("Failed to set variable");
 
     // Use the variable in second execution
-    let result = executor
+    let output = executor
         .execute("print(x)", &graphics)
         .expect("Failed to use variable");
 
-    match result {
+    match output.result {
         ExecutionResult::Text(output) => {
             assert!(
                 output.contains("42"),
