@@ -222,8 +222,8 @@ cargo test -p knot-cli --test integration_build
 ```bash
 # Build and test with an example
 cargo build --release
-./target/release/knot compile examples/demo-python/main.knot
-typst compile examples/demo-python/.main.typ test.pdf
+./target/release/knot compile examples/consolidated/main.knot
+typst compile examples/consolidated/.main.typ test.pdf
 ```
 
 ---

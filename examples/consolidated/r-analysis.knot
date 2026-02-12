@@ -7,7 +7,7 @@ In this chapter, we explore temperature data using R and ggplot2.
 Let's start by creating a synthetic dataset of monthly temperatures:
 
 ```{r}
-#| layout: horizontal
+#| layout: vertical
 
 # Load required libraries
 library(ggplot2)
@@ -42,7 +42,7 @@ Now let's visualize the temperature trends throughout the year:
 #| fig-width: 8
 #| fig-height: 5
 #| layout: vertical
-#| code-background: "rgb(\"#f8f9fa\")"
+#| code-background: 'rgb("#f8f9fa")'
 
 # Create temperature plot
 temp_plot <- ggplot(climate_data, aes(x = month, y = temperature, group = 1)) +

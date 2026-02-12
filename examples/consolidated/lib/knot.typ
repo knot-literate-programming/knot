@@ -53,7 +53,8 @@
     )[#output]
   } else { none }
 
-  // Layout based on mode
+  // Layout based on mode (only horizontal or vertical)
+  // Note: input-only and output-only are now handled by the show option in Rust
   if layout == "vertical" {
     stack(
       dir: ttb,
@@ -61,10 +62,6 @@
       code-block,
       output-block
     )
-  } else if layout == "input-only" {
-    code-block
-  } else if layout == "output-only" {
-    output-block
   } else {
     // horizontal (default)
     grid(

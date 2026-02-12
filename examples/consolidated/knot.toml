@@ -34,13 +34,9 @@ fig-format = "svg"   # Output format: "svg" or "png"
 # Presentation options
 layout = "horizontal"              # Layout: "horizontal", "vertical", "input-only", "output-only"
 # gutter = "1em"                   # Space between input and output
-# code-background = ""             # Code block background color (Typst color)
 #output-background = "[]"           # Output block background color (Typst color)
-# code-stroke = "1pt + gray"       # Code block border (Typst stroke: "thickness + color")
 #output-stroke = "[]"     # Output block border (Typst stroke)
-# code-radius = "4pt"              # Code block corner radius (Typst length)
 # output-radius = "4pt"            # Output block corner radius (Typst length)
-# code-inset = "0.5em"             # Code block padding (Typst length)
 # output-inset = "0.5em"           # Output block padding (Typst length)
 # width-ratio = "1:1"              # Width ratio for horizontal layout
 # align = "left"                   # Content alignment within containers
@@ -52,7 +48,7 @@ codly-stroke = '1pt + rgb("#CE412B")'
 codly-lang-radius = "10pt"
 codly-lang-outset = '(x: -5pt, y: 0pt)'
 output-stroke = '1pt + rgb("#CE412B")'
-output-background = 'rgb("#fdf1ef")'
+output-background = 'rgb("#ffffff")'
 
 [python-chunks]
 echo = true                 # Show Python source code by default
