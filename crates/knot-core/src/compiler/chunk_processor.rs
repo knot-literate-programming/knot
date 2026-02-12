@@ -28,15 +28,15 @@ pub fn process_chunk(
     // Apply config defaults to chunk options and resolve to concrete values
     let mut chunk_options = chunk.options.clone();
 
-    // Priority 1: Apply global [defaults]
-    chunk_options.apply_config_defaults(&config.defaults);
+    // Priority 1: Apply global [chunk-defaults]
+    chunk_options.apply_config_defaults(&config.chunk_defaults);
 
     // Priority 2: Apply language-specific [{lang}-chunks] if present
     // Also merge codly options from language defaults
     let mut merged_codly_options = chunk.codly_options.clone();
 
     // First, merge global defaults codly options
-    for (key, value) in &config.defaults.codly_options {
+    for (key, value) in &config.chunk_defaults.codly_options {
         merged_codly_options.insert(key.clone(), value.clone());
     }
 
@@ -536,7 +536,7 @@ mod tests {
 
         // Create config with both global and language-specific defaults
         let config = Config {
-            defaults: ChunkDefaults {
+            chunk_defaults: ChunkDefaults {
                 show: Some(crate::parser::Show::Output), // Global default
                 ..Default::default()
             },
@@ -590,7 +590,7 @@ mod tests {
 
         // Create config with only global defaults (no python-chunks defined)
         let config = Config {
-            defaults: ChunkDefaults {
+            chunk_defaults: ChunkDefaults {
                 show: Some(crate::parser::Show::Output),
                 eval: Some(true),
                 ..Default::default()

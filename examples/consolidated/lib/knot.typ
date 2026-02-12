@@ -12,19 +12,19 @@
 #let code-chunk(
   input: none,
   output: none,
-  layout: none,  // Optional: only used when both input and output are present
-  gutter: 1em,
+  layout: none, // Optional: only used when both input and output are present
+  gutter: 0.5em,
   code-background: none,
   code-stroke: none,
   code-radius: 0pt,
   code-inset: 0pt,
-  output-background: rgb(244, 244, 244),
+  output-background: rgb(255, 255, 255),
   output-stroke: none,
-  output-radius: 4pt,
-  output-inset: 8pt,
+  output-radius: 0pt,
+  output-inset: 0pt,
   width-ratio: "1:1",
   align: none,
-  ..rest
+  ..rest,
 ) = {
   // Parse width-ratio for horizontal layout
   let ratio-parts = width-ratio.split(":")
@@ -38,7 +38,7 @@
       stroke: code-stroke,
       radius: code-radius,
       inset: code-inset,
-      width: 100%
+      width: 100%,
     )[#input]
   } else { none }
 
@@ -49,7 +49,7 @@
       stroke: output-stroke,
       radius: output-radius,
       inset: output-inset,
-      width: 100%
+      width: 100%,
     )[#output]
   } else { none }
 
@@ -67,15 +67,14 @@
         dir: ttb,
         spacing: gutter,
         code-block,
-        output-block
+        output-block,
       )
     } else {
       // horizontal (default when layout is none or "horizontal")
       grid(
         columns: (left-ratio * 1fr, right-ratio * 1fr),
         gutter: gutter,
-        code-block,
-        output-block
+        code-block, output-block,
       )
     }
   }

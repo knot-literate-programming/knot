@@ -18,7 +18,7 @@ typst = "lib/knot.typ"
 
 # Global chunk defaults (all options are optional)
 # These can be overridden in individual chunks with #| option: value
-[defaults]
+[chunk-defaults]
 # Execution options
 eval = true          # Execute code chunks
 show = "both"        # What to show: "both", "input", or "output"
@@ -31,22 +31,27 @@ dpi = 300            # Resolution for raster graphics
 fig-format = "svg"   # Output format: "svg" or "png"
 
 # Presentation options
-layout = "horizontal"              # Layout when show=both: "horizontal" or
-codly-lang-radius = "40pt"
+layout = "horizontal"  # Layout when show=both: "horizontal" or "vertical"
+gutter = '1em'
+lang-radius = '100pt'
 
-# Language-specific chunk defaults (optional)
-# These override global [defaults] for specific languages
-[r-chunks]
-codly-lang-outset = '(x: 0pt, y: 0pt)'
-code-stroke = '1pt + rgb("#CE412B")'
+# Code options
 code-radius = '4pt'
 code-inset = '0.5em'
+
+# Output options
 output-stroke = '1pt + rgb("#999999")'
 output-inset = '0.5em'
 output-radius = '4pt'
-output-background = 'rgb("#ffffff")'
+output-background = 'rgb("#FFFFFF")'
+
+# Codly options
+codly-lang-outset = '(x: 0pt, y: 0pt)'
+
+# Language-specific chunk defaults (optional)
+# These override global [chunk-defaults] for specific languages
+[r-chunks]
+code-stroke = '1pt + rgb("#CE412B")'
 
 [python-chunks]
-show = "both"               # Show both code and output by default
-fig-width = 6.0             # Smaller figures for Python plots
-dpi = 300
+code-stroke = '1pt + rgb("#3572A5")'

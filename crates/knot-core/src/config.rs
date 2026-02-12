@@ -14,8 +14,8 @@ pub struct Config {
     pub document: DocumentConfig,
     #[serde(default)]
     pub helpers: HelpersConfig,
-    #[serde(default)]
-    pub defaults: ChunkDefaults,
+    #[serde(default, rename = "chunk-defaults")]
+    pub chunk_defaults: ChunkDefaults,
     /// Codly configuration options (passed to #codly() during initialization)
     #[serde(default)]
     pub codly: HashMap<String, toml::Value>,
@@ -194,7 +194,7 @@ impl Config {
             python_chunks.extract_codly_options();
         }
         // Also extract from global defaults
-        config.defaults.extract_codly_options();
+        config.chunk_defaults.extract_codly_options();
 
         Ok(config)
     }
@@ -261,7 +261,7 @@ mod tests {
 [document]
 main = "main.knot"
 
-[defaults]
+[chunk-defaults]
 show = "output"
 eval = true
 cache = true
@@ -274,36 +274,42 @@ gutter = "2em"
 "##;
 
         let config: Config = toml::from_str(toml).unwrap();
-        assert_eq!(config.defaults.show, Some(crate::parser::Show::Output));
-        assert_eq!(config.defaults.eval, Some(true));
-        assert_eq!(config.defaults.cache, Some(true));
-        assert_eq!(config.defaults.fig_width, Some(8.0));
-        assert_eq!(config.defaults.fig_height, Some(6.0));
-        assert_eq!(config.defaults.dpi, Some(600));
         assert_eq!(
-            config.defaults.fig_format,
+            config.chunk_defaults.show,
+            Some(crate::parser::Show::Output)
+        );
+        assert_eq!(config.chunk_defaults.eval, Some(true));
+        assert_eq!(config.chunk_defaults.cache, Some(true));
+        assert_eq!(config.chunk_defaults.fig_width, Some(8.0));
+        assert_eq!(config.chunk_defaults.fig_height, Some(6.0));
+        assert_eq!(config.chunk_defaults.dpi, Some(600));
+        assert_eq!(
+            config.chunk_defaults.fig_format,
             Some(crate::parser::FigFormat::Png)
         );
         assert_eq!(
-            config.defaults.layout,
+            config.chunk_defaults.layout,
             Some(crate::parser::Layout::Vertical)
         );
-        assert_eq!(config.defaults.gutter, Some("2em".to_string()));
+        assert_eq!(config.chunk_defaults.gutter, Some("2em".to_string()));
     }
 
     #[test]
     fn test_defaults_partial() {
         let toml = r#"
-[defaults]
+[chunk-defaults]
 show = "output"
 fig-width = 10.0
 "#;
 
         let config: Config = toml::from_str(toml).unwrap();
-        assert_eq!(config.defaults.show, Some(crate::parser::Show::Output));
-        assert_eq!(config.defaults.fig_width, Some(10.0));
-        assert!(config.defaults.eval.is_none());
-        assert!(config.defaults.cache.is_none());
+        assert_eq!(
+            config.chunk_defaults.show,
+            Some(crate::parser::Show::Output)
+        );
+        assert_eq!(config.chunk_defaults.fig_width, Some(10.0));
+        assert!(config.chunk_defaults.eval.is_none());
+        assert!(config.chunk_defaults.cache.is_none());
     }
 
     #[test]
@@ -312,7 +318,7 @@ fig-width = 10.0
 [document]
 main = "main.knot"
 
-[defaults]
+[chunk-defaults]
 show = "both"
 fig-width = 7.0
 

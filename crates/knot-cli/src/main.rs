@@ -96,11 +96,11 @@ fn init(project_name: &PathBuf) -> Result<()> {
         .context("Failed to extract minimal template")?;
     println!("  ✓ Copied template files");
 
-    // Generate dynamic [defaults] section from ChunkOptions metadata
+    // Generate dynamic [chunk-defaults] section from ChunkOptions metadata
     let options = ChunkOptions::option_metadata();
     let defaults_section = generate_defaults_section(&options);
 
-    // Inject the [defaults] section into knot.toml
+    // Inject the [chunk-defaults] section into knot.toml
     let knot_toml_path = project_name.join("knot.toml");
     let mut knot_toml_content =
         fs::read_to_string(&knot_toml_path).context("Failed to read knot.toml")?;
@@ -131,11 +131,11 @@ fn init(project_name: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-/// Generate the [defaults] section for knot.toml from ChunkOptions metadata
+/// Generate the [chunk-defaults] section for knot.toml from ChunkOptions metadata
 fn generate_defaults_section(options: &[knot_core::parser::OptionMetadata]) -> String {
     let mut output = String::new();
 
-    output.push_str("[defaults]\n\n");
+    output.push_str("[chunk-defaults]\n\n");
 
     // Group options by category
     let mut execution_opts = Vec::new();

@@ -53,7 +53,7 @@ fn generate_knot_toml(options: &[OptionMetadata]) -> String {
     output.push_str("#\n");
     output.push_str("# Uncomment and modify the options below to change defaults.\n\n");
 
-    output.push_str("[defaults]\n\n");
+    output.push_str("[chunk-defaults]\n\n");
 
     // Group options by category
     let mut execution_opts = Vec::new();

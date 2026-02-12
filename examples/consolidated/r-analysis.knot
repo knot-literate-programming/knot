@@ -107,7 +107,7 @@ Finally, let's examine the relationship between temperature and rainfall:
 #| fig-width: 4
 #| fig-height: 4
 #| layout: horizontal
-#| gutter: 2em
+#| gutter: '0.5em'
 
 # Scatter plot
 correlation_plot <- ggplot(climate_data, aes(x = temperature, y = rainfall)) +
