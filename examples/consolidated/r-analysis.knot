@@ -62,7 +62,7 @@ typst(temp_plot, width = 8, height = 5)
 
 == Seasonal Analysis
 
-Let's create a more complex visualization showing temperature by season:
+Let's create a more #emph[complex] visualization showing temperature by season:
 
 ```{r}
 #| show: output
@@ -133,4 +133,18 @@ typst(correlation_plot)
 
 The correlation between temperature and rainfall is `{r} cor_value <- cor(climate_data$temperature, climate_data$rainfall); round(cor_value, 3)`, indicating a negative relationship: warmer months tend to have less rainfall.
 
+```{r}
+# Warning test: vector recycling
+x <- 1:3
+y <- 1:2
+x + y
+```
+
 #lorem(500)
+
+```{r}
+x <- 1:3
+y <- 1:2
+
+x + y
+```

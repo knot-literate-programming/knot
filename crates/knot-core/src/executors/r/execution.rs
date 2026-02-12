@@ -10,7 +10,7 @@
 use super::{BOUNDARY, RExecutor, formatters, process::RProcess};
 use crate::executors::error_utils::format_code_with_context;
 use crate::executors::path_utils::escape_path_for_code;
-use crate::executors::{ExecutionOutput, ExecutionResult, GraphicsOptions, LanguageExecutor, SideChannel};
+use crate::executors::{ExecutionOutput, GraphicsOptions, SideChannel};
 use anyhow::{Context, Result};
 use std::io::Write;
 use std::path::Path;
@@ -21,29 +21,26 @@ use std::path::Path;
 /// in the error reporting logic.
 fn wrap_r_code(code: &str) -> String {
     format!(
-        r#".knot_run <- function() {{
-  withCallingHandlers(
-    tryCatch({{
+        r#"tryCatch({{
+  withCallingHandlers({{
+    .knot_res <- withVisible({{
 {code}
-      # Final sync of metadata (including warnings) on success
-      invisible(.write_metadata(NULL, type = "sync"))
-    }}, error = function(e) {{
-      err_obj <- list(
-        message = e$message,
-        call = if(!is.null(e$call)) deparse(e$call)[1] else NULL,
-        traceback = as.character(sys.calls())
-      )
-      .write_metadata(err_obj, type = "error")
-      stop(e)
-    }}),
-    warning = function(w) {{
-      .knot_add_warning(w)
-      invokeRestart("muffleWarning")
-    }}
+    }})
+    if (.knot_res$visible) print(.knot_res$value)
+    invisible(.write_metadata(NULL, type = "sync"))
+  }}, warning = function(w) {{
+    .knot_add_warning(w)
+    invokeRestart("muffleWarning")
+  }})
+}}, error = function(e) {{
+  err_obj <- list(
+    message = e$message,
+    call = if(!is.null(e$call)) deparse(e$call)[1] else NULL,
+    traceback = as.character(sys.calls())
   )
-}}
-.knot_run()
-rm(.knot_run)
+  .write_metadata(err_obj, type = "error")
+  stop(e)
+}})
 "#
     )
 }
@@ -92,13 +89,14 @@ pub fn execute(
         // In our wrapper, the user code starts at line 4 of the block.
         // But R error reporting can be tricky with sys.calls().
         // For now, we report the message and the call.
-        let code_preview = format_code_with_context(code, &error.message, 3);
+        let error_msg = error.message.as_ref().map(|m| m.to_string()).unwrap_or_else(|| "Unknown R error".to_string());
+        let code_preview = format_code_with_context(code, &error_msg, 3);
         
         anyhow::bail!(
             "R execution failed.\n\nCode:\n{}\n\nError: {}\nCall: {}\n\nTraceback:\n{}",
             code_preview,
-            error.message,
-            error.call.as_deref().unwrap_or("unknown"),
+            error_msg,
+            error.call.as_ref().map(|c| c.to_string()).unwrap_or_else(|| "unknown".to_string()),
             error.traceback.join("\n")
         );
     }
@@ -132,23 +130,28 @@ pub fn execute(
 
 /// Execute an inline R expression and return formatted result
 pub fn execute_inline(executor: &mut RExecutor, code: &str) -> Result<String> {
-    let defaults = crate::parser::ChunkOptions::default_resolved();
-    let graphics = GraphicsOptions {
-        width: defaults.fig_width,
-        height: defaults.fig_height,
-        dpi: defaults.dpi,
-        format: defaults.fig_format.as_str().to_string(),
-    };
+    // For inline expressions, we use a simpler approach without the structured wrapper
+    // because they don't need rich output/warnings capture and it avoids side-channel issues.
+    let stdin = executor.process.stdin.as_mut().context("R process stdin is not available")?;
+    
+    // Just wrap in withVisible to get the output
+    let inline_code = format!(
+        ".knot_res <- withVisible({{ {} }}); if (.knot_res$visible) print(.knot_res$value);",
+        code
+    );
 
-    // Correctly call trait method
-    let output = LanguageExecutor::execute(executor, code, &graphics)?;
+    writeln!(stdin, "{}", inline_code)?;
+    writeln!(stdin, "cat('{}\\n', file=stdout())", BOUNDARY)?;
+    writeln!(stdin, "cat('{}\\n', file=stderr())", BOUNDARY)?;
+    stdin.flush()?;
 
-    let output_text = match output.result {
-        ExecutionResult::Text(text) => text,
-        _ => anyhow::bail!("Complex outputs are not supported in inline expressions."),
-    };
+    let (stdout_output, stderr_output) = executor.process.read_until_boundary()?;
 
-    formatters::format_inline_output(&output_text)
+    if !stderr_output.trim().is_empty() && stderr_output.to_lowercase().contains("error") {
+        anyhow::bail!("Inline R execution failed: {}", stderr_output.trim());
+    }
+
+    formatters::format_inline_output(&stdout_output)
 }
 
 /// Execute lightweight R code and return raw stdout

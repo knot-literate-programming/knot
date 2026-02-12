@@ -1,16 +1,19 @@
 # Knot R Helpers - Internal utility functions
 
 # Internal state
+.knot_results <- list()
 .knot_warnings <- list()
+.knot_error <- NULL
 
 .knot_clear_state <- function() {
+  .knot_results <<- list()
   .knot_warnings <<- list()
+  .knot_error <<- NULL
 }
 
 .knot_add_warning <- function(w) {
-  # Capture message and line if possible
   warn_obj <- list(
-    message = w$message,
+    message = as.character(w$message),
     call = if (!is.null(w$call)) deparse(w$call)[1] else NULL
   )
   .knot_warnings <<- c(.knot_warnings, list(warn_obj))
@@ -29,30 +32,37 @@
   meta_file <- Sys.getenv("KNOT_METADATA_FILE")
   if (meta_file == "") return(FALSE)
 
-  # Load existing metadata
-  data <- list(results = list(), warnings = .knot_warnings)
-  
-  if (file.exists(meta_file)) {
-    tryCatch({
-      existing <- jsonlite::fromJSON(meta_file, simplifyVector = FALSE)
-      if (is.list(existing)) {
-        if ("results" %in% names(existing)) data$results <- existing$results
-        if ("warnings" %in% names(existing)) data$warnings <- existing$warnings
-        if ("error" %in% names(existing)) data$error <- existing$error
-      }
-    }, error = function(e) {})
+  if (!requireNamespace("jsonlite", quietly = TRUE)) {
+    return(FALSE)
   }
 
-  # Update data based on type
-  if (type == "result") {
-    data$results <- c(data$results, list(metadata))
+  # Update internal state
+  if (type == "result" && !is.null(metadata)) {
+    .knot_results <<- c(.knot_results, list(metadata))
   } else if (type == "error") {
-    data$error <- metadata
+    .knot_error <<- metadata
   }
-  
-  # Always ensure latest warnings are included
-  data$warnings <- .knot_warnings
 
-  jsonlite::write_json(data, meta_file, auto_unbox = TRUE, pretty = TRUE)
+  # Prepare full metadata object
+  data <- list(
+    results = .knot_results,
+    warnings = .knot_warnings
+  )
+  
+  # Only include error if it exists
+  if (!is.null(.knot_error)) {
+    data$error <- .knot_error
+  }
+
+  # Write JSON without any unboxing to avoid "Tried to unbox" errors
+  # We handle the array structures in Rust.
+  tryCatch({
+    json_content <- jsonlite::toJSON(data, auto_unbox = FALSE, pretty = TRUE)
+    writeLines(json_content, meta_file, useBytes = TRUE)
+  }, error = function(e) {
+    # If JSON fails, write a minimal error so Rust doesn't hang
+    writeLines('{"results":[], "warnings":[]}', meta_file)
+  })
+  
   TRUE
 }
