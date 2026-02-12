@@ -94,8 +94,6 @@ impl Backend for TypstBackend {
             args.push(format!("errors: ({})", error_list));
         }
 
-        use crate::parser::Show;
-
         // Generate input based on show option
         let should_show_input = matches!(
             resolved_options.show,
@@ -169,12 +167,15 @@ impl Backend for TypstBackend {
         }
 
         // Add presentation options
-        use crate::parser::Layout;
-        let layout_str = match resolved_options.layout {
-            Layout::Horizontal => "horizontal",
-            Layout::Vertical => "vertical",
-        };
-        args.push(format!("layout: \"{}\"", layout_str));
+        // Only add layout when showing both input and output
+        use crate::parser::{Layout, Show};
+        if matches!(resolved_options.show, Show::Both) {
+            let layout_str = match resolved_options.layout {
+                Layout::Horizontal => "horizontal",
+                Layout::Vertical => "vertical",
+            };
+            args.push(format!("layout: \"{}\"", layout_str));
+        }
 
         if let Some(gutter) = &resolved_options.gutter {
             args.push(format!("gutter: {}", gutter));

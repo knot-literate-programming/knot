@@ -12,7 +12,7 @@
 #let code-chunk(
   input: none,
   output: none,
-  layout: "horizontal",
+  layout: none,  // Optional: only used when both input and output are present
   gutter: 1em,
   code-background: none,
   code-stroke: none,
@@ -53,22 +53,31 @@
     )[#output]
   } else { none }
 
-  // Layout based on mode (only horizontal or vertical)
-  // Note: input-only and output-only are now handled by the show option in Rust
-  if layout == "vertical" {
-    stack(
-      dir: ttb,
-      spacing: gutter,
-      code-block,
-      output-block
-    )
-  } else {
-    // horizontal (default)
-    grid(
-      columns: (left-ratio * 1fr, right-ratio * 1fr),
-      gutter: gutter,
-      code-block,
-      output-block
-    )
+  // Layout based on what's being displayed
+  if input == none and output != none {
+    // Only output: single column
+    output-block
+  } else if output == none and input != none {
+    // Only input: single column
+    code-block
+  } else if input != none and output != none {
+    // Both input and output: use layout
+    if layout == "vertical" {
+      stack(
+        dir: ttb,
+        spacing: gutter,
+        code-block,
+        output-block
+      )
+    } else {
+      // horizontal (default when layout is none or "horizontal")
+      grid(
+        columns: (left-ratio * 1fr, right-ratio * 1fr),
+        gutter: gutter,
+        code-block,
+        output-block
+      )
+    }
   }
+  // If both are none, display nothing
 }
