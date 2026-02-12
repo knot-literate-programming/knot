@@ -63,6 +63,39 @@ pub struct ChunkDefaults {
     #[serde(rename = "width-ratio")]
     pub width_ratio: Option<String>,
     pub align: Option<String>,
+
+    // Codly-specific options (extracted from codly-* keys in TOML)
+    // Not directly deserialized - populated during post-processing
+    #[serde(skip)]
+    pub codly_options: HashMap<String, String>,
+
+    // Capture all unknown keys for post-processing
+    #[serde(flatten)]
+    pub other: HashMap<String, toml::Value>,
+}
+
+impl ChunkDefaults {
+    /// Extract codly-* options from the "other" HashMap
+    ///
+    /// This should be called after deserialization to populate codly_options
+    pub fn extract_codly_options(&mut self) {
+        for (key, value) in &self.other {
+            if key.starts_with("codly-") {
+                let codly_key = key.strip_prefix("codly-").unwrap().to_string();
+                let value_str = match value {
+                    toml::Value::String(s) => s.clone(),
+                    toml::Value::Boolean(b) => b.to_string(),
+                    toml::Value::Integer(i) => i.to_string(),
+                    toml::Value::Float(f) => f.to_string(),
+                    _ => toml::to_string(value)
+                        .unwrap_or_default()
+                        .trim()
+                        .to_string(),
+                };
+                self.codly_options.insert(codly_key, value_str);
+            }
+        }
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -143,8 +176,18 @@ impl Config {
         let content = std::fs::read_to_string(path)
             .context(format!("Failed to read config file: {}", path.display()))?;
 
-        let config: Config = toml::from_str(&content)
+        let mut config: Config = toml::from_str(&content)
             .context(format!("Failed to parse config file: {}", path.display()))?;
+
+        // Extract codly-* options from language templates
+        if let Some(ref mut r_chunks) = config.r_chunks {
+            r_chunks.extract_codly_options();
+        }
+        if let Some(ref mut python_chunks) = config.python_chunks {
+            python_chunks.extract_codly_options();
+        }
+        // Also extract from global defaults
+        config.defaults.extract_codly_options();
 
         Ok(config)
     }
@@ -301,5 +344,60 @@ dpi = 300
         // Should return None when no language-specific templates are defined
         assert!(config.get_language_defaults("r").is_none());
         assert!(config.get_language_defaults("python").is_none());
+    }
+
+    #[test]
+    fn test_language_templates_with_codly_options() {
+        let toml = r##"
+[document]
+main = "main.knot"
+
+[r-chunks]
+echo = false
+codly-stroke = '1pt + rgb("#CE412B")'
+codly-lang-radius = "10pt"
+output-stroke = '1pt + rgb("#CE412B")'
+
+[python-chunks]
+echo = true
+codly-zebra-fill = 'rgb("#f0f0f0")'
+fig-width = 6.0
+"##;
+
+        let content = toml.to_string();
+        let mut config: Config = toml::from_str(&content).unwrap();
+
+        // Extract codly options (simulate load_from_path behavior)
+        if let Some(ref mut r_chunks) = config.r_chunks {
+            r_chunks.extract_codly_options();
+        }
+        if let Some(ref mut python_chunks) = config.python_chunks {
+            python_chunks.extract_codly_options();
+        }
+
+        // Test R-chunks codly options
+        let r_defaults = config.get_language_defaults("r").unwrap();
+        assert_eq!(r_defaults.echo, Some(false));
+        assert_eq!(
+            r_defaults.codly_options.get("stroke"),
+            Some(&"1pt + rgb(\"#CE412B\")".to_string())
+        );
+        assert_eq!(
+            r_defaults.codly_options.get("lang-radius"),
+            Some(&"10pt".to_string())
+        );
+        assert_eq!(
+            r_defaults.output_stroke,
+            Some("1pt + rgb(\"#CE412B\")".to_string())
+        );
+
+        // Test Python-chunks codly options
+        let python_defaults = config.get_language_defaults("python").unwrap();
+        assert_eq!(python_defaults.echo, Some(true));
+        assert_eq!(python_defaults.fig_width, Some(6.0));
+        assert_eq!(
+            python_defaults.codly_options.get("zebra-fill"),
+            Some(&"rgb(\"#f0f0f0\")".to_string())
+        );
     }
 }

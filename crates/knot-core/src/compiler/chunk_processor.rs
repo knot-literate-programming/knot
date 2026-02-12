@@ -32,9 +32,27 @@ pub fn process_chunk(
     chunk_options.apply_config_defaults(&config.defaults);
 
     // Priority 2: Apply language-specific [{lang}-chunks] if present
+    // Also merge codly options from language defaults
+    let mut merged_codly_options = chunk.codly_options.clone();
+
+    // First, merge global defaults codly options
+    for (key, value) in &config.defaults.codly_options {
+        merged_codly_options.insert(key.clone(), value.clone());
+    }
+
+    // Then, merge language-specific defaults (higher priority)
     if let Some(lang_defaults) = config.get_language_defaults(&chunk.language) {
         chunk_options.apply_config_defaults(lang_defaults);
+        for (key, value) in &lang_defaults.codly_options {
+            merged_codly_options.insert(key.clone(), value.clone());
+        }
     }
+
+    // Finally, chunk-specific codly options (highest priority - already in merged_codly_options)
+    for (key, value) in &chunk.codly_options {
+        merged_codly_options.insert(key.clone(), value.clone());
+    }
+
     let resolved_options = chunk_options.resolve(); // Convert Option<bool> to bool
     let chunk_name = chunk
         .name
@@ -86,8 +104,13 @@ pub fn process_chunk(
         result
     };
 
+    // Create a chunk with merged codly options for the backend
+    let mut chunk_with_codly = chunk.clone();
+    chunk_with_codly.codly_options = merged_codly_options;
+
     let backend = TypstBackend::new();
-    let chunk_output_final = backend.format_chunk(chunk, &resolved_options, &execution_result);
+    let chunk_output_final =
+        backend.format_chunk(&chunk_with_codly, &resolved_options, &execution_result);
 
     Ok((chunk_output_final, chunk_hash))
 }

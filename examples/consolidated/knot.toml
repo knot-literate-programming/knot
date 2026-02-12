@@ -35,9 +35,9 @@ fig-format = "svg"   # Output format: "svg" or "png"
 layout = "horizontal"              # Layout: "horizontal", "vertical", "input-only", "output-only"
 # gutter = "1em"                   # Space between input and output
 # code-background = ""             # Code block background color (Typst color)
-# output-background = ""           # Output block background color (Typst color)
+output-background = ""           # Output block background color (Typst color)
 # code-stroke = "1pt + gray"       # Code block border (Typst stroke: "thickness + color")
-# output-stroke = "1pt + gray"     # Output block border (Typst stroke)
+output-stroke = ""     # Output block border (Typst stroke)
 # code-radius = "4pt"              # Code block corner radius (Typst length)
 # output-radius = "4pt"            # Output block corner radius (Typst length)
 # code-inset = "0.5em"             # Code block padding (Typst length)
@@ -48,9 +48,11 @@ layout = "horizontal"              # Layout: "horizontal", "vertical", "input-on
 # Language-specific chunk defaults (optional)
 # These override global [defaults] for specific languages
 [r-chunks]
-echo = false                # Don't show R source code by default
-fig-width = 8.0             # Larger figures for R plots
-fig-height = 6.0
+codly-stroke = '1pt + rgb("#CE412B")'
+codly-lang-radius = "10pt"
+codly-lang-outset = '(x: -5pt, y: 0pt)'
+output-stroke = '1pt + rgb("#CE412B")'
+output-background = 'rgb("#fdf1ef")'
 
 [python-chunks]
 echo = true                 # Show Python source code by default

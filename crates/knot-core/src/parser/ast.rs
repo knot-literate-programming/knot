@@ -294,7 +294,7 @@ define_options! {
     [opt] align: String, None,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Chunk {
     pub language: String,
     pub name: Option<String>,

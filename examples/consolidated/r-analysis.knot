@@ -7,8 +7,6 @@ In this chapter, we explore temperature data using R and ggplot2.
 Let's start by creating a synthetic dataset of monthly temperatures:
 
 ```{r}
-#| echo: true
-#| output: true
 #| layout: horizontal
 
 # Load required libraries
@@ -116,9 +114,6 @@ Finally, let's examine the relationship between temperature and rainfall:
 #| fig-height: 4
 #| layout: 'horizontal'
 #| gutter: 2em
-#| codly-stroke: '1pt + rgb("#CE412B")'
-#| codly-lang-radius: 10pt
-#| output-stroke: '1pt + rgb("#CE412B")'
 
 # Scatter plot with regression line
 correlation_plot <- ggplot(climate_data, aes(x = temperature, y = rainfall)) +
