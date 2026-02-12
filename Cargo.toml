@@ -20,6 +20,8 @@ clap = { version = "4.5", features = ["derive"] }
 [workspace.metadata.dist]
 # The preferred dist version to use in CI (Cargo.toml SemVer syntax)
 cargo-dist-version = "0.30.3"
+# Allow manual changes to CI workflows
+allow-dirty = ["ci"]
 # CI backends to support
 ci = "github"
 # The installers to generate for each app
