@@ -19,6 +19,26 @@ pub fn format_codly_call(options: &HashMap<String, String>) -> String {
     format!("#codly({})", args.join(", "))
 }
 
+/// Formats a HashMap of codly options into a Typst #local() function call.
+///
+/// #local() applies codly configuration only to the next code block,
+/// preventing global scope pollution.
+///
+/// # Example
+/// ```
+/// let mut options = HashMap::new();
+/// options.insert("lang-radius".to_string(), "10pt".to_string());
+/// let result = format_local_call(&options);
+/// // result: "#local(lang-radius: 10pt)"
+/// ```
+pub fn format_local_call(options: &HashMap<String, String>) -> String {
+    let args: Vec<String> = options
+        .iter()
+        .map(|(key, value)| format!("{}: {}", key, value))
+        .collect();
+    format!("#local({})", args.join(", "))
+}
+
 pub trait Backend {
     /// Formats a processed chunk into the target document syntax.
     fn format_chunk(
@@ -75,7 +95,18 @@ impl Backend for TypstBackend {
         }
 
         if resolved_options.echo {
-            let input_str = format!("[```{}\n{}```]", chunk.language, chunk.code.trim());
+            // Use #local() for chunk-specific codly options (local scope)
+            let input_str = if !chunk.codly_options.is_empty() {
+                let local_call = format_local_call(&chunk.codly_options);
+                format!(
+                    "[{}[```{}\n{}```]]",
+                    local_call,
+                    chunk.language,
+                    chunk.code.trim()
+                )
+            } else {
+                format!("[```{}\n{}```]", chunk.language, chunk.code.trim())
+            };
             args.push(format!("input: {}", input_str));
         } else {
             args.push("input: none".to_string());
@@ -152,11 +183,6 @@ impl Backend for TypstBackend {
 
         let code_chunk_call = format!("#code-chunk({})", args.join(", "));
         let mut chunk_output_final = String::new();
-
-        // Add codly() call if there are codly options from the chunk
-        if !chunk.codly_options.is_empty() {
-            chunk_output_final.push_str(&format!("{}\n", format_codly_call(&chunk.codly_options)));
-        }
 
         if let Some(name) = &chunk.name {
             if !name.trim().is_empty() {
@@ -472,5 +498,63 @@ mod tests {
 
         // Empty text should result in output: none
         assert!(output.contains("output: none"));
+    }
+
+    #[test]
+    fn test_format_chunk_with_codly_options() {
+        let backend = TypstBackend::new();
+        let mut chunk = create_test_chunk("r", "x <- 1:10", None, true, true, None);
+
+        // Add codly options
+        chunk
+            .codly_options
+            .insert("stroke".to_string(), "1pt + rgb(\"#CE412B\")".to_string());
+        chunk
+            .codly_options
+            .insert("lang-radius".to_string(), "10pt".to_string());
+
+        let result = ExecutionResult::Text("[1] 1  2  3  4  5  6  7  8  9 10".to_string());
+        let resolved = chunk.options.resolve();
+
+        let output = backend.format_chunk(&chunk, &resolved, &result);
+
+        // Should use #local() for chunk-specific codly options
+        assert!(output.contains("#local("));
+        assert!(output.contains("stroke: 1pt + rgb(\"#CE412B\")"));
+        assert!(output.contains("lang-radius: 10pt"));
+
+        // Code block should follow the #local() call
+        assert!(output.contains("```r"));
+    }
+
+    #[test]
+    fn test_format_chunk_without_codly_options() {
+        let backend = TypstBackend::new();
+        let chunk = create_test_chunk("r", "x <- 1:10", None, true, true, None);
+
+        let result = ExecutionResult::Text("[1] 1  2  3  4  5  6  7  8  9 10".to_string());
+        let resolved = chunk.options.resolve();
+
+        let output = backend.format_chunk(&chunk, &resolved, &result);
+
+        // Without codly options, should NOT have #local()
+        assert!(!output.contains("#local("));
+
+        // Should have simple input
+        assert!(output.contains("input: [```r"));
+    }
+
+    #[test]
+    fn test_format_local_call() {
+        let mut options = HashMap::new();
+        options.insert("stroke".to_string(), "1pt + red".to_string());
+        options.insert("lang-radius".to_string(), "5pt".to_string());
+
+        let result = format_local_call(&options);
+
+        assert!(result.starts_with("#local("));
+        assert!(result.ends_with(")"));
+        assert!(result.contains("stroke: 1pt + red"));
+        assert!(result.contains("lang-radius: 5pt"));
     }
 }
