@@ -507,7 +507,7 @@ mod tests {
         let config = Config {
             r_chunks: Some(ChunkDefaults {
                 show: Some(crate::parser::Show::Output),
-                eval: Some(true),
+                eval: Some(false),
                 cache: Some(true),
                 fig_width: Some(10.0),
                 fig_height: Some(8.0),
@@ -592,7 +592,7 @@ mod tests {
         let config = Config {
             chunk_defaults: ChunkDefaults {
                 show: Some(crate::parser::Show::Output),
-                eval: Some(true),
+                eval: Some(false),
                 ..Default::default()
             },
             // Note: python_chunks is None, so global defaults should be used
