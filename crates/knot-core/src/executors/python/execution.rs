@@ -9,7 +9,7 @@
 use super::process::PythonProcess;
 use crate::executors::error_utils::format_code_with_context;
 use crate::executors::path_utils::escape_path_for_code;
-use crate::executors::{ExecutionResult, GraphicsOptions, SideChannel};
+use crate::executors::{ExecutionOutput, GraphicsOptions, SideChannel};
 use anyhow::Result;
 use std::path::Path;
 
@@ -19,7 +19,7 @@ pub fn execute(
     cache_dir: &Path,
     code: &str,
     graphics: &GraphicsOptions,
-) -> Result<ExecutionResult> {
+) -> Result<ExecutionOutput> {
     // Create side-channel for this chunk
     let channel = SideChannel::new()?;
 

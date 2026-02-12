@@ -23,4 +23,7 @@ setup_environment <- function(metadata_file, cache_dir, fig_width, fig_height, f
   Sys.setenv(KNOT_FIG_HEIGHT = as.character(fig_height))
   Sys.setenv(KNOT_FIG_DPI = as.character(fig_dpi))
   Sys.setenv(KNOT_FIG_FORMAT = fig_format)
+
+  # Clear internal state for new chunk
+  .knot_clear_state()
 }

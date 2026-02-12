@@ -12,7 +12,8 @@ mod formatters;
 mod process;
 
 use super::{
-    ConstantObjectHandler, ExecutionResult, GraphicsOptions, KnotExecutor, LanguageExecutor,
+    ConstantObjectHandler, ExecutionOutput, GraphicsOptions, KnotExecutor,
+    LanguageExecutor,
 };
 use anyhow::Result;
 use std::path::{Path, PathBuf};
@@ -66,7 +67,7 @@ impl LanguageExecutor for RExecutor {
         self.process.initialize()
     }
 
-    fn execute(&mut self, code: &str, graphics: &GraphicsOptions) -> Result<ExecutionResult> {
+    fn execute(&mut self, code: &str, graphics: &GraphicsOptions) -> Result<ExecutionOutput> {
         execution::execute(&mut self.process, &self.cache_dir, code, graphics)
     }
 
@@ -206,6 +207,7 @@ impl Drop for RExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::executors::ExecutionResult;
     use tempfile::TempDir;
 
     fn setup_executor() -> (TempDir, RExecutor) {
@@ -231,8 +233,8 @@ mod tests {
     #[ignore]
     fn test_execute_simple_expression() {
         let (_temp_dir, mut executor) = setup_executor();
-        let result = executor.execute("1 + 1", &default_graphics()).unwrap();
-        match result {
+        let output = executor.execute("1 + 1", &default_graphics()).unwrap();
+        match output.result {
             ExecutionResult::Text(output) => assert!(output.contains("2")),
             _ => panic!("Expected Text result"),
         }
