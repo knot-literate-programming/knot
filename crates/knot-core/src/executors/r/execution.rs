@@ -82,7 +82,7 @@ pub fn execute_inline(executor: &mut RExecutor, code: &str) -> Result<String> {
         width: defaults.fig_width,
         height: defaults.fig_height,
         dpi: defaults.dpi,
-        format: defaults.fig_format,
+        format: defaults.fig_format.as_str().to_string(),
     };
 
     // Correctly call trait method

@@ -36,8 +36,7 @@ pub struct Config {
 #[derive(Debug, Default, Deserialize, Clone)]
 pub struct ChunkDefaults {
     pub eval: Option<bool>,
-    pub echo: Option<bool>,
-    pub output: Option<bool>,
+    pub show: Option<crate::parser::Show>,
     pub cache: Option<bool>,
 
     // Graphics options
@@ -47,10 +46,10 @@ pub struct ChunkDefaults {
     pub fig_height: Option<f64>,
     pub dpi: Option<u32>,
     #[serde(rename = "fig-format")]
-    pub fig_format: Option<String>,
+    pub fig_format: Option<crate::parser::FigFormat>,
 
     // Presentation options
-    pub layout: Option<String>,
+    pub layout: Option<crate::parser::Layout>,
     pub gutter: Option<String>,
     #[serde(rename = "output-background")]
     pub output_background: Option<String>,

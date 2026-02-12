@@ -50,11 +50,13 @@ pub fn get_document_symbols(text: &str) -> Option<Vec<DocumentSymbol>> {
         if matches!(chunk.options.eval, Some(false)) {
             details.push("eval: false".to_string());
         }
-        if matches!(chunk.options.echo, Some(false)) {
-            details.push("echo: false".to_string());
-        }
-        if matches!(chunk.options.output, Some(false)) {
-            details.push("output: false".to_string());
+        if let Some(show) = &chunk.options.show {
+            use knot_core::parser::Show;
+            match show {
+                Show::Input => details.push("show: input".to_string()),
+                Show::Output => details.push("show: output".to_string()),
+                Show::Both => {}, // default, don't show
+            }
         }
         if matches!(chunk.options.cache, Some(false)) {
             details.push("cache: false".to_string());

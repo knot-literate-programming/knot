@@ -50,8 +50,8 @@ pub fn get_inline_expr_hash(
     let resolved = options.resolve();
     // Include options in hash to invalidate cache when options change
     let options_str = format!(
-        "echo={},eval={},output={},digits={:?}",
-        resolved.echo, resolved.eval, resolved.output, resolved.digits
+        "show={:?},eval={},digits={:?}",
+        resolved.show, resolved.eval, resolved.digits
     );
     let inline_content = format!("{}|{}|{}", code, options_str, previous_hash);
 

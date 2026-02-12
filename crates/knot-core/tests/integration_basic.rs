@@ -46,8 +46,10 @@ Done!
     assert_eq!(doc.chunks.len(), 1);
     assert_eq!(doc.chunks[0].name, Some("test".to_string()));
     assert_eq!(doc.chunks[0].options.eval, Some(true));
-    assert_eq!(doc.chunks[0].options.echo, Some(true));
-    assert_eq!(doc.chunks[0].options.output, Some(true));
+    assert_eq!(
+        doc.chunks[0].options.show,
+        Some(knot_core::parser::Show::Both)
+    );
 
     // Verify code content
     assert!(doc.chunks[0].code.contains("x <- 1 + 1"));

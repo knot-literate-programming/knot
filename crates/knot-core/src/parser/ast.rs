@@ -3,6 +3,70 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+// ============================================================================
+// Chunk Option Enums
+// ============================================================================
+
+/// What to display in the output
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Show {
+    /// Display both input code and output
+    Both,
+    /// Display only input code
+    Input,
+    /// Display only output
+    Output,
+}
+
+impl Default for Show {
+    fn default() -> Self {
+        Show::Both
+    }
+}
+
+/// How to layout input and output when both are displayed
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Layout {
+    /// Side-by-side layout
+    Horizontal,
+    /// Stacked layout
+    Vertical,
+}
+
+impl Default for Layout {
+    fn default() -> Self {
+        Layout::Horizontal
+    }
+}
+
+/// Format for generated figures
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FigFormat {
+    /// SVG vector format
+    Svg,
+    /// PNG raster format
+    Png,
+}
+
+impl Default for FigFormat {
+    fn default() -> Self {
+        FigFormat::Svg
+    }
+}
+
+impl FigFormat {
+    /// Convert to string representation
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            FigFormat::Svg => "svg",
+            FigFormat::Png => "png",
+        }
+    }
+}
+
 // NOTE : Ces structures sont basées sur la section 3.5 du document de référence.
 // La section 11.4 mentionne que les positions sont cruciales pour un futur LSP.
 // Pour la phase 1, les positions exactes sont moins critiques, mais les structures
@@ -234,15 +298,11 @@ macro_rules! define_options {
 define_options! {
     /// Whether to evaluate the chunk
     [val] eval: bool, true,
-    /// Whether to include the source code in the output
-    [val] echo: bool, true,
-    /// Whether to include the execution results
-    [val] output: bool, true,
+    /// What to display in the output (both, input, or output)
+    [val] show: Show, Show::Both,
     /// Whether to cache the results
     [val] cache: bool, true,
 
-    /// Optional label for the chunk (metadata, not configurable in knot.toml)
-    [meta] label: String, None,
     /// Optional caption for figures (metadata, not configurable in knot.toml)
     [meta] caption: String, None,
     /// File dependencies
@@ -256,23 +316,19 @@ define_options! {
     [val] fig_height: f64, 5.0,
     /// DPI for raster graphics
     [val] dpi: u32, 300,
-    /// Format of plots (e.g., "svg", "png")
+    /// Format of plots (svg or png)
     #[serde(rename = "fig-format")]
-    [val] fig_format: String, "svg".to_string(),
-    /// Alternative text for figures (metadata, not configurable in knot.toml)
-    #[serde(rename = "fig-alt")]
-    [meta] fig_alt: String, None,
+    [val] fig_format: FigFormat, FigFormat::Svg,
 
     /// Names of objects to treat as immutable constants
     [col] constant: Vec<String>, Vec::new(),
 
     // === Presentation Options ===
 
-    /// Layout mode for chunk display
-    [val] layout: String, "horizontal".to_string(),
+    /// How to layout input and output when both are displayed (horizontal or vertical)
+    [val] layout: Layout, Layout::Horizontal,
     /// Space between input and output blocks (Typst length)
     [opt] gutter: String, None,
-
 
     /// Background color for output container (Typst color)
     #[serde(rename = "output-background")]
@@ -362,12 +418,10 @@ macro_rules! define_inline_options {
 }
 
 define_inline_options! {
-    /// Show the inline code
-    echo: bool = false,
     /// Evaluate the code
     eval: bool = true,
-    /// Show the result in the document
-    output: bool = true,
+    /// What to display (output is default for inline, both/input rarely used)
+    show: Show = Show::Output,
     /// Number of digits for numeric formatting
     digits: Option<u32> = None,
 }

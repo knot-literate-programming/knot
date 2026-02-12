@@ -1,5 +1,5 @@
 use crate::executors::ExecutionResult;
-use crate::parser::{Chunk, ResolvedChunkOptions};
+use crate::parser::{Chunk, ResolvedChunkOptions, Show};
 use std::collections::HashMap;
 
 /// Formats a HashMap of codly options into a Typst #codly() function call.
@@ -81,7 +81,7 @@ impl Backend for TypstBackend {
             }
         }
 
-        args.push(format!("echo: {}", resolved_options.echo));
+        // echo is now handled by the show option in generate input/output logic below
 
         // Include errors as a special argument to code-chunk (if any)
         if !chunk.errors.is_empty() {
@@ -94,7 +94,15 @@ impl Backend for TypstBackend {
             args.push(format!("errors: ({})", error_list));
         }
 
-        if resolved_options.echo {
+        use crate::parser::Show;
+
+        // Generate input based on show option
+        let should_show_input = matches!(
+            resolved_options.show,
+            Show::Both | Show::Input
+        );
+
+        if should_show_input {
             // Use #local() for chunk-specific codly options (local scope)
             let input_str = if !chunk.codly_options.is_empty() {
                 let local_call = format_local_call(&chunk.codly_options);
@@ -112,7 +120,13 @@ impl Backend for TypstBackend {
             args.push("input: none".to_string());
         }
 
-        if resolved_options.output {
+        // Generate output based on show option
+        let should_show_output = matches!(
+            resolved_options.show,
+            Show::Both | Show::Output
+        );
+
+        if should_show_output {
             let output_str = match result {
                 ExecutionResult::Text(text) if !text.trim().is_empty() => {
                     format!("[```\n{}```]", text.trim())
@@ -155,7 +169,12 @@ impl Backend for TypstBackend {
         }
 
         // Add presentation options
-        args.push(format!("layout: \"{}\"", resolved_options.layout));
+        use crate::parser::Layout;
+        let layout_str = match resolved_options.layout {
+            Layout::Horizontal => "horizontal",
+            Layout::Vertical => "vertical",
+        };
+        args.push(format!("layout: \"{}\"", layout_str));
 
         if let Some(gutter) = &resolved_options.gutter {
             args.push(format!("gutter: {}", gutter));
@@ -264,17 +283,19 @@ mod tests {
             name,
             options: ChunkOptions {
                 eval: Some(true),
-                echo: Some(echo),
-                output: Some(output),
+                show: Some(match (echo, output) {
+                    (true, true) => Show::Both,
+                    (true, false) => Show::Input,
+                    (false, true) => Show::Output,
+                    (false, false) => Show::Output, // fallback to output
+                }),
                 cache: Some(true),
                 caption,
                 depends: vec![],
-                label: None,
                 fig_width: None,
                 fig_height: None,
                 dpi: None,
                 fig_format: None,
-                fig_alt: None,
                 constant: vec![],
                 // Presentation options (use defaults for tests)
                 layout: None,

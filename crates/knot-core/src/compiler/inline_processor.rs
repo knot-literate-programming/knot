@@ -56,11 +56,10 @@ pub fn process_inline_expr(
             inline_expr.language, inline_expr.code
         ))?;
 
-    // If output=false, we discard the result for the document
-    let final_result = if resolved_options.output {
-        result
-    } else {
-        String::new()
+    // Determine what to display based on show option
+    let final_result = match resolved_options.show {
+        crate::parser::Show::Output | crate::parser::Show::Both => result,
+        crate::parser::Show::Input => String::new(), // Input not shown for inline (just evaluates)
     };
 
     // Cache the result (either the actual result or empty string)
@@ -160,7 +159,7 @@ mod tests {
         let inline_output_false = create_inline_expr(
             "x <- 1",
             crate::parser::InlineOptions {
-                output: Some(false),
+                show: Some(crate::parser::Show::Input),
                 ..Default::default()
             },
         );
@@ -235,7 +234,7 @@ mod tests {
             crate::parser::InlineOptions {
                 eval: Some(false),
                 echo: Some(true),
-                output: Some(false),
+                show: Some(crate::parser::Show::Input),
                 digits: Some(Some(3)),
             },
         );

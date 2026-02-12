@@ -23,7 +23,7 @@
 //! errors and includes them in the AST nodes, allowing the compilation to continue
 //! while reporting issues to the user.
 
-use super::ast::{Chunk, ChunkError, Document, InlineExpr, InlineOptions, Position, Range};
+use super::ast::{Chunk, ChunkError, Document, InlineExpr, InlineOptions, Position, Range, Show};
 use super::options::parse_options;
 use winnow::ModalResult;
 use winnow::Parser;
@@ -324,9 +324,21 @@ fn parse_inline_options(options_str: &str) -> (InlineOptions, Vec<ChunkError>) {
     if let Ok(pairs) = parse_kv_pairs.parse_next(&mut input) {
         for (key, value) in pairs {
             match key {
-                "echo" => options.echo = Some(value == "true"),
                 "eval" => options.eval = Some(value == "true"),
-                "output" => options.output = Some(value == "true"),
+                "show" => {
+                    options.show = match value {
+                        "output" => Some(Show::Output),
+                        "input" => Some(Show::Input),
+                        "both" => Some(Show::Both),
+                        _ => {
+                            errors.push(ChunkError::new(
+                                format!("Invalid show value '{}'. Expected: output, input, or both", value),
+                                None,
+                            ));
+                            None
+                        }
+                    }
+                }
                 "digits" => match value.parse::<u32>() {
                     Ok(n) => options.digits = Some(Some(n)),
                     Err(e) => errors.push(ChunkError::new(format!("Option 'digits': {}", e), None)),

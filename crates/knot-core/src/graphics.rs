@@ -16,7 +16,7 @@ impl Default for GraphicsDefaults {
             fig_width: defaults.fig_width,
             fig_height: defaults.fig_height,
             dpi: defaults.dpi,
-            format: defaults.fig_format,
+            format: defaults.fig_format.as_str().to_string(),
         }
     }
 }
@@ -42,7 +42,7 @@ pub fn resolve_graphics_options(
         dpi: chunk_opts.dpi.unwrap_or(defaults.dpi),
         format: chunk_opts
             .fig_format
-            .clone()
+            .map(|f| f.as_str().to_string())
             .unwrap_or_else(|| defaults.format.clone()),
     }
 }

@@ -85,7 +85,7 @@ pub fn process_chunk(
             width: resolved_options.fig_width,
             height: resolved_options.fig_height,
             dpi: resolved_options.dpi,
-            format: resolved_options.fig_format.clone(),
+            format: resolved_options.fig_format.as_str().to_string(),
         };
 
         let exec = executor_manager.get_executor(&chunk.language)?;
@@ -168,17 +168,14 @@ mod tests {
             name,
             options: ChunkOptions {
                 eval: Some(eval),
-                echo: Some(true),
-                output: Some(true),
+                show: Some(crate::parser::Show::Both),
                 cache: Some(cache),
                 caption: None,
                 depends: vec![],
-                label: None,
                 fig_width: None,
                 fig_height: None,
                 dpi: None,
                 fig_format: None,
-                fig_alt: None,
                 constant: vec![],
                 // Presentation options (use defaults for tests)
                 layout: None,
@@ -506,9 +503,8 @@ mod tests {
         // Create config with language-specific defaults for R
         let config = Config {
             r_chunks: Some(ChunkDefaults {
-                echo: Some(false),
+                show: Some(crate::parser::Show::Output),
                 eval: Some(true),
-                output: Some(true),
                 cache: Some(true),
                 fig_width: Some(10.0),
                 fig_height: Some(8.0),
@@ -520,8 +516,8 @@ mod tests {
         let (output, _hash) =
             process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &config).unwrap();
 
-        // Verify that language-specific defaults were applied
-        assert!(output.contains("echo: false"));
+        // Verify that language-specific defaults were applied (show: output means input: none)
+        assert!(output.contains("input: none"));
     }
 
     #[test]
@@ -538,11 +534,11 @@ mod tests {
         // Create config with both global and language-specific defaults
         let config = Config {
             defaults: ChunkDefaults {
-                echo: Some(false), // Global default
+                show: Some(crate::parser::Show::Output), // Global default
                 ..Default::default()
             },
             python_chunks: Some(ChunkDefaults {
-                echo: Some(false), // Language-specific default
+                show: Some(crate::parser::Show::Output), // Language-specific default
                 fig_width: Some(6.0),
                 ..Default::default()
             }),
@@ -592,7 +588,7 @@ mod tests {
         // Create config with only global defaults (no python-chunks defined)
         let config = Config {
             defaults: ChunkDefaults {
-                echo: Some(false),
+                show: Some(crate::parser::Show::Output),
                 eval: Some(true),
                 ..Default::default()
             },
