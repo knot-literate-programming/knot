@@ -51,6 +51,14 @@ pub struct ChunkDefaults {
     // Presentation options
     pub layout: Option<crate::parser::Layout>,
     pub gutter: Option<String>,
+    #[serde(rename = "code-background")]
+    pub code_background: Option<String>,
+    #[serde(rename = "code-stroke")]
+    pub code_stroke: Option<String>,
+    #[serde(rename = "code-radius")]
+    pub code_radius: Option<String>,
+    #[serde(rename = "code-inset")]
+    pub code_inset: Option<String>,
     #[serde(rename = "output-background")]
     pub output_background: Option<String>,
     #[serde(rename = "output-stroke")]

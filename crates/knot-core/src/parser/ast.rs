@@ -315,6 +315,19 @@ define_options! {
     /// Space between input and output blocks (Typst length)
     [opt] gutter: String, None,
 
+    /// Background color for code/input container (Typst color)
+    #[serde(rename = "code-background")]
+    [opt] code_background: String, None,
+    /// Border stroke for code/input container (Typst stroke)
+    #[serde(rename = "code-stroke")]
+    [opt] code_stroke: String, None,
+    /// Corner radius for code/input container (Typst length)
+    #[serde(rename = "code-radius")]
+    [opt] code_radius: String, None,
+    /// Internal padding for code/input container (Typst length)
+    #[serde(rename = "code-inset")]
+    [opt] code_inset: String, None,
+
     /// Background color for output container (Typst color)
     #[serde(rename = "output-background")]
     [opt] output_background: String, None,

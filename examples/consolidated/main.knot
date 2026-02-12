@@ -9,10 +9,11 @@
   languages: (
     r: (name: "R", icon: "", color: rgb("#CE412B")),
     python: (name: "Python", icon: "", color: rgb("#3572A5")),
+    output: (name: "#>", icon: "", color: rgb("#9999"))
   ),
 )
 
-// Figure numbering
+// Figure numbering‡
 #set figure(numbering: "1.")
 
 // Global title (without section marker)

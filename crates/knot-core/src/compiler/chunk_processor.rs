@@ -180,6 +180,10 @@ mod tests {
                 // Presentation options (use defaults for tests)
                 layout: None,
                 gutter: None,
+                code_background: None,
+                code_stroke: None,
+                code_radius: None,
+                code_inset: None,
                 output_background: None,
                 output_stroke: None,
                 output_radius: None,

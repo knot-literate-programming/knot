@@ -125,7 +125,7 @@ impl Backend for TypstBackend {
         if should_show_output {
             let output_str = match result {
                 ExecutionResult::Text(text) if !text.trim().is_empty() => {
-                    format!("[```\n{}```]", text.trim())
+                    format!("[```output\n{}```]", text.trim())
                 }
                 ExecutionResult::Plot(path) => {
                     let abs_plot = path.canonicalize().unwrap_or_else(|_| path.clone());
@@ -141,7 +141,7 @@ impl Backend for TypstBackend {
                 ExecutionResult::TextAndPlot { text, plot } => {
                     let abs_plot = plot.canonicalize().unwrap_or_else(|_| plot.clone());
                     format!(
-                        "[#image(\"{}\")\n```\n{}```]",
+                        "[#image(\"{}\")\n```output\n{}```]",
                         abs_plot.to_string_lossy(),
                         text.trim()
                     )
@@ -176,6 +176,19 @@ impl Backend for TypstBackend {
 
         if let Some(gutter) = &resolved_options.gutter {
             args.push(format!("gutter: {}", gutter));
+        }
+
+        if let Some(code_bg) = &resolved_options.code_background {
+            args.push(format!("code-background: {}", code_bg));
+        }
+        if let Some(code_stroke) = &resolved_options.code_stroke {
+            args.push(format!("code-stroke: {}", code_stroke));
+        }
+        if let Some(code_radius) = &resolved_options.code_radius {
+            args.push(format!("code-radius: {}", code_radius));
+        }
+        if let Some(code_inset) = &resolved_options.code_inset {
+            args.push(format!("code-inset: {}", code_inset));
         }
 
         if let Some(output_bg) = &resolved_options.output_background {
@@ -298,6 +311,10 @@ mod tests {
                 // Presentation options (use defaults for tests)
                 layout: None,
                 gutter: None,
+                code_background: None,
+                code_stroke: None,
+                code_radius: None,
+                code_inset: None,
                 output_background: None,
                 output_stroke: None,
                 output_radius: None,
@@ -349,7 +366,7 @@ mod tests {
 
         assert!(output.contains("lang: \"r\""));
         assert!(output.contains("input: [```r\nx <- 1:10\nmean(x)```]"));
-        assert!(output.contains("output: [```\n[1] 5.5```]"));
+        assert!(output.contains("output: [```output\n[1] 5.5```]"));
         assert!(output.starts_with("#code-chunk("));
     }
 
@@ -363,7 +380,7 @@ mod tests {
         let output = backend.format_chunk(&chunk, &resolved, &result);
 
         assert!(output.contains("input: none"));
-        assert!(output.contains("output: [```\n[1] 5.5```]"));
+        assert!(output.contains("output: [```output\n[1] 5.5```]"));
     }
 
     #[test]

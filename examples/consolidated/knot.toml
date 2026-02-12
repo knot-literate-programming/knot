@@ -31,22 +31,19 @@ dpi = 300            # Resolution for raster graphics
 fig-format = "svg"   # Output format: "svg" or "png"
 
 # Presentation options
-layout = "horizontal"              # Layout when show=both: "horizontal" or "vertical"
-# gutter = "1em"                   # Space between input and output
-#output-background = "[]"           # Output block background color (Typst color)
-#output-stroke = "[]"     # Output block border (Typst stroke)
-# output-radius = "4pt"            # Output block corner radius (Typst length)
-# output-inset = "0.5em"           # Output block padding (Typst length)
-# width-ratio = "1:1"              # Width ratio for horizontal layout
-# align = "left"                   # Content alignment within containers
+layout = "horizontal"              # Layout when show=both: "horizontal" or
+codly-lang-radius = "40pt"
 
 # Language-specific chunk defaults (optional)
 # These override global [defaults] for specific languages
 [r-chunks]
-codly-stroke = '1pt + rgb("#CE412B")'
-codly-lang-radius = "40pt"
 codly-lang-outset = '(x: 0pt, y: 0pt)'
-output-stroke = '1pt + rgb("#CE412B")'
+code-stroke = '1pt + rgb("#CE412B")'
+code-radius = '4pt'
+code-inset = '0.5em'
+output-stroke = '1pt + rgb("#999999")'
+output-inset = '0.5em'
+output-radius = '4pt'
 output-background = 'rgb("#ffffff")'
 
 [python-chunks]
