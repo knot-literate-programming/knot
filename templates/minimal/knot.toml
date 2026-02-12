@@ -1,27 +1,65 @@
 # Knot Project Configuration
+#
+# This file defines the structure and compilation settings for your Knot document.
+# Learn more: https://github.com/knot-literate-programming/knot
+#
+# Note on styling options:
+# - code-* and output-* options use Typst block() for external styling (borders, padding, background)
+# - codly-* options configure codly features (line numbers, syntax highlighting, zebra stripes, etc.)
+# - Both can be used together: code-stroke adds an outer border, codly-stroke adds an inner border
+#   Use with care to avoid visual clutter!
 
 [document]
+# Main entry point (required)
 main = "main.knot"
+
+# Additional files to include in order (optional)
+# These will be injected at the /* KNOT-INJECT-CHAPTERS */ placeholder
 # includes = ["chapter1.knot", "chapter2.knot"]
 
 [helpers]
-# Typst helper functions (for rendering R/Python output)
+# Typst helper functions (required)
+# This file contains utility functions for rendering code chunks
 typst = "lib/knot.typ"
 
-# ============================================
-# Default values for chunk options
-# ============================================
-#
-# These defaults apply to all chunks unless overridden in
-# individual chunk headers using YAML syntax:
-#
-#   ```{r}
-#   #| echo: false
-#   #| fig-width: 10
-#   ...
-#   ```
-#
-# Uncomment and modify the options below to change defaults.
+# Global chunk defaults (all options are optional)
+# These can be overridden in individual chunks with #| option: value
+[chunk-defaults]
+# Execution options
+eval = true          # Execute code chunks
+show = "both"        # What to show: "both", "input", or "output"
+cache = true         # Enable caching
 
-/* KNOT-INJECT-DEFAULTS */
+# Graphics options
+fig-width = 7.0      # Figure width in inches
+fig-height = 5.0     # Figure height in inches
+dpi = 300            # Resolution for raster graphics
+fig-format = "svg"   # Output format: "svg" or "png"
 
+# Presentation options
+layout = "horizontal"              # Layout when show=both: "horizontal" or "vertical"
+#gutter = "1em"                   # Space between input and output
+
+# Code/input styling (uses Typst block() - independent from codly)
+# code-background = "rgb(250, 250, 250)"  # Code block background color (Typst color)
+# code-stroke = "1pt + gray"       # Code block border (Typst stroke)
+# code-radius = "4pt"              # Code block corner radius (Typst length)
+# code-inset = "8pt"               # Code block padding (Typst length)
+
+# Output styling (uses Typst block())
+# output-background = "rgb(244, 244, 244)"  # Output block background color (Typst color)
+# output-stroke = "1pt + gray"     # Output block border (Typst stroke)
+# output-radius = "4pt"            # Output block corner radius (Typst length)
+# output-inset = "8pt"             # Output block padding (Typst length)
+
+# Layout options
+# width-ratio = "1:1"              # Width ratio for horizontal layout
+# align = "left"                   # Content alignment within containers
+
+# Language-specific chunk defaults (optional)
+# These override global [chunk-defaults] for specific languages
+#[r-chunks]
+#code-stroke = '1pt + rgb("#CE412B")'
+
+#[python-chunks]
+#code-stroke = '1pt + rgb("#3572A5")'

@@ -7,14 +7,12 @@
 #import "@preview/codly:1.3.0": *
 #show: codly-init
 
-#import "@preview/codly-languages:0.1.10": *
-#codly(languages: codly-languages)
-
 // Language-specific colors
 #codly(
   languages: (
     r: (name: "R", icon: "", color: rgb("#CE412B")),
     python: (name: "Python", icon: "", color: rgb("#3572A5")),
+    output: (name: "#>", icon: "", color: rgb("#9999"))
   ),
 )
 
@@ -23,7 +21,7 @@
 // ============================================
 
 // Activate figure numbering
-#set figure(numbering: "1.")
+// #set figure(numbering: "1.")
 
 // ============================================
 // Optional: Import a Typst template
@@ -41,19 +39,3 @@
 // ============================================
 
 /* KNOT-INJECT-CHAPTERS */
-
-= My Document
-
-This is a Knot document with embedded R/Python code.
-
-== Inline Expression
-
-You can embed code inline: `{r} 1 + 1`.
-
-== Code Chunk
-
-```{r}
-# This is R code
-x <- 1:10
-summary(x)
-```
