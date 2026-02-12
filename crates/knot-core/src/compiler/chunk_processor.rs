@@ -481,8 +481,7 @@ mod tests {
             name: None,
             options: ChunkOptions {
                 eval: None,      // Will use language default
-                echo: None,      // Will use language default
-                output: None,    // Will use language default
+                show: None,      // Will use language default
                 cache: None,     // Will use language default
                 fig_width: None, // Will use language default
                 ..Default::default()
@@ -526,7 +525,7 @@ mod tests {
 
         // Create a chunk with some explicit options
         let mut chunk = create_test_chunk("python", "x = 1", None, false, false);
-        chunk.options.echo = Some(true); // Override with chunk-specific option
+        chunk.options.show = Some(crate::parser::Show::Both); // Override with chunk-specific option
 
         let (_temp_dir_cache, mut cache) = setup_test_cache();
         let (_temp_dir_mgr, mut manager) = setup_test_manager();
@@ -548,8 +547,8 @@ mod tests {
         let (output, _hash) =
             process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &config).unwrap();
 
-        // Chunk-specific option should override everything
-        assert!(output.contains("echo: true"));
+        // Chunk-specific option should override everything (show: both means input is shown)
+        assert!(output.contains("input: [```python"));
     }
 
     #[test]
@@ -569,7 +568,7 @@ mod tests {
             name: None,
             options: ChunkOptions {
                 eval: None, // Will use global default
-                echo: None, // Will use global default
+                show: None, // Will use global default
                 ..Default::default()
             },
             codly_options: std::collections::HashMap::new(),
@@ -599,7 +598,7 @@ mod tests {
         let (output, _hash) =
             process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &config).unwrap();
 
-        // Should use global defaults since no language-specific defaults exist for Python
-        assert!(output.contains("echo: false"));
+        // Should use global defaults (show: output means input is not shown)
+        assert!(output.contains("input: none"));
     }
 }

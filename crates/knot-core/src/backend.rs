@@ -1,11 +1,13 @@
 use crate::executors::ExecutionResult;
-use crate::parser::{Chunk, ResolvedChunkOptions, Show};
+use crate::parser::{Chunk, Layout, ResolvedChunkOptions, Show};
 use std::collections::HashMap;
 
 /// Formats a HashMap of codly options into a Typst #codly() function call.
 ///
 /// # Example
 /// ```
+/// use std::collections::HashMap;
+/// use knot_core::backend::format_codly_call;
 /// let mut options = HashMap::new();
 /// options.insert("lang-radius".to_string(), "10pt".to_string());
 /// let result = format_codly_call(&options);
@@ -26,6 +28,8 @@ pub fn format_codly_call(options: &HashMap<String, String>) -> String {
 ///
 /// # Example
 /// ```
+/// use std::collections::HashMap;
+/// use knot_core::backend::format_local_call;
 /// let mut options = HashMap::new();
 /// options.insert("lang-radius".to_string(), "10pt".to_string());
 /// let result = format_local_call(&options);
@@ -95,10 +99,7 @@ impl Backend for TypstBackend {
         }
 
         // Generate input based on show option
-        let should_show_input = matches!(
-            resolved_options.show,
-            Show::Both | Show::Input
-        );
+        let should_show_input = matches!(resolved_options.show, Show::Both | Show::Input);
 
         if should_show_input {
             // Use #local() for chunk-specific codly options (local scope)
@@ -119,10 +120,7 @@ impl Backend for TypstBackend {
         }
 
         // Generate output based on show option
-        let should_show_output = matches!(
-            resolved_options.show,
-            Show::Both | Show::Output
-        );
+        let should_show_output = matches!(resolved_options.show, Show::Both | Show::Output);
 
         if should_show_output {
             let output_str = match result {
@@ -168,7 +166,6 @@ impl Backend for TypstBackend {
 
         // Add presentation options
         // Only add layout when showing both input and output
-        use crate::parser::{Layout, Show};
         if matches!(resolved_options.show, Show::Both) {
             let layout_str = match resolved_options.layout {
                 Layout::Horizontal => "horizontal",
@@ -351,7 +348,6 @@ mod tests {
         let output = backend.format_chunk(&chunk, &resolved, &result);
 
         assert!(output.contains("lang: \"r\""));
-        assert!(output.contains("echo: true"));
         assert!(output.contains("input: [```r\nx <- 1:10\nmean(x)```]"));
         assert!(output.contains("output: [```\n[1] 5.5```]"));
         assert!(output.starts_with("#code-chunk("));
@@ -366,7 +362,6 @@ mod tests {
 
         let output = backend.format_chunk(&chunk, &resolved, &result);
 
-        assert!(output.contains("echo: false"));
         assert!(output.contains("input: none"));
         assert!(output.contains("output: [```\n[1] 5.5```]"));
     }

@@ -70,7 +70,7 @@ mod tests {
             fig_width: Some(10.0),
             fig_height: Some(8.0),
             dpi: Some(600),
-            fig_format: Some("png".to_string()),
+            fig_format: Some(crate::parser::FigFormat::Png),
             ..Default::default()
         };
 

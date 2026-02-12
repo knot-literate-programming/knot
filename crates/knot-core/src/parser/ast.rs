@@ -8,10 +8,11 @@ use std::path::PathBuf;
 // ============================================================================
 
 /// What to display in the output
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Show {
     /// Display both input code and output
+    #[default]
     Both,
     /// Display only input code
     Input,
@@ -19,42 +20,26 @@ pub enum Show {
     Output,
 }
 
-impl Default for Show {
-    fn default() -> Self {
-        Show::Both
-    }
-}
-
 /// How to layout input and output when both are displayed
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Layout {
     /// Side-by-side layout
+    #[default]
     Horizontal,
     /// Stacked layout
     Vertical,
 }
 
-impl Default for Layout {
-    fn default() -> Self {
-        Layout::Horizontal
-    }
-}
-
 /// Format for generated figures
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum FigFormat {
     /// SVG vector format
+    #[default]
     Svg,
     /// PNG raster format
     Png,
-}
-
-impl Default for FigFormat {
-    fn default() -> Self {
-        FigFormat::Svg
-    }
 }
 
 impl FigFormat {

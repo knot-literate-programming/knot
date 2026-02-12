@@ -44,8 +44,8 @@ layout = "horizontal"              # Layout when show=both: "horizontal" or "ver
 # These override global [defaults] for specific languages
 [r-chunks]
 codly-stroke = '1pt + rgb("#CE412B")'
-codly-lang-radius = "10pt"
-codly-lang-outset = '(x: -5pt, y: 0pt)'
+codly-lang-radius = "40pt"
+codly-lang-outset = '(x: 0pt, y: 0pt)'
 output-stroke = '1pt + rgb("#CE412B")'
 output-background = 'rgb("#ffffff")'
 

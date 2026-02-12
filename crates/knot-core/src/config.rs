@@ -204,7 +204,7 @@ impl Config {
     /// # Example
     /// ```toml
     /// [r-chunks]
-    /// echo = false
+    /// show = "output"
     /// fig-width = 8.0
     /// ```
     pub fn get_language_defaults(&self, lang: &str) -> Option<&ChunkDefaults> {
@@ -254,7 +254,7 @@ mod tests {
 main = "main.knot"
 
 [defaults]
-echo = false
+show = "output"
 eval = true
 cache = true
 fig-width = 8.0
@@ -266,14 +266,20 @@ gutter = "2em"
 "##;
 
         let config: Config = toml::from_str(toml).unwrap();
-        assert_eq!(config.defaults.echo, Some(false));
+        assert_eq!(config.defaults.show, Some(crate::parser::Show::Output));
         assert_eq!(config.defaults.eval, Some(true));
         assert_eq!(config.defaults.cache, Some(true));
         assert_eq!(config.defaults.fig_width, Some(8.0));
         assert_eq!(config.defaults.fig_height, Some(6.0));
         assert_eq!(config.defaults.dpi, Some(600));
-        assert_eq!(config.defaults.fig_format, Some("png".to_string()));
-        assert_eq!(config.defaults.layout, Some("vertical".to_string()));
+        assert_eq!(
+            config.defaults.fig_format,
+            Some(crate::parser::FigFormat::Png)
+        );
+        assert_eq!(
+            config.defaults.layout,
+            Some(crate::parser::Layout::Vertical)
+        );
         assert_eq!(config.defaults.gutter, Some("2em".to_string()));
     }
 
@@ -281,12 +287,12 @@ gutter = "2em"
     fn test_defaults_partial() {
         let toml = r#"
 [defaults]
-echo = false
+show = "output"
 fig-width = 10.0
 "#;
 
         let config: Config = toml::from_str(toml).unwrap();
-        assert_eq!(config.defaults.echo, Some(false));
+        assert_eq!(config.defaults.show, Some(crate::parser::Show::Output));
         assert_eq!(config.defaults.fig_width, Some(10.0));
         assert!(config.defaults.eval.is_none());
         assert!(config.defaults.cache.is_none());
@@ -299,16 +305,16 @@ fig-width = 10.0
 main = "main.knot"
 
 [defaults]
-echo = true
+show = "both"
 fig-width = 7.0
 
 [r-chunks]
-echo = false
+show = "output"
 fig-width = 8.0
 fig-height = 6.0
 
 [python-chunks]
-echo = true
+show = "both"
 fig-width = 6.0
 dpi = 300
 "##;
@@ -319,7 +325,7 @@ dpi = 300
         let r_defaults = config.get_language_defaults("r");
         assert!(r_defaults.is_some());
         let r_defaults = r_defaults.unwrap();
-        assert_eq!(r_defaults.echo, Some(false));
+        assert_eq!(r_defaults.show, Some(crate::parser::Show::Output));
         assert_eq!(r_defaults.fig_width, Some(8.0));
         assert_eq!(r_defaults.fig_height, Some(6.0));
 
@@ -327,7 +333,7 @@ dpi = 300
         let python_defaults = config.get_language_defaults("python");
         assert!(python_defaults.is_some());
         let python_defaults = python_defaults.unwrap();
-        assert_eq!(python_defaults.echo, Some(true));
+        assert_eq!(python_defaults.show, Some(crate::parser::Show::Both));
         assert_eq!(python_defaults.fig_width, Some(6.0));
         assert_eq!(python_defaults.dpi, Some(300));
 
@@ -352,13 +358,13 @@ dpi = 300
 main = "main.knot"
 
 [r-chunks]
-echo = false
+show = "output"
 codly-stroke = '1pt + rgb("#CE412B")'
 codly-lang-radius = "10pt"
 output-stroke = '1pt + rgb("#CE412B")'
 
 [python-chunks]
-echo = true
+show = "both"
 codly-zebra-fill = 'rgb("#f0f0f0")'
 fig-width = 6.0
 "##;
@@ -376,7 +382,7 @@ fig-width = 6.0
 
         // Test R-chunks codly options
         let r_defaults = config.get_language_defaults("r").unwrap();
-        assert_eq!(r_defaults.echo, Some(false));
+        assert_eq!(r_defaults.show, Some(crate::parser::Show::Output));
         assert_eq!(
             r_defaults.codly_options.get("stroke"),
             Some(&"1pt + rgb(\"#CE412B\")".to_string())
@@ -392,7 +398,7 @@ fig-width = 6.0
 
         // Test Python-chunks codly options
         let python_defaults = config.get_language_defaults("python").unwrap();
-        assert_eq!(python_defaults.echo, Some(true));
+        assert_eq!(python_defaults.show, Some(crate::parser::Show::Both));
         assert_eq!(python_defaults.fig_width, Some(6.0));
         assert_eq!(
             python_defaults.codly_options.get("zebra-fill"),

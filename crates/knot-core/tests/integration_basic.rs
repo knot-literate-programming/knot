@@ -27,8 +27,7 @@ This is a basic test.
 
 ```{r test}
 #| eval: true
-#| echo: true
-#| output: true
+#| show: both
 x <- 1 + 1
 print(x)
 ```

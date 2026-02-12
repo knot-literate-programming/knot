@@ -332,7 +332,10 @@ fn parse_inline_options(options_str: &str) -> (InlineOptions, Vec<ChunkError>) {
                         "both" => Some(Show::Both),
                         _ => {
                             errors.push(ChunkError::new(
-                                format!("Invalid show value '{}'. Expected: output, input, or both", value),
+                                format!(
+                                    "Invalid show value '{}'. Expected: output, input, or both",
+                                    value
+                                ),
                                 None,
                             ));
                             None
@@ -394,7 +397,7 @@ mod tests {
 
 ```{r}
 #| eval: true
-#| echo: false
+#| show: output
 1 + 1
 ```
         "###;
@@ -404,8 +407,7 @@ mod tests {
         assert_eq!(chunk.language, "r");
         assert_eq!(chunk.code.trim(), "1 + 1");
         assert_eq!(chunk.options.eval, Some(true));
-        assert_eq!(chunk.options.echo, Some(false));
-        assert_eq!(chunk.options.output, None); // not specified, will use default
+        assert_eq!(chunk.options.show, Some(Show::Output));
     }
 
     #[test]
@@ -470,8 +472,11 @@ ggplot(iris, aes(x, y)) + geom_point()
         assert_eq!(chunk.options.fig_width, Some(10.0));
         assert_eq!(chunk.options.fig_height, Some(8.0));
         assert_eq!(chunk.options.dpi, Some(600));
-        assert_eq!(chunk.options.fig_format, Some("png".to_string()));
-        assert_eq!(chunk.options.fig_alt, Some("A scatter plot".to_string()));
+        assert_eq!(
+            chunk.options.fig_format,
+            Some(crate::parser::FigFormat::Png)
+        );
+        // fig_alt was removed (unused option)
     }
 
     #[test]
@@ -537,7 +542,7 @@ More text below."###;
 
 ```{r}
 #| eval: true
-#| echo: false
+#| show: output
 1 + 1
 ```
         "###;
@@ -547,7 +552,7 @@ More text below."###;
         assert_eq!(chunk.language, "r");
         assert!(chunk.code.contains("1 + 1"));
         assert_eq!(chunk.options.eval, Some(true));
-        assert_eq!(chunk.options.echo, Some(false));
+        assert_eq!(chunk.options.show, Some(Show::Output));
     }
 
     #[test]
@@ -576,33 +581,33 @@ More text below."###;
         let inline = &doc.inline_exprs[0];
         let resolved = inline.options.resolve();
         assert_eq!(inline.code, "mean(1:10)");
-        assert!(!resolved.echo); // default
+        assert_eq!(resolved.show, crate::parser::Show::Output); // default for inline
         assert!(resolved.eval); // default
         assert_eq!(resolved.digits, None); // default
     }
 
     #[test]
     fn test_parse_inline_single_option() {
-        let content = "Value: `{r echo=true} x` here";
+        let content = "Value: `{r show=both} x` here";
         let doc = Document::parse(content.to_string()).unwrap();
         assert_eq!(doc.inline_exprs.len(), 1);
         let inline = &doc.inline_exprs[0];
         let resolved = inline.options.resolve();
         assert_eq!(inline.code, "x");
-        assert!(resolved.echo);
+        assert_eq!(resolved.show, Show::Both);
         assert!(resolved.eval); // default
         assert_eq!(resolved.digits, None); // default
     }
 
     #[test]
     fn test_parse_inline_multiple_options() {
-        let content = "`{r echo=true eval=false digits=3} pi` is pi";
+        let content = "`{r show=both eval=false digits=3} pi` is pi";
         let doc = Document::parse(content.to_string()).unwrap();
         assert_eq!(doc.inline_exprs.len(), 1);
         let inline = &doc.inline_exprs[0];
         let resolved = inline.options.resolve();
         assert_eq!(inline.code, "pi");
-        assert!(resolved.echo);
+        assert_eq!(resolved.show, Show::Both);
         assert!(!resolved.eval);
         assert_eq!(resolved.digits, Some(3));
     }
@@ -610,38 +615,38 @@ More text below."###;
     #[test]
     fn test_parse_inline_options_with_spaces() {
         // Options can have spaces around them
-        let content = "`{r  echo=false   eval=true  } sqrt(2)` is root 2";
+        let content = "`{r  show=input   eval=true  } sqrt(2)` is root 2";
         let doc = Document::parse(content.to_string()).unwrap();
         assert_eq!(doc.inline_exprs.len(), 1);
         let inline = &doc.inline_exprs[0];
         let resolved = inline.options.resolve();
         assert_eq!(inline.code, "sqrt(2)");
-        assert!(!resolved.echo);
+        assert_eq!(resolved.show, Show::Input);
         assert!(resolved.eval);
     }
 
     #[test]
     fn test_parse_inline_options_with_spaces_around_equals() {
         // Options can have spaces around the '=' sign
-        let content = "`{r echo = false , eval  =  true} sqrt(2)` is root 2";
+        let content = "`{r show = input , eval  =  true} sqrt(2)` is root 2";
         let doc = Document::parse(content.to_string()).unwrap();
         assert_eq!(doc.inline_exprs.len(), 1);
         let inline = &doc.inline_exprs[0];
         let resolved = inline.options.resolve();
         assert_eq!(inline.code, "sqrt(2)");
-        assert!(!resolved.echo);
+        assert_eq!(resolved.show, Show::Input);
         assert!(resolved.eval);
     }
 
     #[test]
     fn test_parse_inline_unknown_options_captured() {
         // Unknown options should be captured as errors
-        let content = "`{r unknown=value echo=true} x` end";
+        let content = "`{r unknown=value show=both} x` end";
         let doc = Document::parse(content.to_string()).unwrap();
         assert_eq!(doc.inline_exprs.len(), 1);
         let inline = &doc.inline_exprs[0];
         let resolved = inline.options.resolve();
-        assert!(resolved.echo);
+        assert_eq!(resolved.show, Show::Both);
         assert!(resolved.eval); // default
         assert_eq!(inline.errors.len(), 1);
         assert!(

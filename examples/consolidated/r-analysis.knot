@@ -109,7 +109,7 @@ Finally, let's examine the relationship between temperature and rainfall:
 #| layout: horizontal
 #| gutter: 2em
 
-# Scatter plot with regression line
+# Scatter plot
 correlation_plot <- ggplot(climate_data, aes(x = temperature, y = rainfall)) +
   geom_point(aes(color = season), size = 4, alpha = 0.7) +
   geom_smooth(method = "lm", se = TRUE, color = "black", linetype = "dashed") +
@@ -132,3 +132,5 @@ typst(correlation_plot)
 ```
 
 The correlation between temperature and rainfall is `{r} cor_value <- cor(climate_data$temperature, climate_data$rainfall); round(cor_value, 3)`, indicating a negative relationship: warmer months tend to have less rainfall.
+
+#lorem(500)

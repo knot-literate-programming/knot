@@ -219,9 +219,8 @@ mod tests {
 
         assert_eq!(inline.language, "r");
         assert_eq!(inline.code, "mean(1:10)");
-        assert!(!resolved.echo);
+        assert_eq!(resolved.show, crate::parser::Show::Output); // default
         assert!(resolved.eval);
-        assert!(resolved.output);
         assert_eq!(resolved.digits, None);
         assert_eq!(inline.start, 0);
         assert_eq!(inline.end, "mean(1:10)".len());
@@ -233,7 +232,6 @@ mod tests {
             "library(dplyr)",
             crate::parser::InlineOptions {
                 eval: Some(false),
-                echo: Some(true),
                 show: Some(crate::parser::Show::Input),
                 digits: Some(Some(3)),
             },
@@ -243,8 +241,7 @@ mod tests {
         assert_eq!(inline.language, "r");
         assert_eq!(inline.code, "library(dplyr)");
         assert!(!resolved.eval);
-        assert!(resolved.echo);
-        assert!(!resolved.output);
+        assert_eq!(resolved.show, crate::parser::Show::Input);
         assert_eq!(resolved.digits, Some(3));
     }
 

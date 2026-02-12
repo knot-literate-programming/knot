@@ -55,7 +55,7 @@ pub fn get_document_symbols(text: &str) -> Option<Vec<DocumentSymbol>> {
             match show {
                 Show::Input => details.push("show: input".to_string()),
                 Show::Output => details.push("show: output".to_string()),
-                Show::Both => {}, // default, don't show
+                Show::Both => {} // default, don't show
             }
         }
         if matches!(chunk.options.cache, Some(false)) {

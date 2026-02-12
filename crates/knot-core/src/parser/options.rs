@@ -151,17 +151,15 @@ mod tests {
     fn test_parse_valid_options() {
         let options_block = r#"
 #| eval: true
-#| echo: false
+#| show: output
 #| fig-width: 7.0
-#| label: my-plot
 #| constant: [x, y]
 "#;
         let (opts, _codly, errors) = parse_options(options_block);
         assert!(errors.is_empty());
         assert_eq!(opts.eval, Some(true));
-        assert_eq!(opts.echo, Some(false));
+        assert_eq!(opts.show, Some(crate::parser::Show::Output));
         assert_eq!(opts.fig_width, Some(7.0));
-        assert_eq!(opts.label, Some("my-plot".to_string()));
         assert_eq!(opts.constant.len(), 2);
     }
 
