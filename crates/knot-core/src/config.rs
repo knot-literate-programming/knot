@@ -53,19 +53,19 @@ pub struct ChunkDefaults {
     pub gutter: Option<String>,
     #[serde(rename = "code-background")]
     pub code_background: Option<String>,
-    #[serde(rename = "code-stroke")]
+    #[serde(rename = "code-stroke", alias = "code-border")]
     pub code_stroke: Option<String>,
     #[serde(rename = "code-radius")]
     pub code_radius: Option<String>,
-    #[serde(rename = "code-inset")]
+    #[serde(rename = "code-inset", alias = "code-padding")]
     pub code_inset: Option<String>,
     #[serde(rename = "output-background")]
     pub output_background: Option<String>,
-    #[serde(rename = "output-stroke")]
+    #[serde(rename = "output-stroke", alias = "output-border")]
     pub output_stroke: Option<String>,
     #[serde(rename = "output-radius")]
     pub output_radius: Option<String>,
-    #[serde(rename = "output-inset")]
+    #[serde(rename = "output-inset", alias = "output-padding")]
     pub output_inset: Option<String>,
     #[serde(rename = "width-ratio")]
     pub width_ratio: Option<String>,
