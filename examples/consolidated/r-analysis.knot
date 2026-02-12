@@ -37,7 +37,7 @@ The dataset contains `{r} nrow(climate_data)` observations with average temperat
 Now let's visualize the temperature trends throughout the year:
 
 ```{r}
-#| show: input
+#| show: code
 #| fig-width: 8
 #| fig-height: 5
 #| layout: vertical

@@ -10,9 +10,9 @@
 // Document configuration belongs in your main.knot file.
 
 #let code-chunk(
-  input: none,
+  code: none,
   output: none,
-  layout: none, // Optional: only used when both input and output are present
+  layout: none, // Optional: only used when both code and output are present
   gutter: 0.5em,
   code-background: none,
   code-stroke: none,
@@ -31,15 +31,15 @@
   let left-ratio = if ratio-parts.len() >= 1 { float(ratio-parts.at(0)) } else { 1.0 }
   let right-ratio = if ratio-parts.len() >= 2 { float(ratio-parts.at(1)) } else { 1.0 }
 
-  // Wrap input in styled block
-  let code-block = if input != none {
+  // Wrap code in styled block
+  let code-block = if code != none {
     block(
       fill: code-background,
       stroke: code-stroke,
       radius: code-radius,
       inset: code-inset,
       width: 100%,
-    )[#input]
+    )[#code]
   } else { none }
 
   // Wrap output in styled block
@@ -54,14 +54,14 @@
   } else { none }
 
   // Layout based on what's being displayed
-  if input == none and output != none {
+  if code == none and output != none {
     // Only output: single column
     output-block
-  } else if output == none and input != none {
-    // Only input: single column
+  } else if output == none and code != none {
+    // Only code: single column
     code-block
-  } else if input != none and output != none {
-    // Both input and output: use layout
+  } else if code != none and output != none {
+    // Both code and output: use layout
     if layout == "vertical" {
       stack(
         dir: ttb,

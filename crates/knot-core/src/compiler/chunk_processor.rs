@@ -519,8 +519,8 @@ mod tests {
         let (output, _hash) =
             process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &config).unwrap();
 
-        // Verify that language-specific defaults were applied (show: output means input: none)
-        assert!(output.contains("input: none"));
+        // Verify that language-specific defaults were applied (show: output means code: none)
+        assert!(output.contains("code: none"));
     }
 
     #[test]
@@ -551,8 +551,8 @@ mod tests {
         let (output, _hash) =
             process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &config).unwrap();
 
-        // Chunk-specific option should override everything (show: both means input is shown)
-        assert!(output.contains("input: [```python"));
+        // Chunk-specific option should override everything (show: both means code is shown)
+        assert!(output.contains("code: [```python"));
     }
 
     #[test]
@@ -602,7 +602,7 @@ mod tests {
         let (output, _hash) =
             process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &config).unwrap();
 
-        // Should use global defaults (show: output means input is not shown)
-        assert!(output.contains("input: none"));
+        // Should use global defaults (show: output means code is not shown)
+        assert!(output.contains("code: none"));
     }
 }

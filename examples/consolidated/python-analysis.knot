@@ -39,7 +39,7 @@ Dataset dimensions: `{python} weather_data.shape[0]` months × `{python} weather
 Using matplotlib's object-oriented interface for better control:
 
 ```{python}
-#| show: input
+#| show: code
 #| fig-width: 8
 #| fig-height: 5
 #| layout: vertical
@@ -74,7 +74,7 @@ typst(fig)
 Creating a sophisticated multi-panel figure with subplots:
 
 ```{python}
-#| show: input
+#| show: code
 #| fig-width: 10
 #| fig-height: 6
 

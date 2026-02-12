@@ -27,7 +27,7 @@ typst = "lib/knot.typ"
 [chunk-defaults]
 # Execution options
 eval = true          # Execute code chunks
-show = "both"        # What to show: "both", "input", or "output"
+show = "both"        # "both", "code", "output", or "none"
 cache = true         # Enable caching
 
 # Graphics options
@@ -38,9 +38,9 @@ fig-format = "svg"   # Output format: "svg" or "png"
 
 # Presentation options
 layout = "horizontal"              # Layout when show=both: "horizontal" or "vertical"
-#gutter = "1em"                   # Space between input and output
+#gutter = "1em"                   # Space between code and output
 
-# Code/input styling (uses Typst block() - independent from codly)
+# Code styling (uses Typst block() - independent from codly)
 # code-background = "rgb(250, 250, 250)"  # Code block background color (Typst color)
 # code-stroke = "1pt + gray"       # Code block border (Typst stroke)
 # code-radius = "4pt"              # Code block corner radius (Typst length)

@@ -10,23 +10,23 @@ This document tracks the high-level goals and roadmap for the Knot project. Deta
 
 ## 📊 Current Status (Updated Feb 2026)
 
-**Maturity:** ~75% towards v1.0
+**Maturity:** ~80% towards v1.0
 
-**Core:** ~85% complete
+**Core:** ~90% complete
 - ✅ Parsing, execution, caching
 - ✅ Multi-language (R, Python)
-- ✅ Chunk customization with 12+ presentation options
+- ✅ Chunk customization with show: none and aliases
 - ⏳ Structured error handling for R/Python (planned)
 
-**LSP:** ~70% complete
+**LSP:** ~75% complete
 - ✅ Hover (chunks, R, Python, Typst)
 - ✅ Completion (chunk options, R, Python, Typst)
 - ✅ Diagnostics (parsing errors, structure validation)
-- ✅ Document symbols
+- ✅ Document symbols (including all show variants)
 - ⏳ Go to Definition
 - ⏳ Hybrid formatting (Air/Ruff)
 
-**CLI:** ~90% complete
+**CLI:** ~95% complete
 - ✅ Compile, watch, init
 - ✅ Dynamic knot.toml generation
 
@@ -70,9 +70,9 @@ Make Knot accessible and showcase its capabilities.
 ## 📅 Roadmap by Component
 
 ### Knot Core
-- [x] YAML-based options parsing.
-- [x] Macro-based options definition.
-- [x] **Chunk display customization**: Flexible presentation options. See [chunk-customization.md](chunk-customization.md).
+- [x] YAML-based options parsing (standardized).
+- [x] Macro-based options definition (`define_options!`).
+- [x] **Chunk display customization**: Integrated `show` option and aliases.
 - [x] Dynamic knot.toml generation with OptionMetadata.
 - [ ] Structured error handlers for R/Python executors.
 - [ ] (Future) Support for Julia executor.

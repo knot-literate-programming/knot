@@ -29,7 +29,8 @@ consolidated/
 - Various chunk options:
   - `layout: horizontal` - side-by-side code and output
   - `layout: vertical` - stacked presentation
-  - `layout: output-only` - hide code, show only results
+  - `show: code` - hide results, show only code
+  - `show: output` - hide code, show only results
   - Custom colors and borders
 
 ### 3. Python Analysis (`python-analysis.knot`)
@@ -47,13 +48,13 @@ consolidated/
 
 ### 5. Chunk Customization
 Throughout the examples, you'll see different chunk options:
-- `echo: true/false` - Show/hide code
-- `output: true/false` - Show/hide results
-- `layout` - Horizontal, vertical, input-only, output-only
+- `show: code/output/both` - Show/hide code or results
+- `eval: true/false` - Execute/skip chunk
+- `layout` - Horizontal or vertical
 - `fig-width`, `fig-height` - Figure dimensions
 - `code-background`, `output-background` - Color customization
-- `*-border-color`, `*-border-thickness` - Border styling
-- `gutter`, `padding` - Spacing adjustments
+- `code-stroke`, `output-stroke` - Border styling
+- `gutter`, `code-inset`, `output-inset` - Spacing adjustments
 
 ## How to Use
 

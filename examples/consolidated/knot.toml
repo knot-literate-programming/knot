@@ -21,7 +21,7 @@ typst = "lib/knot.typ"
 [chunk-defaults]
 # Execution options
 eval = true          # Execute code chunks
-show = "both"        # What to show: "both", "input", or "output"
+show = "both"        # What to show: "both", "code", or "output"
 cache = true         # Enable caching
 
 # Graphics options

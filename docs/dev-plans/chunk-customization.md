@@ -4,7 +4,7 @@
 
 ## 🎯 Problem Statement
 
-Currently, Knot supports chunk options that control **execution** (`eval`, `cache`, `echo`) and **metadata** (`caption`, `label`), but the **visual presentation** of chunks is hardcoded in the `#code-chunk` Typst function.
+Currently, Knot supports chunk options that control **execution** (`eval`, `cache`) and **visibility** (`show`), but the **visual presentation** of chunks is hardcoded in the `#code-chunk` Typst function.
 
 Users cannot:
 - Change the layout (horizontal grid vs vertical stack)
@@ -15,9 +15,10 @@ Users cannot:
 ## 📋 Current Architecture Gap
 
 ### What exists:
-1. **Execution options**: `eval`, `cache`, `echo`, `output`
-2. **Graphics options**: `fig-width`, `fig-height`, `dpi`, `fig-format`
-3. **Metadata options**: `label`, `caption`, `fig-alt`
+1. **Execution options**: `eval`, `cache`
+2. **Visibility options**: `show` (`code`, `output`, `both`, `none`)
+3. **Graphics options**: `fig-width`, `fig-height`, `dpi`, `fig-format`
+4. **Metadata options**: `label`, `caption`, `depends`
 
 ### What's missing:
 - **Presentation options** that control how `#code-chunk` renders
@@ -26,36 +27,40 @@ Users cannot:
 
 ## 🎨 Proposed Presentation Options
 
-### Display Layout
+### Display Mode
 ```yaml
-layout: "horizontal" | "vertical" | "output-only" | "code-only"
+show: "both" | "code" | "output" | "none"
 ```
-- `horizontal` (default): Side-by-side grid (input | output)
-- `vertical`: Stacked layout (input above output)
-- `output-only`: Hide code, show only results
-- `code-only`: Show only code, suppress output
+- `both` (default): Display both code and output
+- `code`: Display only the source code
+- `output`: Display only the execution results
+- `none`: Execute the chunk but display nothing (useful for setup/imports)
+
+### Display Layout (when show: "both")
+```yaml
+layout: "horizontal" | "vertical"
+```
+- `horizontal` (default): Side-by-side grid (code | output)
+- `vertical`: Stacked layout (code above output)
 
 ### Styling Options
 ```yaml
 code-background: color     # Background for code block
-output-background: color   # Background for output block
-border: bool               # Whether to draw borders
-border-color: color        # Color of borders
-border-radius: length      # Corner radius
-```
+code-stroke: stroke        # Border for code block (alias: code-border)
+code-inset: length         # Padding for code block (alias: code-padding)
+code-radius: length        # Corner radius for code block
 
-### Code Display
-```yaml
-show-line-numbers: bool    # Display line numbers
-line-number-start: int     # Starting line number (default: 1)
-highlight-lines: [int]     # Lines to highlight (e.g., [2, 5, 8])
+output-background: color   # Background for output block
+output-stroke: stroke      # Border for output block (alias: output-border)
+output-inset: length       # Padding for output block (alias: output-padding)
+output-radius: length      # Corner radius for output block
 ```
 
 ### Spacing & Sizing
 ```yaml
-gutter: length             # Space between input and output (horizontal layout)
-padding: length            # Internal padding for blocks
-width-ratio: (float, float) # Column width ratio for horizontal layout (e.g., (1, 1))
+gutter: length             # Space between code and output (horizontal layout)
+width-ratio: string        # Column width ratio (e.g., "1:1", "2:1")
+align: string              # Content alignment (Typst alignment)
 ```
 
 ## 📐 Order of Precedence
@@ -108,29 +113,41 @@ plot(x)
 
 **File:** `crates/knot-core/src/parser/ast.rs`
 
-Add presentation options to the `define_options!` macro:
+The `define_options!` macro system uses markers to control behavior and configurability:
+- `[val]` : Required value with default, configurable in `knot.toml`.
+- `[opt]` : Optional value without default, configurable in `knot.toml`.
+- `[meta]`: Chunk-specific metadata, NOT configurable in `knot.toml`.
+- `[col]` : Collection (Vec), NOT configurable in `knot.toml`.
+
 ```rust
 define_options! {
-    // ... existing options ...
+    /// Whether to evaluate the chunk
+    [val] eval: bool, true,
+    /// What to display in the output (both, code, output, or none)
+    [val] show: Show, Show::Both,
+    /// Whether to cache the results
+    [val] cache: bool, true,
 
-    /// Layout mode for chunk display
-    [val] layout: String, "horizontal".to_string(),
-    /// Background color for code block
+    // ... Presentation Options ...
+
+    /// How to layout code and output (horizontal or vertical)
+    [val] layout: Layout, Layout::Horizontal,
+    /// Space between code and output blocks
+    [opt] gutter: String, None,
+    /// Background color for code container
     #[serde(rename = "code-background")]
     [opt] code_background: String, None,
-    /// Background color for output block
-    #[serde(rename = "output-background")]
-    [opt] output_background: String, None,
-    /// Whether to show borders
-    [val] border: bool, false,
-    /// Border corner radius
-    #[serde(rename = "border-radius")]
-    [opt] border_radius: String, None,
-    /// Whether to show line numbers
-    #[serde(rename = "show-line-numbers")]
-    [val] show_line_numbers: bool, false,
-    /// Gutter size between input and output
-    [opt] gutter: String, None,
+    /// Border stroke for code container (alias: code-border)
+    #[serde(rename = "code-stroke", alias = "code-border")]
+    [opt] code_stroke: String, None,
+    /// Corner radius for code container
+    #[serde(rename = "code-radius")]
+    [opt] code_radius: String, None,
+    /// Internal padding for code container (alias: code-padding)
+    #[serde(rename = "code-inset", alias = "code-padding")]
+    [opt] code_inset: String, None,
+    
+    // ... Output options follow same pattern ...
 }
 ```
 
@@ -164,81 +181,57 @@ if self.code_background.is_none() { self.code_background = defaults.code_backgro
 
 **File:** `crates/knot-core/src/backend.rs`
 
-Modify `format_chunk()` to pass all presentation options to `#code-chunk`:
+The `TypstBackend` translates `ResolvedChunkOptions` into a Typst `#code-chunk()` call. It intelligently handles visibility based on the `show` option:
+
 ```rust
-let mut chunk_args = vec![
-    format!("input: {}", input_content),
-    format!("output: {}", output_content),
-];
-
-// Add presentation options
-chunk_args.push(format!("layout: \"{}\"", resolved.layout));
-if let Some(bg) = &resolved.code_background {
-    chunk_args.push(format!("code-background: rgb(\"{}\")", bg));
-}
-if let Some(bg) = &resolved.output_background {
-    chunk_args.push(format!("output-background: rgb(\"{}\")", bg));
-}
-chunk_args.push(format!("border: {}", resolved.border));
-if let Some(gutter) = &resolved.gutter {
-    chunk_args.push(format!("gutter: {}", gutter));
+// Generate code based on show option
+let should_show_code = matches!(resolved_options.show, Show::Both | Show::Code);
+if should_show_code {
+    args.push(format!("code: {}", code_str));
+} else {
+    args.push("code: none".to_string());
 }
 
-let chunk_call = format!("#code-chunk({})", chunk_args.join(", "));
+// Generate output based on show option
+let should_show_output = matches!(resolved_options.show, Show::Both | Show::Output);
+if should_show_output {
+    args.push(format!("output: {}", output_str));
+} else {
+    args.push("output: none".to_string());
+}
 ```
 
 ### Phase 4: Flexible Typst Template ✅
 
 **File:** `lib/knot.typ` (in project templates)
 
-Rewrite `#code-chunk` to handle all presentation options:
+The `#code-chunk` function in Typst uses standard blocks and can be fully customized:
+
 ```typst
 #let code-chunk(
-  input: none,
+  code: none,
   output: none,
-  layout: "horizontal",
-  code-background: rgb("#ffffff"),
-  output-background: rgb("#f4f4f4"),
-  border: false,
-  border-radius: 4pt,
-  show-line-numbers: false,
-  gutter: 1em,
-  ..rest
+  layout: none,
+  gutter: 0.5em,
+  code-background: none,
+  code-stroke: none,
+  code-inset: 0pt,
+  ..
 ) = {
-  let code-block = if input != none {
-    block(
-      fill: code-background,
-      radius: border-radius,
-      inset: 8pt,
-      width: 100%,
-      stroke: if border { 1pt + gray } else { none }
-    )[#input]
-  } else { [] }
+  // ... ratio parsing ...
 
-  let output-block = if output != none {
-    block(
-      fill: output-background,
-      radius: border-radius,
-      inset: 8pt,
-      width: 100%,
-      stroke: if border { 1pt + gray } else { none }
-    )[#output]
-  } else { [] }
+  let code-block = if code != none {
+    block(fill: code-background, stroke: code-stroke, inset: code-inset)[#code]
+  } else { none }
 
-  if layout == "vertical" {
-    stack(dir: ttb, spacing: gutter, code-block, output-block)
-  } else if layout == "output-only" {
+  // ... output block ...
+
+  if code == none and output != none {
     output-block
-  } else if layout == "code-only" {
+  } else if output == none and code != none {
     code-block
-  } else {
-    // horizontal (default)
-    grid(
-      columns: (1fr, 1fr),
-      gutter: gutter,
-      code-block,
-      output-block
-    )
+  } else if code != none and output != none {
+    // Both: use horizontal/vertical layout
   }
 }
 ```
@@ -247,45 +240,45 @@ Rewrite `#code-chunk` to handle all presentation options:
 
 ### 1. Vertical Layout for Long Code
 ```knot
-```{r, layout="vertical"}
+```{r}
+#| layout: vertical
 # Long data processing pipeline
 data <- read.csv("large_dataset.csv")
-processed <- data |>
-  filter(value > 100) |>
-  mutate(log_value = log(value)) |>
-  summarize(mean = mean(log_value))
-print(processed)
+print(data)
 ```
 ```
 
 ### 2. Output-Only for Reports
 ```knot
-```{python, layout="output-only", caption="Summary Statistics"}
+```{python}
+#| show: output
+#| caption: Summary Statistics
 import pandas as pd
-df = pd.DataFrame({"x": [1, 2, 3], "y": [4, 5, 6]})
+df = pd.DataFrame({"x": [1, 2, 3]})
 print(df.describe())
 ```
 ```
 
-### 3. Custom Styling
+### 3. Custom Styling (using aliases)
 ```knot
-```{r, code-background="#fef3cd", output-background="#d1ecf1", border=true}
-x <- runif(100)
-hist(x, main="Random Distribution")
+```{r}
+#| code-background: "#fef3cd"
+#| output-background: "#d1ecf1"
+#| code-border: 1pt + orange
+#| code-padding: 10pt
+hist(runif(100))
 ```
 ```
 
 ### 4. Project-Wide Defaults
 ```toml
 # knot.toml
-[defaults]
+[chunk-defaults]
 layout = "vertical"
-border = true
-border-radius = "6pt"
+code-radius = "6pt"
 code-background = "#f8f9fa"
 output-background = "#e9ecef"
 gutter = "1.5em"
-show-line-numbers = true
 ```
 
 ## ✅ Success Criteria
@@ -294,7 +287,8 @@ show-line-numbers = true
 - [x] Users can define project-wide defaults in `knot.toml`
 - [x] Options follow the correct precedence order
 - [x] `#code-chunk` template is flexible and customizable
-- [ ] Documentation includes examples of all presentation options (TODO: update user docs)
+- [x] `none` mode allows execution without display
+- [x] Aliases (`padding`, `border`) improve UX for CSS/Quarto users
 - [x] No breaking changes to existing `.knot` files (defaults preserve current behavior)
 
 ### Bonus Features Implemented

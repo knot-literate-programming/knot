@@ -110,7 +110,7 @@ typst = "lib/knot.typ"
 [defaults]
 # Global chunk options (all commented by default)
 # eval = true
-# echo = true
+# show = "both"
 # fig-width = 7.0
 # layout = "horizontal"
 ```
@@ -148,8 +148,7 @@ Edit `main.knot` and add some code:
 Let's analyze the famous iris dataset:
 
 ```{r}
-#| echo: true
-#| output: true
+#| show: "both"
 
 # Load data
 data(iris)
@@ -175,8 +174,7 @@ The mean sepal length is `{r} mean(iris$Sepal.Length)` cm.
 = Machine Learning with Python
 
 ```{python}
-#| echo: true
-#| output: true
+#| show: "both"
 
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -244,8 +242,7 @@ Control how chunks behave and appear:
 ```typst
 ```{r}
 #| eval: true      # Execute this chunk (default: true)
-#| echo: true      # Show source code (default: true)
-#| output: true    # Show results (default: true)
+#| show: "both"    # "both", "code", "output", or "none"
 #| cache: true     # Cache results (default: true)
 
 x <- 1:10
@@ -272,8 +269,8 @@ typst(plt.gcf())
 
 ```typst
 ```{r}
-#| layout: "vertical"          # "horizontal", "vertical", "input-only", "output-only"
-#| gutter: "1em"               # Space between input/output
+#| layout: "vertical"          # "horizontal" or "vertical"
+#| gutter: "1em"               # Space between code and output
 #| code-background: "#f5f5f5"  # Code block background color
 #| output-background: "#e8f4f8" # Output block background color
 
@@ -377,8 +374,7 @@ Set global defaults in `knot.toml` to avoid repeating chunk options:
 [defaults]
 # All chunks will inherit these unless overridden
 eval = true
-echo = false          # Hide code by default (show only in specific chunks)
-output = true
+show = "output"       # "both", "code", "output", or "none"
 cache = true
 
 # Graphics
@@ -397,7 +393,7 @@ output-background = "#e9ecef"
 Override in specific chunks:
 ```typst
 ```{r}
-#| echo: true    # Show code for THIS chunk only
+#| show: "both"    # Show code for THIS chunk only
 x <- 1:10
 ```
 ```

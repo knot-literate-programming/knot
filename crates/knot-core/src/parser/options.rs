@@ -6,8 +6,7 @@
 //! # Supported Options
 //!
 //! - `eval`: (bool) Whether to evaluate the chunk.
-//! - `echo`: (bool) Whether to include the source code in the output.
-//! - `output`: (bool) Whether to include the execution results.
+//! - `show`: (string) What to display: "code", "output", "both", or "none".
 //! - `cache`: (bool) Whether to cache the results.
 //! - `fig-width`, `fig-height`: (f64) Dimensions of generated plots.
 //! - `fig-format`: (string) Format of plots (e.g., "svg", "png").
@@ -151,16 +150,24 @@ mod tests {
     fn test_parse_valid_options() {
         let options_block = r#"
 #| eval: true
-#| show: output
+#| show: code
 #| fig-width: 7.0
 #| constant: [x, y]
 "#;
         let (opts, _codly, errors) = parse_options(options_block);
         assert!(errors.is_empty());
         assert_eq!(opts.eval, Some(true));
-        assert_eq!(opts.show, Some(crate::parser::Show::Output));
+        assert_eq!(opts.show, Some(crate::parser::Show::Code));
         assert_eq!(opts.fig_width, Some(7.0));
         assert_eq!(opts.constant.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_show_none() {
+        let options_block = "#| show: none\n";
+        let (opts, _codly, errors) = parse_options(options_block);
+        assert!(errors.is_empty());
+        assert_eq!(opts.show, Some(crate::parser::Show::None));
     }
 
     #[test]
