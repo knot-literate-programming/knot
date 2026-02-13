@@ -19,6 +19,7 @@ pub async fn handle_hover(state: &ServerState, params: HoverParams) -> Result<Op
     let doc = parse_document(&text);
     let line = pos.line as usize;
 
+    // 1. Check if we are in a regular code chunk
     let current_chunk = doc
         .chunks
         .iter()
@@ -54,33 +55,70 @@ pub async fn handle_hover(state: &ServerState, params: HoverParams) -> Result<Op
                 return Ok(get_python_help(state, uri, &token).await);
             }
         }
-    } else {
-        // Forward to tinymist
-        if let Some(typ_pos) = mapper.knot_to_typ_position(pos) {
-            let mut tinymist_guard = state.tinymist.write().await;
-            if let Some(proxy) = tinymist_guard.as_mut() {
-                let virtual_uri = crate::transform::to_virtual_uri(uri);
-                let params =
-                    serde_json::json!({ "textDocument": { "uri": virtual_uri }, "position": typ_pos });
-                if let Ok(response) = proxy.send_request("textDocument/hover", params).await {
-                    if let Some(result) = response.get("result") {
-                        if let Ok(mut hover) = serde_json::from_value::<Hover>(result.clone()) {
-                            if let Some(range) = &mut hover.range {
-                                if let (Some(s), Some(e)) = (
-                                    mapper.typ_to_knot_position(range.start),
-                                    mapper.typ_to_knot_position(range.end),
-                                ) {
-                                    *range = Range { start: s, end: e };
-                                }
+        return Ok(None);
+    }
+
+    // 2. Check if we are in an inline expression
+    let byte_offset = get_byte_offset(&text, pos);
+    let current_inline = doc
+        .inline_exprs
+        .iter()
+        .find(|i| byte_offset >= i.start && byte_offset < i.end);
+
+    if let Some(inline) = current_inline {
+        if let Some(token) = get_token_at_pos(&text, pos, &inline.language, true) {
+            if inline.language == "r" {
+                return Ok(get_r_help(state, uri, &token).await);
+            } else if inline.language == "python" {
+                return Ok(get_python_help(state, uri, &token).await);
+            }
+        }
+        return Ok(None);
+    }
+
+    // 3. Forward to tinymist for regular Typst content
+    if let Some(typ_pos) = mapper.knot_to_typ_position(pos) {
+        let mut tinymist_guard = state.tinymist.write().await;
+        if let Some(proxy) = tinymist_guard.as_mut() {
+            let virtual_uri = crate::transform::to_virtual_uri(uri);
+            let params =
+                serde_json::json!({ "textDocument": { "uri": virtual_uri }, "position": typ_pos });
+            if let Ok(response) = proxy.send_request("textDocument/hover", params).await {
+                if let Some(result) = response.get("result") {
+                    if let Ok(mut hover) = serde_json::from_value::<Hover>(result.clone()) {
+                        if let Some(range) = &mut hover.range {
+                            if let (Some(s), Some(e)) = (
+                                mapper.typ_to_knot_position(range.start),
+                                mapper.typ_to_knot_position(range.end),
+                            ) {
+                                *range = Range { start: s, end: e };
                             }
-                            return Ok(Some(hover));
                         }
+                        return Ok(Some(hover));
                     }
                 }
             }
         }
     }
+
     Ok(None)
+}
+
+fn get_byte_offset(text: &str, pos: Position) -> usize {
+    let mut offset = 0;
+    for (i, line) in text.lines().enumerate() {
+        if i == pos.line as usize {
+            // Find character offset in UTF-8 bytes
+            let char_offset: usize = line
+                .chars()
+                .take(pos.character as usize)
+                .map(|c| c.len_utf8())
+                .sum();
+            return offset + char_offset;
+        }
+        offset += line.len() + 1; // +1 for \n
+    }
+    offset
 }
 
 fn get_token_at_pos(text: &str, pos: Position, lang: &str, bidirectional: bool) -> Option<String> {

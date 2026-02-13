@@ -21,6 +21,8 @@ pub async fn handle_completion(
 
     let doc = parse_document(&text);
     let line = pos.line as usize;
+
+    // 1. Check if we are in a regular code chunk
     let current_chunk = doc
         .chunks
         .iter()
@@ -64,7 +66,29 @@ pub async fn handle_completion(
                 return Ok(get_python_completion(state, uri, &token).await);
             }
         }
-    } else if let Some(typ_pos) = mapper.knot_to_typ_position(pos) {
+        return Ok(None);
+    }
+
+    // 2. Check if we are in an inline expression
+    let byte_offset = get_byte_offset(&text, pos);
+    let current_inline = doc
+        .inline_exprs
+        .iter()
+        .find(|i| byte_offset >= i.start && byte_offset < i.end);
+
+    if let Some(inline) = current_inline {
+        if let Some(token) = get_token_at_pos(&text, pos, &inline.language, false) {
+            if inline.language == "r" {
+                return Ok(get_r_completion(state, uri, &token).await);
+            } else if inline.language == "python" {
+                return Ok(get_python_completion(state, uri, &token).await);
+            }
+        }
+        return Ok(None);
+    }
+
+    // 3. Forward to tinymist for regular Typst content
+    if let Some(typ_pos) = mapper.knot_to_typ_position(pos) {
         let mut tinymist_guard = state.tinymist.write().await;
         if let Some(proxy) = tinymist_guard.as_mut() {
             let mut typ_params = serde_json::to_value(&params).unwrap_or_default();
@@ -79,6 +103,7 @@ pub async fn handle_completion(
             if let Some(pos_obj) = typ_params.pointer_mut("/position") {
                 *pos_obj = serde_json::to_value(typ_pos).unwrap_or_default();
             }
+
             if let Ok(resp) = proxy
                 .send_request("textDocument/completion", typ_params)
                 .await
@@ -105,6 +130,22 @@ pub async fn handle_completion(
         }
     }
     Ok(None)
+}
+
+fn get_byte_offset(text: &str, pos: Position) -> usize {
+    let mut offset = 0;
+    for (i, line) in text.lines().enumerate() {
+        if i == pos.line as usize {
+            let char_offset: usize = line
+                .chars()
+                .take(pos.character as usize)
+                .map(|c| c.len_utf8())
+                .sum();
+            return offset + char_offset;
+        }
+        offset += line.len() + 1; // +1 for \n
+    }
+    offset
 }
 
 fn map_item(item: &mut CompletionItem, mapper: &crate::position_mapper::PositionMapper) {
