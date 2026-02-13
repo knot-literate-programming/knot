@@ -442,7 +442,7 @@ impl KnotLanguageServer {
         // --- WARM UP TINYMIST ---
         // Perform warm-up after releasing the lock to avoid blocking other requests
         if warm_up {
-            if let (Some(virtual_uri), Some(mut tinymist_guard)) =
+            if let (Some(virtual_uri), Some(tinymist_guard)) =
                 (virtual_uri_opt, self.state.tinymist.write().await.as_mut())
             {
                 let warm_up_params = serde_json::json!({
