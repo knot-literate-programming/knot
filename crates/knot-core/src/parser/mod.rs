@@ -18,13 +18,14 @@
 //! let doc = parse_document(source);
 //! ```
 
-mod ast;
+pub mod ast;
 mod options;
 mod winnow_parser;
 
 pub use ast::{
-    Chunk, ChunkError, ChunkOptions, Document, FigFormat, InlineExpr, InlineOptions, Layout,
-    OptionMetadata, Position, Range, ResolvedChunkOptions, Show, WarningsVisibility,
+    Chunk, ChunkDefaults, ChunkError, ChunkOptions, Document, FigFormat, InlineExpr, InlineOptions,
+    Layout, OptionMetadata, Position, Range, ResolvedChunkOptions, ResolvedInlineOptions, Show,
+    WarningsVisibility,
 };
 pub use options::parse_options;
 pub use winnow_parser::parse_document;

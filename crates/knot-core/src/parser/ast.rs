@@ -7,58 +7,42 @@ use std::path::PathBuf;
 // Chunk Option Enums
 // ============================================================================
 
-/// What to display in the output
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Show {
-    /// Display both code and output
     #[default]
     Both,
-    /// Display only code
     Code,
-    /// Display only output
     Output,
-    /// Display nothing (useful for setup chunks)
     None,
 }
 
-/// Where to display warnings relative to the code/output block
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum WarningsVisibility {
-    /// Show warnings below the entire block (default)
     #[default]
     Below,
-    /// Show warnings inside the layout — stacked with output in the output column
     Inline,
-    /// Suppress warnings entirely
     None,
 }
 
-/// How to layout code and output when both are displayed
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Layout {
-    /// Side-by-side layout
     #[default]
     Horizontal,
-    /// Stacked layout
     Vertical,
 }
 
-/// Format for generated figures
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum FigFormat {
-    /// SVG vector format
     #[default]
     Svg,
-    /// PNG raster format
     Png,
 }
 
 impl FigFormat {
-    /// Convert to string representation
     pub fn as_str(&self) -> &'static str {
         match self {
             FigFormat::Svg => "svg",
@@ -67,31 +51,21 @@ impl FigFormat {
     }
 }
 
-// NOTE : Ces structures sont basées sur la section 3.5 du document de référence.
-// La section 11.4 mentionne que les positions sont cruciales pour un futur LSP.
-// Pour la phase 1, les positions exactes sont moins critiques, mais les structures
-// sont là pour l'avenir.
-
-/// Position dans le fichier (ligne/colonne, base 0)
-/// Essentiel pour le support LSP (Language Server Protocol)
 #[derive(Debug, Clone, Default)]
 pub struct Position {
     pub line: usize,
     pub column: usize,
 }
 
-/// Plage dans le fichier, de `start` (inclusif) à `end` (exclusif)
 #[derive(Debug, Clone, Default)]
 pub struct Range {
     pub start: Position,
     pub end: Position,
 }
 
-/// An error detected during chunk or inline expression parsing
 #[derive(Debug, Clone, Serialize)]
 pub struct ChunkError {
     pub message: String,
-    /// Relative line offset within the chunk (0 = header line)
     pub line_offset: Option<usize>,
 }
 
@@ -104,70 +78,25 @@ impl ChunkError {
     }
 }
 
-// ============================================================================
-// Chunk Options Macro System
-// ============================================================================
-//
-// This macro system defines ChunkOptions with automatic generation of related
-// types and methods. It uses markers to control behavior and configurability.
-//
-// ## Markers
-//
-// - [val]  : Required value with default, configurable in knot.toml
-//            → ChunkOptions: Option<T>, ResolvedChunkOptions: T
-//            → Included in ChunkDefaults for global configuration
-//            → Example: eval: bool (knot.toml: eval = false)
-//
-// - [opt]  : Optional value without default, configurable in knot.toml
-//            → ChunkOptions: Option<T>, ResolvedChunkOptions: Option<T>
-//            → Included in ChunkDefaults for global configuration
-//            → Example: gutter: String (knot.toml: gutter = "2em")
-//
-// - [meta] : Chunk-specific metadata, NOT configurable in knot.toml
-//            → ChunkOptions: Option<T>, ResolvedChunkOptions: Option<T>
-//            → NOT included in ChunkDefaults (chunk-specific only)
-//            → Example: label: String (only in chunk header)
-//
-// - [col]  : Collection, NOT configurable in knot.toml
-//            → ChunkOptions: Vec<T>, ResolvedChunkOptions: Vec<T>
-//            → NOT included in ChunkDefaults (chunk-specific only)
-//            → Example: depends: Vec<PathBuf>
-//
-// ## Auto-generated code
-//
-// The define_options! macro generates:
-// - ChunkOptions struct (for parsing YAML chunk options)
-// - ResolvedChunkOptions struct (with concrete types after resolution)
-// - resolve() method (applies hardcoded defaults)
-// - apply_config_defaults() method (applies knot.toml defaults)
-//   → Only processes [val] and [opt] fields (skips [meta] and [col])
-// - option_metadata() method (returns metadata for template generation)
-//
-// ============================================================================
-
-/// Metadata for a single chunk option (used for template generation)
 #[derive(Debug, Clone)]
 pub struct OptionMetadata {
-    /// Option kind: "val", "opt", "meta", or "col"
     pub kind: &'static str,
-    /// Field name in Rust code
     pub name: &'static str,
-    /// Type as string
     pub type_name: &'static str,
-    /// Default value as string
     pub default_value: &'static str,
-    /// Documentation string
     pub doc: &'static str,
 }
 
 impl OptionMetadata {
-    /// Get the serde name (converts snake_case to kebab-case for options like fig_width → fig-width)
     pub fn serde_name(&self) -> String {
         self.name.replace('_', "-")
     }
 }
 
-/// Internal macros to handle type expansion and resolution
+// ============================================================================
+// Chunk Options Macro System (Unified, Robust)
+// ============================================================================
+
 macro_rules! expand_type {
     (val, $type:ty) => { Option<$type> };
     (opt, $type:ty) => { Option<$type> };
@@ -197,24 +126,25 @@ macro_rules! expand_resolve {
     };
 }
 
-/// Helper macro to conditionally apply config defaults
-/// Only [val] and [opt] fields are configurable in knot.toml
-macro_rules! apply_config_if_applicable {
-    (val, $self:expr, $defaults:expr, $name:ident) => {
-        if $self.$name.is_none() {
-            $self.$name = $defaults.$name.clone();
+macro_rules! apply_merge {
+    (col, $self:expr, $other:expr, $name:ident) => {
+        // Skip collections in merge
+    };
+    ($kind:ident, $self:expr, $other:expr, $name:ident) => {
+        if $other.$name.is_some() {
+            $self.$name = $other.$name.clone();
         }
     };
-    (opt, $self:expr, $defaults:expr, $name:ident) => {
-        if $self.$name.is_none() {
-            $self.$name = $defaults.$name.clone();
-        }
-    };
-    (meta, $self:expr, $defaults:expr, $name:ident) => {
-        // Skip - metadata is chunk-specific, not configurable in knot.toml
-    };
+}
+
+macro_rules! apply_config {
     (col, $self:expr, $defaults:expr, $name:ident) => {
-        // Skip - collections are chunk-specific, not configurable in knot.toml
+        // Skip collections in config
+    };
+    ($kind:ident, $self:expr, $defaults:expr, $name:ident) => {
+        if $self.$name.is_none() {
+            $self.$name = $defaults.$name.clone();
+        }
     };
 }
 
@@ -226,7 +156,6 @@ macro_rules! define_options {
             [$kind:ident] $name:ident : $type:ty , $default:expr
         ),* $(,)?
     ) => {
-        /// ChunkOptions with optional fields for YAML parsing.
         #[derive(Debug, Default, Clone, Serialize, Deserialize)]
         #[serde(default)]
         pub struct ChunkOptions {
@@ -237,7 +166,22 @@ macro_rules! define_options {
             )*
         }
 
-        /// ChunkOptions with all values resolved to concrete types.
+        #[derive(Debug, Default, Clone, Serialize, Deserialize)]
+        #[serde(default)]
+        pub struct ChunkDefaults {
+            $(
+                $(#[doc = $doc])*
+                $(#[serde($($serde_attr)*)])*
+                pub $name: expand_type!($kind, $type),
+            )*
+
+            #[serde(skip)]
+            pub codly_options: HashMap<String, String>,
+
+            #[serde(flatten)]
+            pub other: HashMap<String, toml::Value>,
+        }
+
         #[derive(Debug, Clone, Serialize)]
         pub struct ResolvedChunkOptions {
             $(
@@ -246,11 +190,35 @@ macro_rules! define_options {
             )*
         }
 
+        impl ChunkDefaults {
+            pub fn merge(&mut self, other: &ChunkDefaults) {
+                $(
+                    apply_merge!($kind, self, other, $name);
+                )*
+                for (key, value) in &other.codly_options {
+                    self.codly_options.insert(key.clone(), value.clone());
+                }
+            }
+
+            pub fn extract_codly_options(&mut self) {
+                for (key, value) in &self.other {
+                    if key.starts_with("codly-") {
+                        let codly_key = key.strip_prefix("codly-").unwrap().to_string();
+                        let value_str = match value {
+                            toml::Value::String(s) => s.clone(),
+                            toml::Value::Boolean(b) => b.to_string(),
+                            toml::Value::Integer(i) => i.to_string(),
+                            toml::Value::Float(f) => f.to_string(),
+                            _ => toml::to_string(value).unwrap_or_default().trim().to_string(),
+                        };
+                        self.codly_options.insert(codly_key, value_str);
+                    }
+                }
+            }
+        }
+
         impl ChunkOptions {
-            /// Resolve all options to concrete values, applying hardcoded defaults.
             pub fn resolve(&self) -> ResolvedChunkOptions {
-                #[allow(unused_imports)]
-                use crate::defaults::Defaults;
                 ResolvedChunkOptions {
                     $(
                         $name: expand_resolve!(self.$name, $kind, $type, $default),
@@ -258,26 +226,16 @@ macro_rules! define_options {
                 }
             }
 
-            /// Get a ResolvedChunkOptions instance with all default values.
             pub fn default_resolved() -> ResolvedChunkOptions {
                 Self::default().resolve()
             }
 
-            /// Apply default values from knot.toml configuration.
-            ///
-            /// This method is auto-generated by define_options! macro.
-            /// Only [val] and [opt] fields are processed; [meta] and [col] fields
-            /// are chunk-specific and not configurable in knot.toml.
-            pub fn apply_config_defaults(&mut self, defaults: &crate::config::ChunkDefaults) {
+            pub fn apply_config_defaults(&mut self, defaults: &ChunkDefaults) {
                 $(
-                    apply_config_if_applicable!($kind, self, defaults, $name);
+                    apply_config!($kind, self, defaults, $name);
                 )*
             }
 
-            /// Returns metadata for all chunk options (used for template generation).
-            ///
-            /// This method is auto-generated by define_options! macro and provides
-            /// all information needed to generate documentation and templates.
             pub fn option_metadata() -> Vec<OptionMetadata> {
                 vec![
                     $(
@@ -292,7 +250,7 @@ macro_rules! define_options {
                 ]
             }
         }
-    }
+    };
 }
 
 define_options! {
@@ -387,8 +345,8 @@ pub struct Chunk {
     pub options: ChunkOptions,
     pub codly_options: HashMap<String, String>,
     pub errors: Vec<ChunkError>,
-    pub range: Range,      // Position du chunk entier (de ```{r}} à ```)
-    pub code_range: Range, // Position du code seul à l'intérieur
+    pub range: Range,
+    pub code_range: Range,
     pub start_byte: usize,
     pub end_byte: usize,
     pub code_start_byte: usize,
@@ -402,7 +360,6 @@ macro_rules! define_inline_options {
             $name:ident : $type:ty = $default:expr
         ),* $(,)?
     ) => {
-        /// Options for inline expressions
         #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
         pub struct InlineOptions {
             $(
@@ -411,7 +368,6 @@ macro_rules! define_inline_options {
             )*
         }
 
-        /// Resolved options for inline expressions
         #[derive(Debug, Clone, Serialize)]
         pub struct ResolvedInlineOptions {
             $(
@@ -429,7 +385,6 @@ macro_rules! define_inline_options {
         }
 
         impl InlineOptions {
-            /// Resolve all options to concrete values, applying defaults.
             pub fn resolve(&self) -> ResolvedInlineOptions {
                 ResolvedInlineOptions {
                     $(
@@ -437,31 +392,22 @@ macro_rules! define_inline_options {
                     )*
                 }
             }
-
-            /// Get a ResolvedInlineOptions instance with all default values.
-            pub fn default_resolved() -> ResolvedInlineOptions {
-                Self::default().resolve()
-            }
         }
     }
 }
 
 define_inline_options! {
-    /// Evaluate the code
     eval: bool = true,
-    /// What to display (output is default for inline, both/code rarely used)
     show: Show = Show::Output,
-    /// Number of digits for numeric formatting
     digits: Option<u32> = None,
 }
 
-/// Inline expression (e.g., `{r} nrow(df)` or `{r echo=false} x`)
 #[derive(Debug, Clone)]
 pub struct InlineExpr {
-    pub language: String, // "r", "python", etc.
-    pub code: String,     // The expression to evaluate
-    pub start: usize,     // Byte offset in source
-    pub end: usize,       // Byte offset in source (exclusive)
+    pub language: String,
+    pub code: String,
+    pub start: usize,
+    pub end: usize,
     pub code_start_byte: usize,
     pub code_end_byte: usize,
     pub options: InlineOptions,
@@ -476,7 +422,6 @@ pub struct Document {
 }
 
 impl Document {
-    // La logique de parsing utilise winnow (v2)
     pub fn parse(source: String) -> Result<Self> {
         let doc = super::winnow_parser::parse_document(&source);
         Ok(doc)

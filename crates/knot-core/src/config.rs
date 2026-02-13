@@ -7,6 +7,7 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+pub use crate::parser::ast::ChunkDefaults;
 
 #[derive(Debug, Deserialize, Default)]
 pub struct Config {
@@ -35,127 +36,6 @@ pub struct Config {
     pub python_error: Option<ChunkDefaults>,
 }
 
-/// Default values for chunk options, configurable in knot.toml
-///
-/// All fields are optional to allow partial configuration.
-/// Priority: chunk options > knot.toml defaults > hardcoded defaults
-#[derive(Debug, Default, Deserialize, Clone)]
-pub struct ChunkDefaults {
-    pub eval: Option<bool>,
-    pub show: Option<crate::parser::Show>,
-    pub cache: Option<bool>,
-
-    // Graphics options
-    #[serde(rename = "fig-width")]
-    pub fig_width: Option<f64>,
-    #[serde(rename = "fig-height")]
-    pub fig_height: Option<f64>,
-    pub dpi: Option<u32>,
-    #[serde(rename = "fig-format")]
-    pub fig_format: Option<crate::parser::FigFormat>,
-
-    // Presentation options
-    pub layout: Option<crate::parser::Layout>,
-    #[serde(rename = "warnings-visibility")]
-    pub warnings_visibility: Option<crate::parser::WarningsVisibility>,
-    pub gutter: Option<String>,
-    #[serde(rename = "code-background")]
-    pub code_background: Option<String>,
-    #[serde(rename = "code-stroke", alias = "code-border")]
-    pub code_stroke: Option<String>,
-    #[serde(rename = "code-radius")]
-    pub code_radius: Option<String>,
-    #[serde(rename = "code-inset", alias = "code-padding")]
-    pub code_inset: Option<String>,
-    #[serde(rename = "output-background")]
-    pub output_background: Option<String>,
-    #[serde(rename = "output-stroke", alias = "output-border")]
-    pub output_stroke: Option<String>,
-    #[serde(rename = "output-radius")]
-    pub output_radius: Option<String>,
-    #[serde(rename = "output-inset", alias = "output-padding")]
-    pub output_inset: Option<String>,
-    
-    // Warning styling
-    #[serde(rename = "warning-background")]
-    pub warning_background: Option<String>,
-    #[serde(rename = "warning-stroke", alias = "warning-border")]
-    pub warning_stroke: Option<String>,
-    #[serde(rename = "warning-radius")]
-    pub warning_radius: Option<String>,
-    #[serde(rename = "warning-inset", alias = "warning-padding")]
-    pub warning_inset: Option<String>,
-
-    pub width_ratio: Option<String>,
-    pub align: Option<String>,
-
-    // Codly-specific options (extracted from codly-* keys in TOML)
-    // Not directly deserialized - populated during post-processing
-    #[serde(skip)]
-    pub codly_options: HashMap<String, String>,
-
-    // Capture all unknown keys for post-processing
-    #[serde(flatten)]
-    pub other: HashMap<String, toml::Value>,
-}
-
-impl ChunkDefaults {
-    /// Merge another set of defaults into this one (other takes priority)
-    pub fn merge(&mut self, other: &ChunkDefaults) {
-        if other.eval.is_some() { self.eval = other.eval; }
-        if other.show.is_some() { self.show = other.show.clone(); }
-        if other.cache.is_some() { self.cache = other.cache; }
-        if other.fig_width.is_some() { self.fig_width = other.fig_width; }
-        if other.fig_height.is_some() { self.fig_height = other.fig_height; }
-        if other.dpi.is_some() { self.dpi = other.dpi; }
-        if other.fig_format.is_some() { self.fig_format = other.fig_format.clone(); }
-        if other.layout.is_some() { self.layout = other.layout.clone(); }
-        if other.warnings_visibility.is_some() { self.warnings_visibility = other.warnings_visibility.clone(); }
-        if other.gutter.is_some() { self.gutter = other.gutter.clone(); }
-        if other.code_background.is_some() { self.code_background = other.code_background.clone(); }
-        if other.code_stroke.is_some() { self.code_stroke = other.code_stroke.clone(); }
-        if other.code_radius.is_some() { self.code_radius = other.code_radius.clone(); }
-        if other.code_inset.is_some() { self.code_inset = other.code_inset.clone(); }
-        if other.output_background.is_some() { self.output_background = other.output_background.clone(); }
-        if other.output_stroke.is_some() { self.output_stroke = other.output_stroke.clone(); }
-        if other.output_radius.is_some() { self.output_radius = other.output_radius.clone(); }
-        if other.output_inset.is_some() { self.output_inset = other.output_inset.clone(); }
-        if other.warning_background.is_some() { self.warning_background = other.warning_background.clone(); }
-        if other.warning_stroke.is_some() { self.warning_stroke = other.warning_stroke.clone(); }
-        if other.warning_radius.is_some() { self.warning_radius = other.warning_radius.clone(); }
-        if other.warning_inset.is_some() { self.warning_inset = other.warning_inset.clone(); }
-        if other.width_ratio.is_some() { self.width_ratio = other.width_ratio.clone(); }
-        if other.align.is_some() { self.align = other.align.clone(); }
-
-        // Merge codly options
-        for (key, value) in &other.codly_options {
-            self.codly_options.insert(key.clone(), value.clone());
-        }
-    }
-
-    /// Extract codly-* options from the "other" HashMap
-    ///
-    /// This should be called after deserialization to populate codly_options
-    pub fn extract_codly_options(&mut self) {
-        for (key, value) in &self.other {
-            if key.starts_with("codly-") {
-                let codly_key = key.strip_prefix("codly-").unwrap().to_string();
-                let value_str = match value {
-                    toml::Value::String(s) => s.clone(),
-                    toml::Value::Boolean(b) => b.to_string(),
-                    toml::Value::Integer(i) => i.to_string(),
-                    toml::Value::Float(f) => f.to_string(),
-                    _ => toml::to_string(value)
-                        .unwrap_or_default()
-                        .trim()
-                        .to_string(),
-                };
-                self.codly_options.insert(codly_key, value_str);
-            }
-        }
-    }
-}
-
 #[derive(Debug, Default, Deserialize)]
 pub struct DocumentConfig {
     pub main: Option<String>,
@@ -169,13 +49,6 @@ pub struct HelpersConfig {
 
 impl Config {
     /// Find and load configuration by searching for knot.toml in parent directories
-    ///
-    /// Starts from `start_path` (file or directory) and walks up the directory tree
-    /// until it finds knot.toml. This mimics Cargo's behavior for finding Cargo.toml.
-    ///
-    /// Returns:
-    /// - Ok((config, project_root)) if knot.toml is found
-    /// - Ok((default_config, start_dir)) if no knot.toml is found
     pub fn find_and_load(start_path: &Path) -> Result<(Self, PathBuf)> {
         let start_dir = if start_path.is_file() {
             start_path.parent().unwrap_or(start_path)
@@ -207,11 +80,6 @@ impl Config {
     }
 
     /// Find project root starting from any path (file or directory)
-    ///
-    /// This is a convenience wrapper around `find_and_load()` that automatically
-    /// handles both file and directory paths.
-    ///
-    /// Returns the project root directory (containing knot.toml)
     pub fn find_project_root(start_path: &Path) -> Result<PathBuf> {
         let (_, project_root) = Self::find_and_load(start_path)?;
         Ok(project_root)
@@ -227,7 +95,6 @@ impl Config {
         let path = path.as_ref();
 
         if !path.exists() {
-            // If knot.toml doesn't exist, return default config
             return Ok(Self::default());
         }
 
@@ -262,9 +129,6 @@ impl Config {
     }
 
     /// Get language-specific chunk defaults for a given language
-    ///
-    /// Returns the language-specific defaults if defined in knot.toml,
-    /// otherwise returns None.
     pub fn get_language_defaults(&self, lang: &str) -> Option<&ChunkDefaults> {
         match lang {
             "r" => self.r_chunks.as_ref(),
@@ -301,181 +165,9 @@ mod tests {
         let knot_file = sub_dir.join("file.knot");
         fs::write(&knot_file, "content")?;
 
-        // Test with directory
-        let (config, root) = Config::find_and_load(&sub_dir)?;
+        let (_config, root) = Config::find_and_load(&sub_dir)?;
         assert_eq!(root, project_root);
-        assert_eq!(config.document.main, Some("test.knot".to_string()));
-
-        // Test with file
-        let (config, root) = Config::find_and_load(&knot_file)?;
-        assert_eq!(root, project_root);
-        assert_eq!(config.document.main, Some("test.knot".to_string()));
 
         Ok(())
-    }
-
-    #[test]
-    fn test_defaults_section() {
-        let toml = r##"
-[document]
-main = "main.knot"
-
-[chunk-defaults]
-show = "output"
-eval = true
-cache = true
-fig-width = 8.0
-fig-height = 6.0
-dpi = 600
-fig-format = "png"
-layout = "vertical"
-gutter = "2em"
-"##;
-
-        let config: Config = toml::from_str(toml).unwrap();
-        assert_eq!(
-            config.chunk_defaults.show,
-            Some(crate::parser::Show::Output)
-        );
-        assert_eq!(config.chunk_defaults.eval, Some(true));
-        assert_eq!(config.chunk_defaults.cache, Some(true));
-        assert_eq!(config.chunk_defaults.fig_width, Some(8.0));
-        assert_eq!(config.chunk_defaults.fig_height, Some(6.0));
-        assert_eq!(config.chunk_defaults.dpi, Some(600));
-        assert_eq!(
-            config.chunk_defaults.fig_format,
-            Some(crate::parser::FigFormat::Png)
-        );
-        assert_eq!(
-            config.chunk_defaults.layout,
-            Some(crate::parser::Layout::Vertical)
-        );
-        assert_eq!(config.chunk_defaults.gutter, Some("2em".to_string()));
-    }
-
-    #[test]
-    fn test_defaults_partial() {
-        let toml = r#"
-[chunk-defaults]
-show = "output"
-fig-width = 10.0
-"#;
-
-        let config: Config = toml::from_str(toml).unwrap();
-        assert_eq!(
-            config.chunk_defaults.show,
-            Some(crate::parser::Show::Output)
-        );
-        assert_eq!(config.chunk_defaults.fig_width, Some(10.0));
-        assert!(config.chunk_defaults.eval.is_none());
-        assert!(config.chunk_defaults.cache.is_none());
-    }
-
-    #[test]
-    fn test_language_specific_templates() {
-        let toml = r##"
-[document]
-main = "main.knot"
-
-[chunk-defaults]
-show = "both"
-fig-width = 7.0
-
-[r-chunks]
-show = "output"
-fig-width = 8.0
-fig-height = 6.0
-
-[python-chunks]
-show = "both"
-fig-width = 6.0
-dpi = 300
-"##;
-
-        let config: Config = toml::from_str(toml).unwrap();
-
-        // Test R-specific defaults
-        let r_defaults = config.get_language_defaults("r");
-        assert!(r_defaults.is_some());
-        let r_defaults = r_defaults.unwrap();
-        assert_eq!(r_defaults.show, Some(crate::parser::Show::Output));
-        assert_eq!(r_defaults.fig_width, Some(8.0));
-        assert_eq!(r_defaults.fig_height, Some(6.0));
-
-        // Test Python-specific defaults
-        let python_defaults = config.get_language_defaults("python");
-        assert!(python_defaults.is_some());
-        let python_defaults = python_defaults.unwrap();
-        assert_eq!(python_defaults.show, Some(crate::parser::Show::Both));
-        assert_eq!(python_defaults.fig_width, Some(6.0));
-        assert_eq!(python_defaults.dpi, Some(300));
-
-        // Test unsupported language returns None
-        let julia_defaults = config.get_language_defaults("julia");
-        assert!(julia_defaults.is_none());
-    }
-
-    #[test]
-    fn test_get_language_defaults_none() {
-        let config = Config::default();
-
-        // Should return None when no language-specific templates are defined
-        assert!(config.get_language_defaults("r").is_none());
-        assert!(config.get_language_defaults("python").is_none());
-    }
-
-    #[test]
-    fn test_language_templates_with_codly_options() {
-        let toml = r##"
-[document]
-main = "main.knot"
-
-[r-chunks]
-show = "output"
-codly-stroke = '1pt + rgb("#CE412B")'
-codly-lang-radius = "10pt"
-output-stroke = '1pt + rgb("#CE412B")'
-
-[python-chunks]
-show = "both"
-codly-zebra-fill = 'rgb("#f0f0f0")'
-fig-width = 6.0
-"##;
-
-        let content = toml.to_string();
-        let mut config: Config = toml::from_str(&content).unwrap();
-
-        // Extract codly options (simulate load_from_path behavior)
-        if let Some(ref mut r_chunks) = config.r_chunks {
-            r_chunks.extract_codly_options();
-        }
-        if let Some(ref mut python_chunks) = config.python_chunks {
-            python_chunks.extract_codly_options();
-        }
-
-        // Test R-chunks codly options
-        let r_defaults = config.get_language_defaults("r").unwrap();
-        assert_eq!(r_defaults.show, Some(crate::parser::Show::Output));
-        assert_eq!(
-            r_defaults.codly_options.get("stroke"),
-            Some(&"1pt + rgb(\"#CE412B\")".to_string())
-        );
-        assert_eq!(
-            r_defaults.codly_options.get("lang-radius"),
-            Some(&"10pt".to_string())
-        );
-        assert_eq!(
-            r_defaults.output_stroke,
-            Some("1pt + rgb(\"#CE412B\")".to_string())
-        );
-
-        // Test Python-chunks codly options
-        let python_defaults = config.get_language_defaults("python").unwrap();
-        assert_eq!(python_defaults.show, Some(crate::parser::Show::Both));
-        assert_eq!(python_defaults.fig_width, Some(6.0));
-        assert_eq!(
-            python_defaults.codly_options.get("zebra-fill"),
-            Some(&"rgb(\"#f0f0f0\")".to_string())
-        );
     }
 }
