@@ -321,21 +321,6 @@ impl KnotLanguageServer {
         })
     }
 
-    fn to_virtual_uri(&self, uri: &Url) -> Url {
-        let mut path = uri.path().to_string();
-        if !path.ends_with(".typ") {
-            path.push_str(".typ");
-        }
-        // Handle scheme/host manually to be safe, or just replace path
-        // Url::parse is safer but might lose some info.
-        // Simplest hack: string manipulation
-        let mut s = uri.to_string();
-        if !s.ends_with(".typ") {
-            s.push_str(".typ");
-        }
-        Url::parse(&s).unwrap_or(uri.clone())
-    }
-
     fn resolve_virtual_uri(&self, uri: &Url) -> Url {
         let s = uri.to_string();
         if s.ends_with(".typ") && s.contains(".knot") {
@@ -398,7 +383,7 @@ impl KnotLanguageServer {
             };
 
             // Use virtual URI to trick Tinymist
-            let virtual_uri = self.to_virtual_uri(uri);
+            let virtual_uri = transform::to_virtual_uri(uri);
 
             let mut opened_map = self.state.opened_in_tinymist.write().await;
             let mut versions = self.state.document_versions.write().await;

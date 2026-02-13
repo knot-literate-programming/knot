@@ -1,4 +1,14 @@
 use knot_core::parser::Document;
+use tower_lsp::lsp_types::Url;
+
+/// Transform a .knot URI to a virtual .typ URI for Tinymist
+pub fn to_virtual_uri(uri: &Url) -> Url {
+    let mut s = uri.to_string();
+    if !s.ends_with(".typ") {
+        s.push_str(".typ");
+    }
+    Url::parse(&s).unwrap_or_else(|_| uri.clone())
+}
 
 /// Transform a .knot document to a .typ placeholder document (Typst only)
 ///

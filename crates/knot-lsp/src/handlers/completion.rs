@@ -68,6 +68,14 @@ pub async fn handle_completion(
         let mut tinymist_guard = state.tinymist.write().await;
         if let Some(proxy) = tinymist_guard.as_mut() {
             let mut typ_params = serde_json::to_value(&params).unwrap_or_default();
+            let virtual_uri = crate::transform::to_virtual_uri(uri);
+
+            if let Some(doc_obj) = typ_params.pointer_mut("/textDocument") {
+                if let Some(uri_val) = doc_obj.get_mut("uri") {
+                    *uri_val = serde_json::to_value(virtual_uri).unwrap_or_default();
+                }
+            }
+
             if let Some(pos_obj) = typ_params.pointer_mut("/position") {
                 *pos_obj = serde_json::to_value(typ_pos).unwrap_or_default();
             }

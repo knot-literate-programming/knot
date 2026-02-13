@@ -59,8 +59,9 @@ pub async fn handle_hover(state: &ServerState, params: HoverParams) -> Result<Op
         if let Some(typ_pos) = mapper.knot_to_typ_position(pos) {
             let mut tinymist_guard = state.tinymist.write().await;
             if let Some(proxy) = tinymist_guard.as_mut() {
+                let virtual_uri = crate::transform::to_virtual_uri(uri);
                 let params =
-                    serde_json::json!({ "textDocument": { "uri": uri }, "position": typ_pos });
+                    serde_json::json!({ "textDocument": { "uri": virtual_uri }, "position": typ_pos });
                 if let Ok(response) = proxy.send_request("textDocument/hover", params).await {
                     if let Some(result) = response.get("result") {
                         if let Ok(mut hover) = serde_json::from_value::<Hover>(result.clone()) {
