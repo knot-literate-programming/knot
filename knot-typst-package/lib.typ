@@ -25,6 +25,10 @@
   output-stroke: none,
   output-radius: 0pt,
   output-inset: 0pt,
+  warning-background: rgb("#fff4ce"),
+  warning-stroke: 1pt + rgb("#facc15"),
+  warning-radius: 2pt,
+  warning-inset: 0.5em,
   width-ratio: "1:1",
   align: none,
   is-inert: false,
@@ -47,13 +51,14 @@
       radius: code-radius,
       inset: code-inset,
       width: 100%,
-      clip: true,
     )[#code]
     
     if is-inert {
-      // Overlay a semi-transparent white box to "gray out" the code
-      // We use a stack with spacing 0 and move the overlay up
-      stack(dir: ttb, spacing: -100%, b, block(width: 100%, height: 100%, fill: white.transparentize(40%), radius: code-radius))
+      // Use a clipping block to contain the overlay perfectly
+      block(width: 100%, clip: true, radius: code-radius)[
+        #b
+        #place(top + left, rect(width: 100%, height: 5000pt, fill: white.transparentize(40%)))
+      ]
     } else {
       b
     }
@@ -72,10 +77,10 @@
 
   // Warning blocks (reused for both inline and below positioning)
   let warning-blocks = warnings.map(w => block(
-    fill: rgb("#fff4ce"),
-    stroke: 1pt + rgb("#facc15"),
-    radius: 2pt,
-    inset: 0.5em,
+    fill: warning-background,
+    stroke: warning-stroke,
+    radius: warning-radius,
+    inset: warning-inset,
     width: 100%,
   )[
     #set text(fill: rgb("#854d0e"), size: 0.85em)
@@ -134,14 +139,14 @@
     main-content,
     ..below-warnings,
     ..errors.map(e => block(
-      fill: rgb("#fee2e2"),
-      stroke: 1pt + rgb("#ef4444"),
-      radius: 2pt,
-      inset: 0.5em,
+      fill: rgb("#ef4444"), // Solid red
+      stroke: 1pt + rgb("#b91c1c"),
+      radius: 4pt,
+      inset: 1em,
       width: 100%,
     )[
-      #set text(fill: rgb("#991b1b"), size: 0.85em)
-      *Error:* #e
+      #set text(fill: white, size: 0.95em)
+      #e
     ])
   )
 }

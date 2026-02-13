@@ -272,16 +272,17 @@ fn fix_paths_in_typst(source: &str, typ_file: &Path) -> Result<String> {
         let dest_path = local_files_dir.join(filename.as_ref());
 
         // Copy file
-        match abs_path.exists() {
-            true => {
-                if let Err(e) = fs::copy(abs_path, &dest_path) {
-                    log::warn!("Failed to copy {}: {}", abs_path.display(), e);
-                    format!("\"{}\"", abs_path_str)
-                } else {
-                    format!("\"{}/{}\"", Defaults::LANGUAGE_FILES_DIR, filename)
-                }
+        if abs_path.exists() {
+            if let Err(e) = fs::copy(abs_path, &dest_path) {
+                log::warn!("Failed to copy {}: {}", abs_path.display(), e);
+                format!("\"{}\"", abs_path_str)
+            } else {
+                format!("\"{}/{}\"", Defaults::LANGUAGE_FILES_DIR, filename)
             }
-            false => format!("\"{}/{}\"", Defaults::LANGUAGE_FILES_DIR, filename),
+        } else {
+            log::error!("Cache file not found: {}", abs_path.display());
+            // Keep absolute path so the user can see where it was expected
+            format!("\"{}\"", abs_path_str)
         }
     });
 

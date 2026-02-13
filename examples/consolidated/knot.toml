@@ -39,6 +39,12 @@ lang-radius = '100pt'
 code-radius = '4pt'
 code-inset = '0.5em'
 
+# Warning options
+warning-background = 'rgb("#E0F2FE")' # Light blue for educational warnings
+warning-stroke = '1pt + rgb("#38BDF8")'
+warning-inset = '0.8em'
+warning-radius = '4pt'
+
 # Output options
 output-stroke = '1pt + rgb("#999999")'
 output-inset = '0.5em'

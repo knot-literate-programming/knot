@@ -359,6 +359,19 @@ define_options! {
     #[serde(rename = "output-inset", alias = "output-padding")]
     [opt] output_inset: String, None,
 
+    /// Background color for warning container (Typst color)
+    #[serde(rename = "warning-background")]
+    [opt] warning_background: String, None,
+    /// Border stroke for warning container (Typst stroke)
+    #[serde(rename = "warning-stroke", alias = "warning-border")]
+    [opt] warning_stroke: String, None,
+    /// Corner radius for warning container (Typst length)
+    #[serde(rename = "warning-radius")]
+    [opt] warning_radius: String, None,
+    /// Internal padding for warning container (Typst length)
+    #[serde(rename = "warning-inset", alias = "warning-padding")]
+    [opt] warning_inset: String, None,
+
     /// Width ratio for horizontal layout (e.g., "1:1", "2:1")
     #[serde(rename = "width-ratio")]
     [opt] width_ratio: String, None,

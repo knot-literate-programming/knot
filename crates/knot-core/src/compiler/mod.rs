@@ -178,11 +178,16 @@ impl Compiler {
             let (result_str, node_hash) = match execution_result {
                 Ok(res) => res,
                 Err(e) => {
-                    // Fatal execution error: Insert red error block and mark language as broken
+                    // Fatal execution error: Insert prominent error block and mark language as broken
+                    // We use #code-chunk with is-inert: false to keep it solid and consistent
+                    let error_msg = format!("{}", e).replace('"', "\\\"");
                     let error_block = format!(
-                        "\n#block(fill: rgb(\"#ffebee\"), stroke: 1pt + red, inset: 1em, radius: 0.5em, width: 100%)[
-    *Erreur d'exécution ({}) dans le {} `{}`* \n\n ```\n{}\n``` \n\n _L'exécution des blocs `{}` suivants a été suspendue._
-]\n",
+                        "\n#code-chunk(
+    lang: \"{}\",
+    is-inert: false,
+    errors: ([#local(zebra-fill: none)[\n=== Erreur d'exécution ({})\nDans le {} `{}`\n\n```\n{}\n```\n\n_L'exécution des blocs `{}` suivants a été suspendue._]],)
+)\n",
+                        lang,
                         lang,
                         match node {
                             ExecutableNode::Chunk(_) => "chunk",
@@ -192,7 +197,7 @@ impl Compiler {
                             ExecutableNode::Chunk(c) => c.name.as_deref().unwrap_or("unnamed"),
                             ExecutableNode::InlineExpr(_) => "inline",
                         },
-                        e,
+                        error_msg,
                         lang
                     );
                     typst_output.push_str(&error_block);

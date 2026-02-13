@@ -243,6 +243,19 @@ impl Backend for TypstBackend {
             args.push(format!("output-inset: {}", output_inset));
         }
 
+        if let Some(warning_bg) = &resolved_options.warning_background {
+            args.push(format!("warning-background: {}", warning_bg));
+        }
+        if let Some(warning_stroke) = &resolved_options.warning_stroke {
+            args.push(format!("warning-stroke: {}", warning_stroke));
+        }
+        if let Some(warning_radius) = &resolved_options.warning_radius {
+            args.push(format!("warning-radius: {}", warning_radius));
+        }
+        if let Some(warning_inset) = &resolved_options.warning_inset {
+            args.push(format!("warning-inset: {}", warning_inset));
+        }
+
         if let Some(width_ratio) = &resolved_options.width_ratio {
             args.push(format!("width-ratio: \"{}\"", width_ratio));
         }

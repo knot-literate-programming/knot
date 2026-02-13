@@ -181,3 +181,30 @@ warnings.warn("This is a runtime warning captured by Knot and displayed in the d
 
 print("Code execution continues normally after a warning.")
 ```
+
+#lorem(100)
+
+== Error demonstration
+
+```{python}
+cos(1)
+```
+
+```{python}
+import warnings
+
+# Trigger a demonstration warning
+warnings.warn("This is a runtime warning captured by Knot and displayed in the document.")
+
+print("Code execution continues normally after a warning.")
+```
+
+Un peu de texte pour vérifier si tout se passe bien !
+
+```{python}
+1 + 1
+```
+
+```{r}
+1 + 2
+```
