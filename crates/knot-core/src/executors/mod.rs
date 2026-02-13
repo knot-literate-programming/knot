@@ -49,14 +49,12 @@ pub struct GraphicsOptions {
 /// `traceback_skip` lets each language skip its own wrapper frames from the
 /// traceback (R skips 3: tryCatch/withCallingHandlers/withVisible; Python: 1).
 pub fn process_execution_output(
-    code: &str,
+    _code: &str,
     mut metadata: side_channel::KnotMetadata,
     stdout: &str,
     stderr: &str,
     traceback_skip: usize,
 ) -> Result<ExecutionOutput> {
-    use crate::executors::error_utils::format_code_with_context;
-
     // Check for structured errors first (most precise)
     if let Some(error) = &mut metadata.error {
         // Clean up traceback by skipping internal wrapper frames

@@ -17,9 +17,12 @@ def _knot_clear_state():
     _knot_error = None
 
 
-def _knot_add_warning(message):
+def _knot_add_warning(message, line=None):
     """Capture a warning into the side-channel state."""
-    _knot_warnings.append({'message': str(message)})
+    _knot_warnings.append({
+        'message': str(message),
+        'line': line
+    })
 
 
 def _get_base_dir() -> Path:

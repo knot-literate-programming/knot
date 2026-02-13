@@ -190,6 +190,8 @@ print("Code execution continues normally after a warning.")
 cos(1)
 ```
 
+Test
+
 ```{python}
 import warnings
 
@@ -206,5 +208,5 @@ Un peu de texte pour vérifier si tout se passe bien !
 ```
 
 ```{r}
-1 + 2
+1:3 + 1:2
 ```

@@ -20,7 +20,7 @@ use std::path::Path;
 /// are also captured as structured metadata.
 ///
 /// NOTE: If you change this wrapper, update the traceback_skip value
-/// in the execute() call below (currently 0 — Python frames are all user frames).
+/// in the execute() call below (currently 1 — skips the internal exec() frame).
 fn wrap_python_code_file(code_file: &str) -> String {
     format!(
         r#"import warnings as _knot_wm
@@ -33,11 +33,11 @@ with _knot_wm.catch_warnings(record=True) as _knot_caught:
             exec(_knot_c, globals())
     except Exception as _knot_e:
         for _w in _knot_caught:
-            _knot_add_warning(str(_w.message))
+            _knot_add_warning(str(_w.message), line=_w.lineno)
         _write_metadata({{'message': str(_knot_e), 'traceback': _knot_tb.format_tb(_knot_e.__traceback__)}}, type='error')
         raise
 for _w in _knot_caught:
-    _knot_add_warning(str(_w.message))
+    _knot_add_warning(str(_w.message), line=_w.lineno)
 _write_metadata(None, type='sync')
 "#
     )

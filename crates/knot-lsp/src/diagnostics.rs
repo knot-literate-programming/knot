@@ -7,6 +7,7 @@
 // - Invalid inline expressions
 // - Runtime errors and warnings from R/Python (via cache)
 
+use crate::position_mapper::PositionMapper;
 use knot_core::cache::Cache;
 use knot_core::config::Config;
 use knot_core::executors::error_utils::extract_line_from_traceback;
@@ -14,17 +15,12 @@ use knot_core::get_cache_dir;
 use knot_core::parser::parse_document;
 use tower_lsp::lsp_types::*;
 
-/// Helper to convert knot_core Position to LSP Position
-fn to_lsp_pos(pos: knot_core::parser::Position) -> Position {
-    Position {
-        line: pos.line as u32,
-        character: pos.column as u32,
-    }
-}
-
 /// Generate diagnostics for a document
 pub fn get_diagnostics(uri: &Url, text: &str) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
+
+    // Create a mapper for reliable position conversions
+    let mapper = PositionMapper::new(text, "");
 
     // 1. Parsing and Structure Diagnostics
     let doc = parse_document(text);
@@ -33,14 +29,8 @@ pub fn get_diagnostics(uri: &Url, text: &str) -> Vec<Diagnostic> {
     for error in doc.errors {
         diagnostics.push(Diagnostic {
             range: Range {
-                start: Position {
-                    line: 0,
-                    character: 0,
-                },
-                end: Position {
-                    line: 0,
-                    character: 1,
-                },
+                start: Position { line: 0, character: 0 },
+                end: Position { line: 0, character: 1 },
             },
             severity: Some(DiagnosticSeverity::ERROR),
             source: Some("knot".to_string()),
@@ -59,18 +49,12 @@ pub fn get_diagnostics(uri: &Url, text: &str) -> Vec<Diagnostic> {
             };
 
             let line_text = text.lines().nth(target_line).unwrap_or("");
-            let line_len = line_text.len() as u32;
+            let line_len_utf16 = line_text.encode_utf16().count() as u32;
 
             diagnostics.push(Diagnostic {
                 range: Range {
-                    start: Position {
-                        line: target_line as u32,
-                        character: 0,
-                    },
-                    end: Position {
-                        line: target_line as u32,
-                        character: line_len,
-                    },
+                    start: Position { line: target_line as u32, character: 0 },
+                    end: Position { line: target_line as u32, character: line_len_utf16 },
                 },
                 severity: Some(DiagnosticSeverity::ERROR),
                 source: Some("knot".to_string()),
@@ -88,52 +72,69 @@ pub fn get_diagnostics(uri: &Url, text: &str) -> Vec<Diagnostic> {
 
             if let Ok(cache) = Cache::new(cache_dir) {
                 for chunk_cache in cache.metadata.chunks {
-                    // Match cache entry with parsed chunk
-                    if let Some(parsed_chunk) = doc.chunks.get(chunk_cache.index) {
+                    // Match cache entry with parsed chunk by byte offset (start_byte)
+                    // This is reliable as long as the content before the chunk hasn't changed.
+                    if let Some(parsed_chunk) = doc
+                        .chunks
+                        .iter()
+                        .find(|c| c.start_byte == chunk_cache.index)
+                    {
                         // Add Warnings
                         for warning in chunk_cache.warnings {
+                            let range = if let Some(line_num) = warning.line {
+                                // line_num is 1-indexed relative to the code start
+                                let absolute_line = parsed_chunk.code_range.start.line + line_num - 1;
+                                let line_text = text.lines().nth(absolute_line).unwrap_or("");
+                                let line_len_utf16 = line_text.encode_utf16().count() as u32;
+                                Range {
+                                    start: Position { line: absolute_line as u32, character: 0 },
+                                    end: Position { line: absolute_line as u32, character: line_len_utf16 },
+                                }
+                            } else {
+                                // Fallback: highlight only the closing triple backticks of the chunk
+                                let end_pos = mapper.position_at_offset(parsed_chunk.end_byte);
+                                Range {
+                                    start: Position {
+                                        line: end_pos.line,
+                                        character: end_pos.character.saturating_sub(3),
+                                    },
+                                    end: end_pos,
+                                }
+                            };
+
                             diagnostics.push(Diagnostic {
-                                range: Range {
-                                    start: to_lsp_pos(parsed_chunk.range.start),
-                                    end: to_lsp_pos(parsed_chunk.range.end),
-                                },
+                                range,
                                 severity: Some(DiagnosticSeverity::WARNING),
                                 source: Some(format!("knot-{}", chunk_cache.language)),
-                                message: warning.message.to_string(),
+                                message: warning.detailed_message(),
                                 ..Diagnostic::default()
                             });
                         }
 
                         // Add Fatal Error with precise line if possible
                         if let Some(error) = chunk_cache.error {
-                            let msg = error
-                                .message
-                                .as_ref()
-                                .map(|m| m.to_string())
-                                .unwrap_or_else(|| "Execution error".to_string());
+                            let msg = error.detailed_message();
 
                             // Try to find exact line within chunk
                             let error_line_in_chunk = extract_line_from_traceback(&error.traceback);
 
                             let range = if let Some(line_num) = error_line_in_chunk {
-                                // line_num is 1-indexed relative to the code start
                                 let absolute_line = parsed_chunk.code_range.start.line + line_num - 1;
                                 let line_text = text.lines().nth(absolute_line).unwrap_or("");
+                                let line_len_utf16 = line_text.encode_utf16().count() as u32;
                                 Range {
-                                    start: Position {
-                                        line: absolute_line as u32,
-                                        character: 0,
-                                    },
-                                    end: Position {
-                                        line: absolute_line as u32,
-                                        character: line_text.len() as u32,
-                                    },
+                                    start: Position { line: absolute_line as u32, character: 0 },
+                                    end: Position { line: absolute_line as u32, character: line_len_utf16 },
                                 }
                             } else {
-                                // Fallback: highlight entire chunk
+                                // Fallback: highlight only the closing triple backticks of the chunk
+                                let end_pos = mapper.position_at_offset(parsed_chunk.end_byte);
                                 Range {
-                                    start: to_lsp_pos(parsed_chunk.range.start),
-                                    end: to_lsp_pos(parsed_chunk.range.end),
+                                    start: Position {
+                                        line: end_pos.line,
+                                        character: end_pos.character.saturating_sub(3),
+                                    },
+                                    end: end_pos,
                                 }
                             };
 
@@ -154,16 +155,13 @@ pub fn get_diagnostics(uri: &Url, text: &str) -> Vec<Diagnostic> {
     // Check for errors in inline expressions
     for inline in doc.inline_exprs {
         for error in inline.errors {
-            let (line, col) = byte_offset_to_line_col(text, inline.start);
+            let start_pos = mapper.position_at_offset(inline.start);
             diagnostics.push(Diagnostic {
                 range: Range {
-                    start: Position {
-                        line: line as u32,
-                        character: col as u32,
-                    },
+                    start: start_pos,
                     end: Position {
-                        line: line as u32,
-                        character: (col + 1) as u32,
+                        line: start_pos.line,
+                        character: start_pos.character + 1, // Highlight `
                     },
                 },
                 severity: Some(DiagnosticSeverity::ERROR),
@@ -175,23 +173,4 @@ pub fn get_diagnostics(uri: &Url, text: &str) -> Vec<Diagnostic> {
     }
 
     diagnostics
-}
-
-/// Helper to convert byte offset to line/col (UTF-16 aware for LSP)
-pub fn byte_offset_to_line_col(text: &str, offset: usize) -> (usize, usize) {
-    let mut line = 0;
-    let mut col = 0;
-
-    for (idx, ch) in text.char_indices() {
-        if idx >= offset {
-            break;
-        }
-        if ch == '\n' {
-            line += 1;
-            col = 0;
-        } else {
-            col += ch.len_utf16();
-        }
-    }
-    (line, col)
 }

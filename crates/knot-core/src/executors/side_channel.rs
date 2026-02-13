@@ -10,13 +10,6 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// A JSON value that can be either a plain string or an array of strings.
-///
-/// R serializes scalar values as plain strings with `auto_unbox = TRUE` (our
-/// default), so in practice the `String` variant is produced by R for scalar
-/// fields. The `Vec` variant handles any residual arrays (e.g. multi-line
-/// call stacks) and acts as a defensive fallback.
-///
-/// `#[serde(untagged)]` tries `String` first, then `Vec`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
 pub enum StringOrVec {
@@ -68,11 +61,24 @@ pub enum OutputMetadata {
 pub struct RuntimeWarning {
     pub message: StringOrVec,
     pub call: Option<StringOrVec>,
-    /// Source line number where the warning was triggered.
-    ///
-    /// Not yet implemented: R does not populate this field and the
-    /// Typst backend does not display it. Reserved for future use.
     pub line: Option<usize>,
+}
+
+impl std::fmt::Display for RuntimeWarning {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl RuntimeWarning {
+    /// Full message including call information for IDE display
+    pub fn detailed_message(&self) -> String {
+        let mut s = self.message.to_string();
+        if let Some(call) = &self.call {
+            s.push_str(&format!("\nCall: {}", call));
+        }
+        s
+    }
 }
 
 /// A fatal error captured during code execution
@@ -80,10 +86,6 @@ pub struct RuntimeWarning {
 pub struct RuntimeError {
     pub message: Option<StringOrVec>,
     pub call: Option<StringOrVec>,
-    /// Source line number where the error was triggered.
-    ///
-    /// Not yet implemented: R does not populate this field and the
-    /// Typst backend does not display it. Reserved for future use.
     pub line: Option<usize>,
     #[serde(default)]
     pub traceback: Vec<String>,
@@ -91,8 +93,27 @@ pub struct RuntimeError {
 
 impl std::fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let msg = self.message.as_ref().map(|m| m.to_string()).unwrap_or_else(|| "Unknown error".to_string());
+        let msg = self
+            .message
+            .as_ref()
+            .map(|m| m.to_string())
+            .unwrap_or_else(|| "Unknown error".to_string());
         write!(f, "{}", msg)
+    }
+}
+
+impl RuntimeError {
+    /// Full message including call and traceback for IDE display
+    pub fn detailed_message(&self) -> String {
+        let mut s = self.to_string();
+        if let Some(call) = &self.call {
+            s.push_str(&format!("\nCall: {}", call));
+        }
+        if !self.traceback.is_empty() {
+            s.push_str("\n\nTraceback:\n");
+            s.push_str(&self.traceback.join("\n"));
+        }
+        s
     }
 }
 
