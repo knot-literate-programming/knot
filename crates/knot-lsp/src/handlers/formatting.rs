@@ -28,11 +28,14 @@ pub async fn handle_formatting(
 
     let mut edits = Vec::new();
 
-    // 3. Format each chunk (structurally)
+    // 3. Format each chunk (hybrid: code + structure)
     for chunk in &doc.chunks {
-        // Normalization via Core (header, options)
-        // TODO: Integrate Air/Ruff here for code formatting
-        let formatted = chunk.format();
+        // Try to format code with external tools
+        let formatted_code =
+            knot_core::compiler::formatters::format_code(&chunk.code, &chunk.language).ok();
+
+        // Normalization via Core (header, options + optional formatted code)
+        let formatted = chunk.format(formatted_code.as_deref());
 
         // Only create edit if formatting changed the chunk
         let original_chunk = &text[chunk.start_byte..chunk.end_byte];

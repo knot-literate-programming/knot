@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 pub mod chunk_processor;
+pub mod formatters;
 pub mod inline_processor;
 pub mod snapshot_manager;
 

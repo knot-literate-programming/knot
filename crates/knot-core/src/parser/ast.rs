@@ -390,8 +390,9 @@ pub struct Chunk {
 }
 
 impl Chunk {
-    /// Format the chunk back to its canonical source representation
-    pub fn format(&self) -> String {
+    /// Format the chunk back to its canonical source representation.
+    /// If `formatted_code` is provided, it replaces the internal code.
+    pub fn format(&self, formatted_code: Option<&str>) -> String {
         let mut out = String::new();
 
         // 1. Header: ```{lang name}
@@ -425,9 +426,9 @@ impl Chunk {
         }
 
         // 4. Code: (Trim to ensure clean boundaries)
-        let trimmed_code = self.code.trim();
-        if !trimmed_code.is_empty() {
-            out.push_str(trimmed_code);
+        let final_code = formatted_code.unwrap_or(self.code.as_str()).trim();
+        if !final_code.is_empty() {
+            out.push_str(final_code);
             out.push('\n');
         }
 

@@ -19,16 +19,27 @@ np.random.seed(42)
 
 # Create synthetic data
 months = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-temperatures = np.array([5, 7, 12, 16, 21, 25, 28, 27, 23, 17, 11, 6]) + np.random.normal(0, 1.5, 12)
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+]
+temperatures = np.array(
+    [5, 7, 12, 16, 21, 25, 28, 27, 23, 17, 11, 6]
+) + np.random.normal(0, 1.5, 12)
 humidity = 100 - temperatures * 2 + np.random.normal(0, 5, 12)
 
-weather_data = pd.DataFrame({
-    'month': months,
-    'temperature': temperatures,
-    'humidity': humidity
-})
+weather_data = pd.DataFrame(
+    {"month": months, "temperature": temperatures, "humidity": humidity}
+)
 
 print(weather_data.describe())
 ```
@@ -41,27 +52,33 @@ Using matplotlib's object-oriented interface for better control:
 
 ```{python}
 #| show: code
-#| fig-width: 8
-#| fig-height: 5
+#| fig-width: 8.0
+#| fig-height: 5.0
 #| layout: vertical
 
 # Create figure and axis objects
 fig, ax = plt.subplots(figsize=(8, 5))
 
 # Plot temperature line
-ax.plot(weather_data['month'], weather_data['temperature'],
-        marker='o', linewidth=2, markersize=8,
-        color='#3572A5', label='Temperature')
+ax.plot(
+    weather_data["month"],
+    weather_data["temperature"],
+    marker="o",
+    linewidth=2,
+    markersize=8,
+    color="#3572A5",
+    label="Temperature",
+)
 
 # Customize the plot
-ax.set_xlabel('Month', fontsize=12, fontweight='bold')
-ax.set_ylabel('Temperature (°C)', fontsize=12, fontweight='bold')
-ax.set_title('Monthly Temperature Evolution', fontsize=14, fontweight='bold')
-ax.grid(True, alpha=0.3, linestyle='--')
-ax.legend(loc='upper left')
+ax.set_xlabel("Month", fontsize=12, fontweight="bold")
+ax.set_ylabel("Temperature (°C)", fontsize=12, fontweight="bold")
+ax.set_title("Monthly Temperature Evolution", fontsize=14, fontweight="bold")
+ax.grid(True, alpha=0.3, linestyle="--")
+ax.legend(loc="upper left")
 
 # Rotate x-axis labels
-plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
+plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
 
 # Tight layout for better spacing
 fig.tight_layout()
@@ -76,49 +93,64 @@ Creating a sophisticated multi-panel figure with subplots:
 
 ```{python}
 #| show: code
-#| fig-width: 10
-#| fig-height: 6
+#| fig-width: 10.0
+#| fig-height: 6.0
 
 # Create a 2x2 subplot layout
 fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(10, 6))
 
 # Panel 1: Temperature bar chart
 ax1.bar(
-    weather_data['month'], weather_data['temperature'],
-    color='#fd8d3c', alpha=0.7, edgecolor='black')
-ax1.set_title('Temperature Bar Chart', fontweight='bold')
-ax1.set_ylabel('Temperature (°C)')
-ax1.tick_params(axis='x', rotation=45)
+    weather_data["month"],
+    weather_data["temperature"],
+    color="#fd8d3c",
+    alpha=0.7,
+    edgecolor="black",
+)
+ax1.set_title("Temperature Bar Chart", fontweight="bold")
+ax1.set_ylabel("Temperature (°C)")
+ax1.tick_params(axis="x", rotation=45)
 
 # Panel 2: Humidity line plot
 ax2.plot(
-    weather_data['month'], weather_data['humidity'],
-    marker='s', linewidth=2, markersize=6,
-    color='#74c476', linestyle='--')
-ax2.set_title('Humidity Trends', fontweight='bold')
-ax2.set_ylabel('Humidity (%)')
+    weather_data["month"],
+    weather_data["humidity"],
+    marker="s",
+    linewidth=2,
+    markersize=6,
+    color="#74c476",
+    linestyle="--",
+)
+ax2.set_title("Humidity Trends", fontweight="bold")
+ax2.set_ylabel("Humidity (%)")
 ax2.grid(True, alpha=0.3)
-ax2.tick_params(axis='x', rotation=45)
+ax2.tick_params(axis="x", rotation=45)
 
 # Panel 3: Scatter plot
 ax3.scatter(
-    weather_data['temperature'], weather_data['humidity'],
-    s=100, alpha=0.6, c=range(12), cmap='viridis',
-    edgecolors='black', linewidth=1)
-ax3.set_xlabel('Temperature (°C)')
-ax3.set_ylabel('Humidity (%)')
-ax3.set_title('Temperature vs Humidity', fontweight='bold')
+    weather_data["temperature"],
+    weather_data["humidity"],
+    s=100,
+    alpha=0.6,
+    c=range(12),
+    cmap="viridis",
+    edgecolors="black",
+    linewidth=1,
+)
+ax3.set_xlabel("Temperature (°C)")
+ax3.set_ylabel("Humidity (%)")
+ax3.set_title("Temperature vs Humidity", fontweight="bold")
 
 # Panel 4: Histogram
 ax4.hist(
-    weather_data['temperature'], bins=8,
-    color='#6baed6', alpha=0.7, edgecolor='black')
-ax4.set_xlabel('Temperature (°C)')
-ax4.set_ylabel('Frequency')
-ax4.set_title('Temperature Distribution', fontweight='bold')
+    weather_data["temperature"], bins=8, color="#6baed6", alpha=0.7, edgecolor="black"
+)
+ax4.set_xlabel("Temperature (°C)")
+ax4.set_ylabel("Frequency")
+ax4.set_title("Temperature Distribution", fontweight="bold")
 
 # Overall layout adjustment
-fig.suptitle('Comprehensive Weather Analysis', fontsize=16, fontweight='bold', y=1.02)
+fig.suptitle("Comprehensive Weather Analysis", fontsize=16, fontweight="bold", y=1.02)
 fig.tight_layout()
 
 typst(fig)
@@ -130,8 +162,8 @@ Let's add a regression analysis with confidence intervals:
 
 ```{python}
 #| show: output
-#| fig-width: 7
-#| fig-height: 6
+#| fig-width: 7.0
+#| fig-height: 6.0
 #| output-background: rgb("#fff3cd")
 #| output-inset: 1.5em
 
@@ -140,32 +172,41 @@ fig, ax = plt.subplots(figsize=(7, 6))
 
 # Scatter plot
 scatter = ax.scatter(
-    weather_data['temperature'], weather_data['humidity'],
-    s=150, alpha=0.6, c=weather_data['temperature'],
-    cmap='coolwarm', edgecolors='black', linewidth=2)
+    weather_data["temperature"],
+    weather_data["humidity"],
+    s=150,
+    alpha=0.6,
+    c=weather_data["temperature"],
+    cmap="coolwarm",
+    edgecolors="black",
+    linewidth=2,
+)
 
 # Add regression line
 slope, intercept, r_value, p_value, std_err = stats.linregress(
-    weather_data['temperature'], weather_data['humidity']
+    weather_data["temperature"], weather_data["humidity"]
 )
 x_line = np.linspace(
-    weather_data['temperature'].min(),
-    weather_data['temperature'].max(), 100)
+    weather_data["temperature"].min(), weather_data["temperature"].max(), 100
+)
 y_line = slope * x_line + intercept
-ax.plot(x_line, y_line, 'r--', linewidth=2, label=f'R² = {r_value**2:.3f}')
+ax.plot(x_line, y_line, "r--", linewidth=2, label=f"R² = {r_value**2:.3f}")
 
 # Customize appearance
-ax.set_xlabel('Temperature (°C)', fontsize=13, fontweight='bold')
-ax.set_ylabel('Humidity (%)', fontsize=13, fontweight='bold')
+ax.set_xlabel("Temperature (°C)", fontsize=13, fontweight="bold")
+ax.set_ylabel("Humidity (%)", fontsize=13, fontweight="bold")
 ax.set_title(
-    'Regression Analysis: Temperature vs Humidity',
-    fontsize=14, fontweight='bold', pad=20)
-ax.legend(loc='upper right', fontsize=11)
-ax.grid(True, alpha=0.3, linestyle='--')
+    "Regression Analysis: Temperature vs Humidity",
+    fontsize=14,
+    fontweight="bold",
+    pad=20,
+)
+ax.legend(loc="upper right", fontsize=11)
+ax.grid(True, alpha=0.3, linestyle="--")
 
 # Add colorbar
 cbar = plt.colorbar(scatter, ax=ax)
-cbar.set_label('Temperature (°C)', fontsize=11)
+cbar.set_label("Temperature (°C)", fontsize=11)
 
 fig.tight_layout()
 typst(fig)
@@ -186,7 +227,9 @@ Finally, let's demonstrate how Knot captures and displays Python warnings:
 import warnings
 
 # Trigger a demonstration warning
-warnings.warn("This is a runtime warning captured by Knot and displayed in the document.")
+warnings.warn(
+    "This is a runtime warning captured by Knot and displayed in the document."
+)
 
 print("Code execution continues normally after a warning.")
 ```
@@ -205,7 +248,9 @@ Test
 import warnings
 
 # Trigger a demonstration warning
-warnings.warn("This is a runtime warning captured by Knot and displayed in the document.")
+warnings.warn(
+    "This is a runtime warning captured by Knot and displayed in the document."
+)
 
 print("Code execution continues normally after a warning.")
 ```
@@ -218,6 +263,6 @@ Un peu de texte pour vérifier si tout se passe bien !
 
 ```{r}
 #| eval: false
-#| evval: false
+
 1:3 + 1:2
 ```

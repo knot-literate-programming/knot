@@ -306,9 +306,15 @@ pub fn format_file(file_path: &PathBuf, check_only: bool) -> Result<bool> {
             formatted_text.push_str(&original_text[last_pos..chunk.start_byte]);
         }
 
-        // Append formatted chunk
-        // TODO: In the future, call Air/Ruff here for the code part
-        formatted_text.push_str(&chunk.format());
+        // Try to format code with external tools
+        let formatted_code = knot_core::compiler::formatters::format_code(&chunk.code, &chunk.language).ok();
+        
+        if formatted_code.is_none() {
+            log::debug!("External formatter skipped or failed for {}", chunk.language);
+        }
+
+        // Append formatted chunk (structural + optional code formatting)
+        formatted_text.push_str(&chunk.format(formatted_code.as_deref()));
 
         last_pos = chunk.end_byte;
     }
