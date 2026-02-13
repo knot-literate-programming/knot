@@ -181,6 +181,7 @@ mod tests {
                 constant: vec![],
                 // Presentation options (use defaults for tests)
                 layout: None,
+                warnings_visibility: None,
                 gutter: None,
                 code_background: None,
                 code_stroke: None,

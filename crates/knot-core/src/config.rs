@@ -50,6 +50,8 @@ pub struct ChunkDefaults {
 
     // Presentation options
     pub layout: Option<crate::parser::Layout>,
+    #[serde(rename = "warnings-visibility")]
+    pub warnings_visibility: Option<crate::parser::WarningsVisibility>,
     pub gutter: Option<String>,
     #[serde(rename = "code-background")]
     pub code_background: Option<String>,

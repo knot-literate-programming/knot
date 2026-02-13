@@ -106,20 +106,28 @@ impl Backend for TypstBackend {
             args.push(format!("errors: ({})", error_list));
         }
 
-        // Include runtime warnings if any
+        // Include runtime warnings based on visibility setting
         if !output.warnings.is_empty() {
-            let mut warning_list = output
-                .warnings
-                .iter()
-                .map(|w| format!("[{}]", w.message.to_string()))
-                .collect::<Vec<_>>()
-                .join(", ");
-            
-            // Same trailing comma rule for warnings
-            if output.warnings.len() == 1 {
-                warning_list.push(',');
+            match resolved_options.warnings_visibility {
+                crate::parser::WarningsVisibility::None => {
+                    // Suppress warnings entirely — don't add to args
+                }
+                visibility => {
+                    let mut warning_list = output
+                        .warnings
+                        .iter()
+                        .map(|w| format!("[{}]", w.message.to_string()))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    if output.warnings.len() == 1 {
+                        warning_list.push(',');
+                    }
+                    args.push(format!("warnings: ({})", warning_list));
+                    if matches!(visibility, crate::parser::WarningsVisibility::Inline) {
+                        args.push("warnings-position: \"inline\"".to_string());
+                    }
+                }
             }
-            args.push(format!("warnings: ({})", warning_list));
         }
 
         // Generate code based on show option
@@ -334,6 +342,7 @@ mod tests {
                 constant: vec![],
                 // Presentation options (use defaults for tests)
                 layout: None,
+                warnings_visibility: None,
                 gutter: None,
                 code_background: None,
                 code_stroke: None,

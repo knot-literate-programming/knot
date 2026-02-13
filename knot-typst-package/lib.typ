@@ -14,6 +14,7 @@
   output: none,
   warnings: (),
   errors: (),
+  warnings-position: "below", // "below" or "inline"
   layout: none, // Optional: only used when both code and output are present
   gutter: 0.5em,
   code-background: none,
@@ -59,51 +60,69 @@
     )[#output]
   } else { none }
 
+  // Warning blocks (reused for both inline and below positioning)
+  let warning-blocks = warnings.map(w => block(
+    fill: rgb("#fff4ce"),
+    stroke: 1pt + rgb("#facc15"),
+    radius: 2pt,
+    inset: 0.5em,
+    width: 100%,
+  )[
+    #set text(fill: rgb("#854d0e"), size: 0.85em)
+    *Warning:* #w
+  ])
+
   // Layout based on what's being displayed
   let main-content = if code == none and output != none {
     // Only output: single column
-    output-block
+    if warnings-position == "inline" and warning-blocks.len() > 0 {
+      stack(dir: ttb, spacing: 0.5em, output-block, ..warning-blocks)
+    } else {
+      output-block
+    }
   } else if output == none and code != none {
-    // Only code: single column
+    // Only code: single column (warnings not applicable here)
     code-block
   } else if code != none and output != none {
     // Both code and output: use layout
     if layout == "vertical" {
-      stack(
-        dir: ttb,
-        spacing: gutter,
-        code-block,
-        output-block,
-      )
+      if warnings-position == "inline" and warning-blocks.len() > 0 {
+        stack(dir: ttb, spacing: gutter, code-block, output-block, ..warning-blocks)
+      } else {
+        stack(dir: ttb, spacing: gutter, code-block, output-block)
+      }
     } else {
       // horizontal (default when layout is none or "horizontal")
-      grid(
-        columns: (left-ratio * 1fr, right-ratio * 1fr),
-        gutter: gutter,
-        code-block, output-block,
-      )
+      if warnings-position == "inline" and warning-blocks.len() > 0 {
+        let right-col = stack(dir: ttb, spacing: gutter, output-block, ..warning-blocks)
+        grid(
+          columns: (left-ratio * 1fr, right-ratio * 1fr),
+          gutter: gutter,
+          code-block, right-col,
+        )
+      } else {
+        grid(
+          columns: (left-ratio * 1fr, right-ratio * 1fr),
+          gutter: gutter,
+          code-block, output-block,
+        )
+      }
     }
   } else { none }
 
-  // Assemble final content with warnings and errors
+  // Assemble final content
   if main-content == none and warnings.len() == 0 and errors.len() == 0 {
     return none
   }
+
+  // Warnings below: appended after main-content (inline: already embedded above)
+  let below-warnings = if warnings-position == "inline" { () } else { warning-blocks }
 
   stack(
     dir: ttb,
     spacing: 0.5em,
     main-content,
-    ..warnings.map(w => block(
-      fill: rgb("#fff4ce"),
-      stroke: 1pt + rgb("#facc15"),
-      radius: 2pt,
-      inset: 0.5em,
-      width: 100%,
-    )[
-      #set text(fill: rgb("#854d0e"), size: 0.85em)
-      *Warning:* #w
-    ]),
+    ..below-warnings,
     ..errors.map(e => block(
       fill: rgb("#fee2e2"),
       stroke: 1pt + rgb("#ef4444"),

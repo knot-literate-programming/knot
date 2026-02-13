@@ -22,6 +22,19 @@ pub enum Show {
     None,
 }
 
+/// Where to display warnings relative to the code/output block
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum WarningsVisibility {
+    /// Show warnings below the entire block (default)
+    #[default]
+    Below,
+    /// Show warnings inside the layout — stacked with output in the output column
+    Inline,
+    /// Suppress warnings entirely
+    None,
+}
+
 /// How to layout code and output when both are displayed
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -314,6 +327,9 @@ define_options! {
 
     /// How to layout code and output when both are displayed (horizontal or vertical)
     [val] layout: Layout, Layout::Horizontal,
+    /// Where to display warnings: below the block, inline within the layout, or none
+    #[serde(rename = "warnings-visibility")]
+    [val] warnings_visibility: WarningsVisibility, WarningsVisibility::Below,
     /// Space between code and output blocks (Typst length)
     [opt] gutter: String, None,
 
