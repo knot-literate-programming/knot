@@ -2,6 +2,7 @@ use crate::state::ServerState;
 use knot_core::parser::parse_document;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
+use super::get_token_at_pos;
 
 pub async fn handle_hover(state: &ServerState, params: HoverParams) -> Result<Option<Hover>> {
     let uri = &params.text_document_position_params.text_document.uri;
@@ -59,7 +60,7 @@ pub async fn handle_hover(state: &ServerState, params: HoverParams) -> Result<Op
     }
 
     // 2. Check if we are in an inline expression
-    let byte_offset = get_byte_offset(&text, pos);
+    let byte_offset = mapper.offset_at_position(pos);
     let current_inline = doc
         .inline_exprs
         .iter()
@@ -104,60 +105,7 @@ pub async fn handle_hover(state: &ServerState, params: HoverParams) -> Result<Op
     Ok(None)
 }
 
-fn get_byte_offset(text: &str, pos: Position) -> usize {
-    let mut offset = 0;
-    for (i, line) in text.lines().enumerate() {
-        if i == pos.line as usize {
-            // Find character offset in UTF-8 bytes
-            let char_offset: usize = line
-                .chars()
-                .take(pos.character as usize)
-                .map(|c| c.len_utf8())
-                .sum();
-            return offset + char_offset;
-        }
-        offset += line.len() + 1; // +1 for \n
-    }
-    offset
-}
-
-fn get_token_at_pos(text: &str, pos: Position, lang: &str, bidirectional: bool) -> Option<String> {
-    let lines: Vec<&str> = text.lines().collect();
-    let line = lines.get(pos.line as usize)?;
-    let col = pos.character as usize;
-    let chars: Vec<char> = line.chars().collect();
-    if col > chars.len() {
-        return None;
-    }
-
-    let mut start = col;
-    while start > 0 && is_id_char(chars[start - 1], lang) {
-        start -= 1;
-    }
-
-    let mut end = col;
-    if bidirectional {
-        while end < chars.len() && is_id_char(chars[end], lang) {
-            end += 1;
-        }
-    }
-
-    if start == end {
-        None
-    } else {
-        Some(line[start..end].to_string())
-    }
-}
-
-fn is_id_char(c: char, lang: &str) -> bool {
-    if lang == "r" {
-        c.is_alphanumeric() || c == '_' || c == '.' || c == '$' || c == ':'
-    } else {
-        c.is_alphanumeric() || c == '_' || c == '.'
-    }
-}
-
-async fn get_python_help(state: &ServerState, uri: &Url, token: &str) -> Option<Hover> {
+pub async fn get_python_help(state: &ServerState, uri: &Url, token: &str) -> Option<Hover> {
     let mut managers = state.executors.write().await;
     let manager = managers.get_mut(uri)?;
     let executor = manager.get_executor("python").ok()?;
@@ -177,7 +125,7 @@ async fn get_python_help(state: &ServerState, uri: &Url, token: &str) -> Option<
     })
 }
 
-async fn get_r_help(state: &ServerState, uri: &Url, token: &str) -> Option<Hover> {
+pub async fn get_r_help(state: &ServerState, uri: &Url, token: &str) -> Option<Hover> {
     let mut managers = state.executors.write().await;
     let manager = managers.get_mut(uri)?;
     let executor = manager.get_executor("r").ok()?;
