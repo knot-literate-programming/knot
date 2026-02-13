@@ -18,7 +18,7 @@ This document tracks the high-level goals and roadmap for the Knot project. Deta
 - ✅ Chunk customization with show: none and aliases
 - ✅ Unified structured error handling & Granular resilience
 - ✅ Customizable warnings (styles & visibility)
-- ✅ Zero-escape robust execution model
+- ✅ Zero-escape robust execution model (temp files)
 
 **LSP:** ~85% complete
 - ✅ Hover (chunks, R, Python, Typst — stable & responsive)
@@ -26,7 +26,7 @@ This document tracks the high-level goals and roadmap for the Knot project. Deta
 - ✅ Diagnostics (parsing errors, structure validation)
 - ✅ **Execution Diagnostics**: Runtime errors and warnings surfaced in the editor from cache.
 - ✅ Document symbols (including all show variants)
-- ⏳ Go to Definition
+- ⏳ Go to Definition & References
 - ⏳ Hybrid formatting (Air/Ruff)
 
 **CLI:** ~98% complete
@@ -46,21 +46,24 @@ This document tracks the high-level goals and roadmap for the Knot project. Deta
 Make Knot feel like a native editor for both Typst and the embedded languages.
 - [x] **Stable Hover/Completion**: Reliability across all document sections.
 - [ ] **Go to Definition**: Navigate to function/variable definitions.
-- [ ] **References**: Find all references to symbols.
-- [ ] **Unknown Option Warnings**: Validate YAML options to catch typos.
+- [ ] **References**: Find all uses of a symbol across the document.
+- [ ] **Unknown Option Warnings**: Validate YAML options against `OptionMetadata` to catch typos.
 
 ### 2. Standard Tooling Integration
-- [ ] **Hybrid Formatting**: Air (R) + Ruff (Python) + Tinymist (Typst).
-- [ ] **Julia Support**: Extend the robust execution model to Julia.
+- [ ] **Hybrid Formatting**: Integrate Air (R), Ruff (Python) and Tinymist (Typst) into a single command.
+- [ ] **Julia Support**: Extend the robust execution model to the Julia language.
 
 ### 3. Documentation & Examples
 Make Knot accessible and showcase its capabilities.
 - [ ] **User Guide**: Getting started, installation, basic usage.
+- [ ] **Tutorial**: Step-by-step walkthrough of features.
 - [ ] **Scientific Proof of Concept**: A complete project demonstrating multi-language constant objects and complex layout.
+- [ ] **API Documentation**: Automated documentation of all chunk options and their effects.
 
 ### 4. Advanced Features (Future)
 - [ ] **Sync Mapping**: Bidirectional click (Source ↔ PDF). See [sync-mapping.md](sync-mapping.md).
-- [ ] **Variable Explorer**: Dynamic introspection of R/Python sessions.
+- [ ] **Variable Explorer**: Dynamic introspection of R/Python sessions in the editor.
+- [ ] **Content Generators**: Support for Mermaid diagrams, LilyPond music notation, etc.
 
 ---
 
@@ -71,16 +74,19 @@ Make Knot accessible and showcase its capabilities.
 - [x] **Robust Execution**: Zero-escape model using temp files for all languages.
 - [x] **Graceful Degradation**: Granular per-language resilience.
 - [ ] (Future) Support for Julia executor.
+- [ ] (Future) Support for Content-Generators (Mermaid, LilyPond).
 
 ### Knot LSP
 - [x] **Position Mapping**: Robust UTF-16 aware coordinate translation.
 - [x] **Runtime Diagnostics**: Errors and warnings from build/watch surfaced in VS Code.
 - [ ] **Go to Definition**: Navigate to symbols across languages.
 - [ ] **Hybrid Formatting**: Air (R) + Ruff (Python) + Tinymist (Typst).
+- [ ] **Variable Explorer**: Interactive introspection of live sessions.
 
 ### Knot CLI
 - [x] **Watch mode**: with real-time feedback loop to the editor.
 - [x] **Project initialization**: `knot init`.
+- [ ] Improved error logging for CI/CD environments.
 
 ---
 
