@@ -19,6 +19,7 @@ pub fn parse_options(
             let content = trimmed.trim_start_matches("#|").trim();
             yaml_str.push_str(content);
             yaml_str.push('\n');
+            // Offset is i + 1 because options start on the second line of the chunk
             line_map.push(i + 1);
         }
     }
@@ -65,10 +66,19 @@ pub fn parse_options(
                         codly_options.insert(codly_key, value_str);
                     }
                 } else if !valid_options.contains(&key_str) {
-                    // It's not a standard option and not a codly option -> Unknown
+                    // Find the line containing this unknown key for better diagnostic positioning
+                    let line_offset = options_block
+                        .lines()
+                        .enumerate()
+                        .find(|(_, line)| {
+                            let l = line.trim();
+                            l.starts_with("#|") && l.contains(&key_str)
+                        })
+                        .map(|(i, _)| i + 1);
+
                     warnings.push(ChunkError::new(
                         format!("Unknown chunk option: '{}'", key_str),
-                        None,
+                        line_offset,
                     ));
                 }
             }
@@ -118,6 +128,7 @@ mod tests {
         assert!(errors[0]
             .message
             .contains("Unknown chunk option: 'unknown-opt'"));
+        assert_eq!(errors[0].line_offset, Some(1));
     }
 
     #[test]
