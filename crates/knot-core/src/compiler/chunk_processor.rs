@@ -23,31 +23,34 @@ pub fn process_chunk(
     cache: &mut Cache,
     previous_hash: &str,
     config: &Config,
+    is_inert: bool,
 ) -> Result<(String, String)> {
     // Apply config defaults to chunk options and resolve to concrete values
     let mut chunk_options = chunk.options.clone();
 
-    // Priority 1: Apply global [chunk-defaults]
-    chunk_options.apply_config_defaults(&config.chunk_defaults);
-
-    // Priority 2: Apply language-specific [{lang}-chunks] if present
-    // Also merge codly options from language defaults
-    let mut merged_codly_options = chunk.codly_options.clone();
-
-    // First, merge global defaults codly options
-    for (key, value) in &config.chunk_defaults.codly_options {
-        merged_codly_options.insert(key.clone(), value.clone());
-    }
-
-    // Then, merge language-specific defaults (higher priority)
+    // --- CONFIG LAYERING (Global < Language < Error) ---
+    let mut effective_defaults = config.chunk_defaults.clone();
+    
+    // Layer language-specific defaults
     if let Some(lang_defaults) = config.get_language_defaults(&chunk.language) {
-        chunk_options.apply_config_defaults(lang_defaults);
-        for (key, value) in &lang_defaults.codly_options {
-            merged_codly_options.insert(key.clone(), value.clone());
+        effective_defaults.merge(lang_defaults);
+    }
+    
+    // Layer error-specific defaults (if inert)
+    if is_inert {
+        if let Some(error_defaults) = config.get_language_error_defaults(&chunk.language) {
+            effective_defaults.merge(error_defaults);
         }
     }
+    
+    // Apply the final layered defaults to the chunk's own options (filling Nones)
+    chunk_options.apply_config_defaults(&effective_defaults);
 
-    // Finally, chunk-specific codly options (highest priority - already in merged_codly_options)
+    // --- CODLY OPTIONS MERGING (Same Priority) ---
+    // Note: effective_defaults already has merged codly_options due to effective_defaults.merge()
+    let mut merged_codly_options = effective_defaults.codly_options.clone();
+
+    // Finally, override with chunk-specific options (Highest Priority)
     for (key, value) in &chunk.codly_options {
         merged_codly_options.insert(key.clone(), value.clone());
     }
@@ -71,7 +74,7 @@ pub fn process_chunk(
         &constants_hash,
     );
 
-    let execution_output = if !resolved_options.eval {
+    let execution_output = if is_inert || !resolved_options.eval {
         ExecutionOutput {
             result: ExecutionResult::Text(String::new()),
             warnings: vec![],
@@ -112,7 +115,7 @@ pub fn process_chunk(
 
     let backend = TypstBackend::new();
     let chunk_output_final =
-        backend.format_chunk(&chunk_with_codly, &resolved_options, &execution_output);
+        backend.format_chunk(&chunk_with_codly, &resolved_options, &execution_output, is_inert);
 
     Ok((chunk_output_final, chunk_hash))
 }
@@ -233,6 +236,7 @@ mod tests {
             &mut cache,
             "prev_hash",
             &setup_test_config(),
+            false,
         )
         .unwrap();
 
@@ -253,6 +257,7 @@ mod tests {
             &mut cache,
             "prev_hash",
             &setup_test_config(),
+            false,
         )
         .unwrap();
     }
@@ -269,6 +274,7 @@ mod tests {
             &mut cache,
             "prev_hash",
             &setup_test_config(),
+            false,
         )
         .unwrap();
 
@@ -289,6 +295,7 @@ mod tests {
             &mut cache,
             "prev_hash",
             &setup_test_config(),
+            false,
         )
         .unwrap();
 
@@ -299,6 +306,7 @@ mod tests {
             &mut cache,
             "prev_hash",
             &setup_test_config(),
+            false,
         )
         .unwrap();
 
@@ -320,6 +328,7 @@ mod tests {
             &mut cache,
             "prev_hash",
             &setup_test_config(),
+            false,
         )
         .unwrap();
         let (_output2, hash2) = process_chunk(
@@ -328,6 +337,7 @@ mod tests {
             &mut cache,
             "prev_hash",
             &setup_test_config(),
+            false,
         )
         .unwrap();
 
@@ -347,6 +357,7 @@ mod tests {
             &mut cache,
             "prev_hash_1",
             &setup_test_config(),
+            false,
         )
         .unwrap();
         let (_output2, hash2) = process_chunk(
@@ -355,6 +366,7 @@ mod tests {
             &mut cache,
             "prev_hash_2",
             &setup_test_config(),
+            false,
         )
         .unwrap();
 
@@ -374,6 +386,7 @@ mod tests {
             &mut cache,
             "prev_hash",
             &setup_test_config(),
+            false,
         );
 
         // Should fail with unsupported language
@@ -413,6 +426,7 @@ mod tests {
             &mut cache,
             "prev_hash",
             &setup_test_config(),
+            false,
         )
         .unwrap();
 
@@ -427,6 +441,7 @@ mod tests {
             &mut cache,
             "prev_hash",
             &setup_test_config(),
+            false,
         )
         .unwrap();
 
@@ -445,6 +460,7 @@ mod tests {
             &mut cache,
             "prev_hash",
             &setup_test_config(),
+            false,
         )
         .unwrap();
 
@@ -464,6 +480,7 @@ mod tests {
             &mut cache,
             "prev_hash",
             &setup_test_config(),
+            false,
         )
         .unwrap();
 
@@ -520,7 +537,7 @@ mod tests {
         };
 
         let (output, _hash) =
-            process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &config).unwrap();
+            process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &config, false).unwrap();
 
         // Verify that language-specific defaults were applied (show: output means code: none)
         assert!(output.contains("code: none"));
@@ -552,7 +569,7 @@ mod tests {
         };
 
         let (output, _hash) =
-            process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &config).unwrap();
+            process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &config, false).unwrap();
 
         // Chunk-specific option should override everything (show: both means code is shown)
         assert!(output.contains("code: [```python"));
@@ -603,7 +620,7 @@ mod tests {
         };
 
         let (output, _hash) =
-            process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &config).unwrap();
+            process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &config, false).unwrap();
 
         // Should use global defaults (show: output means code is not shown)
         assert!(output.contains("code: none"));

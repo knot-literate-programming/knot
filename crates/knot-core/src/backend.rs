@@ -50,6 +50,7 @@ pub trait Backend {
         chunk: &Chunk,
         resolved_options: &ResolvedChunkOptions,
         output: &ExecutionOutput,
+        is_inert: bool,
     ) -> String;
 }
 
@@ -73,6 +74,7 @@ impl Backend for TypstBackend {
         chunk: &Chunk,
         resolved_options: &ResolvedChunkOptions,
         output: &ExecutionOutput,
+        is_inert: bool,
     ) -> String {
         // If show is none, return empty string immediately
         if matches!(resolved_options.show, Show::None) {
@@ -80,6 +82,7 @@ impl Backend for TypstBackend {
         }
 
         let mut args = vec![];
+        // For inert chunks, we keep the original language for syntax highlighting
         args.push(format!("lang: \"{}\"", chunk.language));
         if let Some(name) = &chunk.name {
             args.push(format!("name: \"{}\"", name));
@@ -88,6 +91,10 @@ impl Backend for TypstBackend {
             if let Some(caption) = &chunk.options.caption {
                 args.push(format!("caption: [{}]", caption));
             }
+        }
+
+        if is_inert {
+            args.push("is-inert: true".to_string());
         }
 
         // Include errors as a special argument to code-chunk (if any)

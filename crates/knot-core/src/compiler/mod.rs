@@ -103,6 +103,8 @@ impl Compiler {
             executable_nodes.len()
         );
 
+        let mut broken_languages = std::collections::HashSet::new();
+
         // Phase 2: Iterate through sorted nodes, execute, and build output
         for node in executable_nodes {
             let (node_start, node_end, lang) = match node {
@@ -124,6 +126,29 @@ impl Compiler {
                 typst_output.push_str(&doc.source[last_pos..node_start]);
             }
 
+            if broken_languages.contains(lang) {
+                // This language is broken: render as inert
+                let result_str = match node {
+                    ExecutableNode::Chunk(chunk) => {
+                        let (res, _) = chunk_processor::process_chunk(
+                            chunk,
+                            &mut self.executor_manager,
+                            &mut cache,
+                            &previous_hash,
+                            &self.config,
+                            true, // is_inert
+                        )?;
+                        res
+                    }
+                    ExecutableNode::InlineExpr(inline_expr) => {
+                        format!("`{{{} {}}}`", inline_expr.language, inline_expr.code)
+                    }
+                };
+                typst_output.push_str(&result_str);
+                last_pos = node_end;
+                continue;
+            }
+
             // --- PROACTIVE STATE RESTORATION ---
             snapshot_manager.restore_if_needed(
                 lang,
@@ -133,77 +158,100 @@ impl Compiler {
                 &self.project_root,
             )?;
 
-            let (result_str, node_hash) = match node {
-                ExecutableNode::Chunk(chunk) => {
-                    let result = chunk_processor::process_chunk(
-                        chunk,
-                        &mut self.executor_manager,
-                        &mut cache,
-                        &previous_hash,
-                        &self.config,
-                    )?;
-
-                    // Handle constant objects declared in this chunk
-                    if !chunk.options.constant.is_empty() {
-                        let chunk_name = chunk.name.as_deref().unwrap_or("unnamed").to_string();
-                        let exec = self.executor_manager.get_executor(&chunk.language)?;
-                        let cache_dir = self.project_root.join(Defaults::CACHE_DIR_NAME);
-
-                        for obj_name in &chunk.options.constant {
-                            // 1. Hash the object
-                            let obj_hash = exec.hash_object(obj_name).context(format!(
-                                "Failed to hash constant object '{}'",
-                                obj_name
-                            ))?;
-
-                            // 2. Save to content-addressed storage
-                            exec.save_constant(obj_name, &obj_hash, &cache_dir)
-                                .context(format!(
-                                    "Failed to save constant object '{}'",
-                                    obj_name
-                                ))?;
-
-                            // 3. Get file size for metadata
-                            let ext = exec.object_extension();
-                            let object_path = cache_dir
-                                .join("objects")
-                                .join(format!("{}.{}", obj_hash, ext));
-                            let size_bytes = std::fs::metadata(&object_path)?.len();
-
-                            // 4. Track for later verification
-                            constant_objects
-                                .insert(obj_name.clone(), (obj_hash.clone(), chunk_name.clone()));
-
-                            // 5. Add to cache metadata
-                            cache.metadata.constant_objects.insert(
-                                obj_name.clone(),
-                                ConstantObjectInfo {
-                                    hash: obj_hash,
-                                    size_bytes,
-                                    language: chunk.language.clone(),
-                                    created_in_chunk: chunk_name.clone(),
-                                    created_at: chrono::Utc::now().to_rfc3339(),
-                                },
-                            );
-
-                            log::info!(
-                                "🔒 Constant object '{}' ({}) declared in chunk '{}'",
-                                obj_name,
-                                chunk.language,
-                                chunk_name
-                            );
-                        }
-                    }
-
-                    result
-                }
+            let execution_result = match node {
+                ExecutableNode::Chunk(chunk) => chunk_processor::process_chunk(
+                    chunk,
+                    &mut self.executor_manager,
+                    &mut cache,
+                    &previous_hash,
+                    &self.config,
+                    false, // is_inert
+                ),
                 ExecutableNode::InlineExpr(inline_expr) => inline_processor::process_inline_expr(
                     inline_expr,
                     &mut self.executor_manager,
                     &mut cache,
                     &previous_hash,
-                )?,
+                ),
             };
+
+            let (result_str, node_hash) = match execution_result {
+                Ok(res) => res,
+                Err(e) => {
+                    // Fatal execution error: Insert red error block and mark language as broken
+                    let error_block = format!(
+                        "\n#block(fill: rgb(\"#ffebee\"), stroke: 1pt + red, inset: 1em, radius: 0.5em, width: 100%)[
+    *Erreur d'exécution ({}) dans le {} `{}`* \n\n ```\n{}\n``` \n\n _L'exécution des blocs `{}` suivants a été suspendue._
+]\n",
+                        lang,
+                        match node {
+                            ExecutableNode::Chunk(_) => "chunk",
+                            ExecutableNode::InlineExpr(_) => "expression inline",
+                        },
+                        match node {
+                            ExecutableNode::Chunk(c) => c.name.as_deref().unwrap_or("unnamed"),
+                            ExecutableNode::InlineExpr(_) => "inline",
+                        },
+                        e,
+                        lang
+                    );
+                    typst_output.push_str(&error_block);
+                    last_pos = node_end; 
+                    broken_languages.insert(lang.to_string());
+                    continue;
+                }
+            };
+
+            // Handle constant objects declared in this chunk (only if execution succeeded)
+            if let ExecutableNode::Chunk(chunk) = node {
+                if !chunk.options.constant.is_empty() {
+                    let chunk_name = chunk.name.as_deref().unwrap_or("unnamed").to_string();
+                    let exec = self.executor_manager.get_executor(&chunk.language)?;
+                    let cache_dir = self.project_root.join(Defaults::CACHE_DIR_NAME);
+
+                    for obj_name in &chunk.options.constant {
+                        // 1. Hash the object
+                        let obj_hash = exec.hash_object(obj_name).context(format!(
+                            "Failed to hash constant object '{}'",
+                            obj_name
+                        ))?;
+
+                        // 2. Save to content-addressed storage
+                        exec.save_constant(obj_name, &obj_hash, &cache_dir)
+                            .context(format!("Failed to save constant object '{}'", obj_name))?;
+
+                        // 3. Get file size for metadata
+                        let ext = exec.object_extension();
+                        let object_path = cache_dir
+                            .join("objects")
+                            .join(format!("{}.{}", obj_hash, ext));
+                        let size_bytes = std::fs::metadata(&object_path)?.len();
+
+                        // 4. Track for later verification
+                        constant_objects
+                            .insert(obj_name.clone(), (obj_hash.clone(), chunk_name.clone()));
+
+                        // 5. Add to cache metadata
+                        cache.metadata.constant_objects.insert(
+                            obj_name.clone(),
+                            ConstantObjectInfo {
+                                hash: obj_hash,
+                                size_bytes,
+                                language: chunk.language.clone(),
+                                created_in_chunk: chunk_name.clone(),
+                                created_at: chrono::Utc::now().to_rfc3339(),
+                            },
+                        );
+
+                        log::info!(
+                            "🔒 Constant object '{}' ({}) declared in chunk '{}'",
+                            obj_name,
+                            chunk.language,
+                            chunk_name
+                        );
+                    }
+                }
+            }
 
             // Update hash chain for this language
             last_hash_per_lang.insert(lang.to_string(), node_hash.clone());
@@ -238,13 +286,6 @@ impl Compiler {
 
             for (obj_name, (initial_hash, chunk_name)) in &constant_objects {
                 let info = cache.metadata.constant_objects.get(obj_name).unwrap();
-                // Ensure executor is loaded with the right state to verify?
-                // Actually, for verification, we might need to be careful if we skipped chunks.
-                // But constant objects are by definition constant, so their hash should be verifyable
-                // in ANY state where they exist.
-                // If we skipped the chunk that created them, they might not be loaded!
-
-                // So we need to ensure they are loaded.
                 let exec = self.executor_manager.get_executor(&info.language)?;
                 let cache_dir = self.project_root.join(Defaults::CACHE_DIR_NAME);
 
@@ -263,7 +304,7 @@ impl Compiler {
                     anyhow::bail!(
                         "❌ Constant object verification failed!\n\n\
                          Object '{}' ({}) was declared as constant in chunk '{}' but was modified during execution.\n\n\
-                         Initial hash: {}\n\
+                         Initial hash: {}\n\n\
                          Final hash:   {}\n\n\
                          This violates the constant object contract. The object must remain immutable after creation.\n\
                          Output file NOT generated to preserve reproducibility.",

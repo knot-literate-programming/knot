@@ -27,6 +27,12 @@ pub struct Config {
     /// Python-specific chunk defaults ([python-chunks] in knot.toml)
     #[serde(default, rename = "python-chunks")]
     pub python_chunks: Option<ChunkDefaults>,
+    /// R-specific error chunk defaults ([r-error] in knot.toml)
+    #[serde(default, rename = "r-error")]
+    pub r_error: Option<ChunkDefaults>,
+    /// Python-specific error chunk defaults ([python-error] in knot.toml)
+    #[serde(default, rename = "python-error")]
+    pub python_error: Option<ChunkDefaults>,
 }
 
 /// Default values for chunk options, configurable in knot.toml
@@ -84,6 +90,35 @@ pub struct ChunkDefaults {
 }
 
 impl ChunkDefaults {
+    /// Merge another set of defaults into this one (other takes priority)
+    pub fn merge(&mut self, other: &ChunkDefaults) {
+        if other.eval.is_some() { self.eval = other.eval; }
+        if other.show.is_some() { self.show = other.show.clone(); }
+        if other.cache.is_some() { self.cache = other.cache; }
+        if other.fig_width.is_some() { self.fig_width = other.fig_width; }
+        if other.fig_height.is_some() { self.fig_height = other.fig_height; }
+        if other.dpi.is_some() { self.dpi = other.dpi; }
+        if other.fig_format.is_some() { self.fig_format = other.fig_format.clone(); }
+        if other.layout.is_some() { self.layout = other.layout.clone(); }
+        if other.warnings_visibility.is_some() { self.warnings_visibility = other.warnings_visibility.clone(); }
+        if other.gutter.is_some() { self.gutter = other.gutter.clone(); }
+        if other.code_background.is_some() { self.code_background = other.code_background.clone(); }
+        if other.code_stroke.is_some() { self.code_stroke = other.code_stroke.clone(); }
+        if other.code_radius.is_some() { self.code_radius = other.code_radius.clone(); }
+        if other.code_inset.is_some() { self.code_inset = other.code_inset.clone(); }
+        if other.output_background.is_some() { self.output_background = other.output_background.clone(); }
+        if other.output_stroke.is_some() { self.output_stroke = other.output_stroke.clone(); }
+        if other.output_radius.is_some() { self.output_radius = other.output_radius.clone(); }
+        if other.output_inset.is_some() { self.output_inset = other.output_inset.clone(); }
+        if other.width_ratio.is_some() { self.width_ratio = other.width_ratio.clone(); }
+        if other.align.is_some() { self.align = other.align.clone(); }
+
+        // Merge codly options
+        for (key, value) in &other.codly_options {
+            self.codly_options.insert(key.clone(), value.clone());
+        }
+    }
+
     /// Extract codly-* options from the "other" HashMap
     ///
     /// This should be called after deserialization to populate codly_options
@@ -195,6 +230,12 @@ impl Config {
         if let Some(ref mut python_chunks) = config.python_chunks {
             python_chunks.extract_codly_options();
         }
+        if let Some(ref mut r_error) = config.r_error {
+            r_error.extract_codly_options();
+        }
+        if let Some(ref mut python_error) = config.python_error {
+            python_error.extract_codly_options();
+        }
         // Also extract from global defaults
         config.chunk_defaults.extract_codly_options();
 
@@ -210,17 +251,19 @@ impl Config {
     ///
     /// Returns the language-specific defaults if defined in knot.toml,
     /// otherwise returns None.
-    ///
-    /// # Example
-    /// ```toml
-    /// [r-chunks]
-    /// show = "output"
-    /// fig-width = 8.0
-    /// ```
     pub fn get_language_defaults(&self, lang: &str) -> Option<&ChunkDefaults> {
         match lang {
             "r" => self.r_chunks.as_ref(),
             "python" => self.python_chunks.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// Get language-specific error defaults for a given language
+    pub fn get_language_error_defaults(&self, lang: &str) -> Option<&ChunkDefaults> {
+        match lang {
+            "r" => self.r_error.as_ref(),
+            "python" => self.python_error.as_ref(),
             _ => None,
         }
     }

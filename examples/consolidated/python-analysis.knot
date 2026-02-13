@@ -168,3 +168,16 @@ typst(fig)
 ]
 
 The regression analysis shows R² = `{python} f"{r_value**2:.3f}"`, with slope = `{python} f"{slope:.2f}"`.
+
+== Warnings Demonstration
+
+Finally, let's demonstrate how Knot captures and displays Python warnings:
+
+```{python}
+import warnings
+
+# Trigger a demonstration warning
+warnings.warn("This is a runtime warning captured by Knot and displayed in the document.")
+
+print("Code execution continues normally after a warning.")
+```

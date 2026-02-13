@@ -9,7 +9,7 @@ main = "main.knot"
 
 # Additional files to include in order (optional)
 # These will be injected at the /* KNOT-INJECT-CHAPTERS */ placeholder
-includes = ["r-analysis.knot"]# , "python-analysis.knot", "mixed-analysis.knot"]
+includes = ["python-analysis.knot", "r-analysis.knot"] #"mixed-analysis.knot"]
 
 [helpers]
 # Typst helper functions (required)
@@ -55,3 +55,13 @@ code-stroke = '1pt + rgb("#CE412B")'
 
 [python-chunks]
 code-stroke = '1pt + rgb("#3572A5")'
+
+[r-error]
+code-stroke = '1pt + rgb("#CCCCCC")'
+code-background = 'rgb("#F5F5F5")'
+codly-zebra-fill = 'none'
+
+[python-error]
+code-stroke = '1pt + rgb("#CCCCCC")'
+code-background = 'rgb("#F5F5F5")'
+codly-zebra-fill = 'none'
