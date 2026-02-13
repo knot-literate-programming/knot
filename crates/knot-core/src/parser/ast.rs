@@ -51,7 +51,7 @@ impl FigFormat {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Position {
     pub line: usize,
     pub column: usize,
@@ -385,6 +385,7 @@ macro_rules! define_inline_options {
         }
 
         impl InlineOptions {
+            /// Resolve all options to concrete values, applying defaults.
             pub fn resolve(&self) -> ResolvedInlineOptions {
                 ResolvedInlineOptions {
                     $(

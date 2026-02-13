@@ -89,6 +89,13 @@ pub struct RuntimeError {
     pub traceback: Vec<String>,
 }
 
+impl std::fmt::Display for RuntimeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let msg = self.message.as_ref().map(|m| m.to_string()).unwrap_or_else(|| "Unknown error".to_string());
+        write!(f, "{}", msg)
+    }
+}
+
 /// Root structure for metadata passed via side-channel
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct KnotMetadata {

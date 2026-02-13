@@ -26,6 +26,8 @@ pub struct ChunkCacheEntry {
     pub files: Vec<String>,
     #[serde(default)]
     pub warnings: Vec<crate::executors::side_channel::RuntimeWarning>,
+    #[serde(default)]
+    pub error: Option<crate::executors::side_channel::RuntimeError>,
     pub dependencies: Vec<String>,
     pub updated_at: String,
 }

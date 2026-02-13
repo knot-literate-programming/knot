@@ -82,6 +82,7 @@ pub fn get_cached_result(
         return Ok(ExecutionOutput {
             result: ExecutionResult::Text(String::new()),
             warnings: entry.warnings.clone(),
+            error: entry.error.clone(),
         });
     }
 
@@ -112,6 +113,7 @@ pub fn get_cached_result(
     Ok(ExecutionOutput {
         result,
         warnings: entry.warnings.clone(),
+        error: entry.error.clone(),
     })
 }
 
@@ -193,6 +195,7 @@ pub fn create_chunk_entry(
     hash: String,
     files: Vec<String>,
     warnings: Vec<RuntimeWarning>,
+    error: Option<crate::executors::side_channel::RuntimeError>,
     dependencies: Vec<PathBuf>,
 ) -> ChunkCacheEntry {
     ChunkCacheEntry {
@@ -202,6 +205,7 @@ pub fn create_chunk_entry(
         hash,
         files,
         warnings,
+        error,
         dependencies: dependencies
             .iter()
             .map(|p| p.to_string_lossy().to_string())

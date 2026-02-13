@@ -339,7 +339,7 @@ impl KnotLanguageServer {
     }
 
     async fn publish_diagnostics(&self, uri: &Url, text: &str) {
-        let diagnostics = get_diagnostics(text);
+        let diagnostics = get_diagnostics(uri, text);
         {
             let mut cache = self.state.knot_diagnostics_cache.write().await;
             cache.insert(uri.clone(), diagnostics);

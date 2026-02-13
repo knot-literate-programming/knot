@@ -9,7 +9,7 @@
 //! 6. Format the output using the Typst backend.
 
 use crate::backend::{Backend, TypstBackend};
-use crate::cache::{Cache, hash_dependencies};
+use crate::cache::{hash_dependencies, Cache};
 use crate::config::Config;
 use crate::executors::{ExecutionOutput, ExecutionResult, ExecutorManager, GraphicsOptions};
 use crate::parser::Chunk;
@@ -75,6 +75,7 @@ pub fn process_chunk(
         ExecutionOutput {
             result: ExecutionResult::Text(String::new()),
             warnings: vec![],
+            error: None,
         }
     } else if resolved_options.cache && cache.has_cached_result(&chunk_hash) {
         info!("  ✓ {} [cached]", chunk_name);
@@ -94,17 +95,38 @@ pub fn process_chunk(
         let output = exec.execute(&chunk.code, &graphics_opts)?;
 
         if resolved_options.cache {
-            cache.save_result(
-                chunk.start_byte, // Use start_byte as unique ID for now
-                chunk.name.clone(),
-                chunk.language.clone(),
-                chunk_hash.clone(),
-                &output,
-                chunk_options.depends.clone(),
-            )?;
+            if let Some(error) = &output.error {
+                // Save execution error to cache
+                cache.save_error(
+                    chunk.start_byte,
+                    chunk.name.clone(),
+                    chunk.language.clone(),
+                    chunk_hash.clone(),
+                    error.clone(),
+                    chunk_options.depends.clone(),
+                )?;
+            } else {
+                // Save successful result to cache
+                cache.save_result(
+                    chunk.start_byte, // Use start_byte as unique ID for now
+                    chunk.name.clone(),
+                    chunk.language.clone(),
+                    chunk_hash.clone(),
+                    &output,
+                    chunk_options.depends.clone(),
+                )?;
+            }
         }
         output
     };
+
+    // If there is a fatal error, we need to return it as an Err so the compiler knows to switch to inert mode
+    // (preserving the behavior expected by mod.rs)
+    if let Some(error) = &execution_output.error {
+        // Return error with structured data (via anyhow)
+        // We'll wrap it in a way that mod.rs can still format it easily
+        return Err(anyhow::anyhow!("{}", error));
+    }
 
     // Create a chunk with merged codly options for the backend
     let mut chunk_with_codly = chunk.clone();
@@ -542,15 +564,8 @@ mod tests {
             ..Default::default()
         };
 
-        let (output, _hash) = process_chunk(
-            &chunk,
-            &mut manager,
-            &mut cache,
-            "prev_hash",
-            &config,
-            false,
-        )
-        .unwrap();
+        let (output, _hash) =
+            process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &config, false).unwrap();
 
         // Verify that language-specific defaults were applied (show: output means code: none)
         assert!(output.contains("code: none"));
@@ -581,15 +596,8 @@ mod tests {
             ..Default::default()
         };
 
-        let (output, _hash) = process_chunk(
-            &chunk,
-            &mut manager,
-            &mut cache,
-            "prev_hash",
-            &config,
-            false,
-        )
-        .unwrap();
+        let (output, _hash) =
+            process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &config, false).unwrap();
 
         // Chunk-specific option should override everything (show: both means code is shown)
         assert!(output.contains("code: [```python"));
@@ -639,15 +647,8 @@ mod tests {
             ..Default::default()
         };
 
-        let (output, _hash) = process_chunk(
-            &chunk,
-            &mut manager,
-            &mut cache,
-            "prev_hash",
-            &config,
-            false,
-        )
-        .unwrap();
+        let (output, _hash) =
+            process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &config, false).unwrap();
 
         // Should use global defaults (show: output means code is not shown)
         assert!(output.contains("code: none"));

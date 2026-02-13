@@ -104,6 +104,37 @@ impl Cache {
         Ok(())
     }
 
+    /// Save a chunk execution error to cache
+    pub fn save_error(
+        &mut self,
+        chunk_index: usize,
+        chunk_name: Option<String>,
+        language: String,
+        hash: String,
+        error: crate::executors::side_channel::RuntimeError,
+        dependencies: Vec<PathBuf>,
+    ) -> Result<()> {
+        let new_entry = storage::create_chunk_entry(
+            chunk_index,
+            chunk_name,
+            language,
+            hash,
+            Vec::new(), // No output files for error
+            Vec::new(), // Warnings are usually empty if error occurs, or included in RuntimeError
+            Some(error),
+            dependencies,
+        );
+
+        // Remove old entry if it exists
+        self.metadata
+            .chunks
+            .retain(|entry| entry.index != chunk_index);
+        self.metadata.chunks.push(new_entry);
+
+        storage::save_metadata(&self.cache_dir, &self.metadata)?;
+        Ok(())
+    }
+
     /// Check if chunk result is cached
     pub fn has_cached_result(&self, hash: &str) -> bool {
         self.metadata.chunks.iter().any(|entry| entry.hash == hash)
@@ -142,6 +173,7 @@ impl Cache {
             hash,
             files_to_cache,
             output.warnings.clone(),
+            None, // No error on success
             dependencies,
         );
 

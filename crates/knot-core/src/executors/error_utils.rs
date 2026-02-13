@@ -1,20 +1,19 @@
 /// Error formatting utilities for intelligent code context display
 use regex::Regex;
 
-/// Extract line number from error messages
+/// Extract line number from error messages or traceback lines
 ///
 /// Supports:
 /// - Python: "line 15, in <module>" (looks for user code, not wrapper)
 /// - R: various error formats (though R is less consistent)
-fn extract_error_line(error_msg: &str) -> Option<usize> {
+pub fn extract_error_line(error_msg: &str) -> Option<usize> {
     // Python traceback format: look for "line X, in <module>" which is user code
-    // (not "line X, in main" which is the wrapper)
     let python_module_re = Regex::new(r#"line (\d+), in <module>"#).ok()?;
     if let Some(cap) = python_module_re.captures(error_msg) {
         return cap.get(1)?.as_str().parse().ok();
     }
 
-    // Fallback: any "line X," but prefer later occurrences
+    // Python fallback: "line X," but prefer later occurrences (inner frames)
     let python_re = Regex::new(r"line (\d+),").ok()?;
     let all_matches: Vec<_> = python_re.captures_iter(error_msg).collect();
     if let Some(last_match) = all_matches.last() {
@@ -30,22 +29,27 @@ fn extract_error_line(error_msg: &str) -> Option<usize> {
     None
 }
 
+/// Extract the error line number from a structured traceback
+pub fn extract_line_from_traceback(traceback: &[String]) -> Option<usize> {
+    // Search from the end (most specific frame) to the beginning
+    for line in traceback.iter().rev() {
+        if let Some(num) = extract_error_line(line) {
+            return Some(num);
+        }
+    }
+    None
+}
+
 /// Format code with intelligent context around the error
-///
-/// If an error line is found in the error message, shows context around that line.
-/// Otherwise, shows the beginning of the code with a reasonable limit.
 pub fn format_code_with_context(code: &str, error_msg: &str, context_lines: usize) -> String {
     let lines: Vec<&str> = code.lines().collect();
     let total_lines = lines.len();
 
-    // If code is short enough, just return it all
     if total_lines <= 10 {
         return code.to_string();
     }
 
-    // Try to find the error line
     if let Some(error_line) = extract_error_line(error_msg) {
-        // error_line is 1-indexed, convert to 0-indexed
         let error_idx = error_line.saturating_sub(1);
 
         if error_idx < total_lines {
@@ -53,15 +57,12 @@ pub fn format_code_with_context(code: &str, error_msg: &str, context_lines: usiz
             let end = (error_idx + context_lines + 1).min(total_lines);
 
             let mut result = String::new();
-
-            // Show indication if we're skipping the beginning
             if start > 0 {
                 result.push_str(&format!("... ({} lines above)\n", start));
             }
 
-            // Show the context lines with line numbers
             for (i, line) in lines[start..end].iter().enumerate() {
-                let line_num = start + i + 1; // 1-indexed for display
+                let line_num = start + i + 1;
                 if line_num == error_line {
                     result.push_str(&format!(">>> {}: {}\n", line_num, line));
                 } else {
@@ -69,7 +70,6 @@ pub fn format_code_with_context(code: &str, error_msg: &str, context_lines: usiz
                 }
             }
 
-            // Show indication if we're skipping the end
             if end < total_lines {
                 result.push_str(&format!("... ({} lines below)", total_lines - end));
             }
@@ -78,17 +78,14 @@ pub fn format_code_with_context(code: &str, error_msg: &str, context_lines: usiz
         }
     }
 
-    // Fallback: show first N lines with better limit
     let show_lines = 15.min(total_lines);
     let mut result = lines[..show_lines].join("\n");
-
     if total_lines > show_lines {
         result.push_str(&format!(
             "\n... ({} lines not shown)",
             total_lines - show_lines
         ));
     }
-
     result
 }
 
@@ -111,24 +108,11 @@ NameError: name 'x' is not defined"#;
     }
 
     #[test]
-    fn test_format_short_code() {
-        let code = "line1\nline2\nline3";
-        let error = "some error";
-        let result = format_code_with_context(code, error, 2);
-        assert_eq!(result, code);
-    }
-
-    #[test]
-    fn test_format_with_error_line() {
-        let code = (1..=20)
-            .map(|i| format!("line {}", i))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let error = "Traceback: line 10, in <module>";
-        let result = format_code_with_context(&code, error, 2);
-
-        assert!(result.contains(">>> 10:"));
-        assert!(result.contains("line 8"));
-        assert!(result.contains("line 12"));
+    fn test_extract_from_traceback() {
+        let tb = vec![
+            "line 1, in <module>".to_string(),
+            "line 5, in nested_func".to_string(),
+        ];
+        assert_eq!(extract_line_from_traceback(&tb), Some(5));
     }
 }

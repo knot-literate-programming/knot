@@ -9,7 +9,7 @@ pub mod r;
 pub mod side_channel;
 
 pub use manager::ExecutorManager;
-use side_channel::{KnotMetadata, OutputMetadata, RuntimeWarning, SideChannel};
+pub use side_channel::{KnotMetadata, OutputMetadata, RuntimeError, RuntimeWarning, SideChannel};
 
 // From section 3.3 of the reference document
 
@@ -27,6 +27,7 @@ pub enum ExecutionResult {
 pub struct ExecutionOutput {
     pub result: ExecutionResult,
     pub warnings: Vec<RuntimeWarning>,
+    pub error: Option<RuntimeError>,
 }
 
 /// Graphics options for code execution
@@ -46,10 +47,10 @@ pub struct GraphicsOptions {
 /// 3. Successful result via `metadata_to_execution_result`
 ///
 /// `traceback_skip` lets each language skip its own wrapper frames from the
-/// traceback (R skips 3: tryCatch/withCallingHandlers/withVisible; Python: 0).
+/// traceback (R skips 3: tryCatch/withCallingHandlers/withVisible; Python: 1).
 pub fn process_execution_output(
     code: &str,
-    metadata: side_channel::KnotMetadata,
+    mut metadata: side_channel::KnotMetadata,
     stdout: &str,
     stderr: &str,
     traceback_skip: usize,
@@ -57,51 +58,33 @@ pub fn process_execution_output(
     use crate::executors::error_utils::format_code_with_context;
 
     // Check for structured errors first (most precise)
-    if let Some(error) = &metadata.error {
+    if let Some(error) = &mut metadata.error {
+        // Clean up traceback by skipping internal wrapper frames
+        if traceback_skip > 0 && error.traceback.len() >= traceback_skip {
+            error.traceback = error.traceback.drain(traceback_skip..).collect();
+        }
+
         let error_msg = error
             .message
             .as_ref()
             .map(|m| m.to_string())
             .unwrap_or_else(|| "Unknown error".to_string());
 
-        let code_preview = format_code_with_context(code, &error_msg, 3);
-
-        const MAX_TRACEBACK_FRAMES: usize = 8;
-        let user_frames: Vec<&String> = error.traceback.iter().skip(traceback_skip).collect();
-        let traceback_str = if user_frames.len() > MAX_TRACEBACK_FRAMES {
-            let omitted = user_frames.len() - MAX_TRACEBACK_FRAMES;
-            let tail = &user_frames[user_frames.len() - MAX_TRACEBACK_FRAMES..];
-            std::iter::once(format!("... {} frames omitted ...", omitted))
-                .chain(tail.iter().map(|s| s.to_string()))
-                .collect::<Vec<_>>()
-                .join("\n")
-        } else {
-            user_frames
-                .iter()
-                .map(|s| s.as_str())
-                .collect::<Vec<_>>()
-                .join("\n")
-        };
-
-        anyhow::bail!(
-            "Execution failed.\n\nCode:\n{}\n\nError: {}\nCall: {}\n\nTraceback:\n{}",
-            code_preview,
+        // For CLI/Bailing out, we still want a nice error message (log it instead of bailing here)
+        log::debug!(
+            "Execution failed structured: Error: {}, Call: {}",
             error_msg,
             error
                 .call
                 .as_ref()
                 .map(|c| c.to_string())
-                .unwrap_or_else(|| "unknown".to_string()),
-            traceback_str
+                .unwrap_or_else(|| "unknown".to_string())
         );
+
+        return metadata_to_execution_result(metadata, stdout);
     }
 
-    // Since we now use eval(parse(file=...)) in R and exec(compile(...)) in Python,
-    // all syntax and runtime errors are caught by our wrappers and reported via
-    // the structured metadata checked above.
-    //
-    // Stderr may still contain logs, messages (R), or library warnings.
-    // We log these for debugging but do not treat them as fatal execution failures.
+    // Fallback: check stderr for catastrophic failures not caught by the wrapper.
     if !stderr.trim().is_empty() {
         log::debug!("Executor stderr (non-fatal): {}", stderr.trim());
     }
@@ -161,6 +144,7 @@ pub fn metadata_to_execution_result(
     Ok(ExecutionOutput {
         result,
         warnings: metadata.warnings,
+        error: metadata.error,
     })
 }
 
