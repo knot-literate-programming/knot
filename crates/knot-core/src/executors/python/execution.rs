@@ -10,28 +10,27 @@
 use super::process::PythonProcess;
 use crate::executors::path_utils::escape_path_for_code;
 use crate::executors::{ExecutionOutput, GraphicsOptions, SideChannel};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::path::Path;
 
 /// Wrap Python code to capture structured errors and warnings.
 ///
-/// The user code is compiled and executed via exec() so that its own
-/// indentation is preserved. Warnings are intercepted via the `warnings`
-/// module. Errors are caught and written to the side-channel metadata.
+/// The user code is read from `code_file` at runtime.
+/// Using compile() inside the try-except block ensures syntax errors
+/// are also captured as structured metadata.
 ///
 /// NOTE: If you change this wrapper, update the traceback_skip value
 /// in the execute() call below (currently 0 — Python frames are all user frames).
-fn wrap_python_code(code: &str) -> String {
-    // Escape backslashes and triple-quotes in user code for safe embedding
-    let escaped = code.replace('\\', "\\\\").replace("\"\"\"", "\\\"\\\"\\\"");
+fn wrap_python_code_file(code_file: &str) -> String {
     format!(
         r#"import warnings as _knot_wm
 import traceback as _knot_tb
 with _knot_wm.catch_warnings(record=True) as _knot_caught:
     _knot_wm.simplefilter("always")
     try:
-        exec(compile("""{escaped}
-""", "<chunk>", "exec"), globals())
+        with open('{code_file}', 'r', encoding='utf-8') as _knot_f:
+            _knot_c = compile(_knot_f.read(), '{code_file}', 'exec')
+            exec(_knot_c, globals())
     except Exception as _knot_e:
         for _w in _knot_caught:
             _knot_add_warning(str(_w.message))
@@ -54,6 +53,16 @@ pub fn execute(
     // Create side-channel for this chunk
     let channel = SideChannel::new()?;
 
+    // Write user code to a temp file — Python reads it via compile() so no
+    // escaping is needed and syntax errors are caught inside try-except.
+    let code_file = tempfile::Builder::new()
+        .prefix("knot_code_")
+        .suffix(".py")
+        .tempfile()
+        .context("Failed to create temp file for Python code")?;
+    std::fs::write(code_file.path(), code).context("Failed to write Python code to temp file")?;
+    let code_file_str = escape_path_for_code(code_file.path());
+
     // Set environment variables via setup_environment() function
     let meta_file = escape_path_for_code(channel.path());
     let cache_dir_str = escape_path_for_code(cache_dir);
@@ -67,9 +76,10 @@ pub fn execute(
     let _ = process.read_until_boundary()?;
 
     // Wrap the user code with error/warning handlers
-    let wrapped = wrap_python_code(code);
+    let wrapped = wrap_python_code_file(&code_file_str);
     process.execute_code(&wrapped)?;
     let (stdout, stderr) = process.read_until_boundary()?;
+    // code_file is dropped here — temp file cleaned up automatically
 
     // Read metadata from side-channel
     let metadata = channel.read_metadata()?;
