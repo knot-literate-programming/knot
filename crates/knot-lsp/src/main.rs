@@ -375,60 +375,82 @@ impl KnotLanguageServer {
     }
 
     async fn forward_to_tinymist(&self, method: &str, uri: &Url) {
-        let mut tinymist_guard = self.state.tinymist.write().await;
-        if let Some(proxy) = tinymist_guard.as_mut() {
-            let content = {
-                let docs = self.state.documents.read().await;
-                docs.get(uri).cloned().unwrap_or_default()
-            };
+        let mut warm_up = false;
+        let mut virtual_uri_opt = None;
 
-            // Use virtual URI to trick Tinymist
-            let virtual_uri = transform::to_virtual_uri(uri);
+        {
+            let mut tinymist_guard = self.state.tinymist.write().await;
+            if let Some(proxy) = tinymist_guard.as_mut() {
+                let content = {
+                    let docs = self.state.documents.read().await;
+                    docs.get(uri).cloned().unwrap_or_default()
+                };
 
-            let mut opened_map = self.state.opened_in_tinymist.write().await;
-            let mut versions = self.state.document_versions.write().await;
+                // Use virtual URI to trick Tinymist
+                let virtual_uri = transform::to_virtual_uri(uri);
+                virtual_uri_opt = Some(virtual_uri.clone());
 
-            let is_opened = opened_map.get(uri).cloned().unwrap_or(false);
-            let version = versions.get(uri).cloned().unwrap_or(0) + 1;
-            versions.insert(uri.clone(), version);
+                let mut opened_map = self.state.opened_in_tinymist.write().await;
+                let mut versions = self.state.document_versions.write().await;
 
-            let params = if method == "textDocument/didOpen" || !is_opened {
-                serde_json::json!({
-                    "textDocument": {
-                        "uri": virtual_uri,
-                        "languageId": "typst",
-                        "version": version,
-                        "text": transform_to_typst(&content)
-                    }
-                })
-            } else {
-                serde_json::json!({
-                    "textDocument": {
-                        "uri": virtual_uri,
-                        "version": version
-                    },
-                    "contentChanges": [{
-                        "text": transform_to_typst(&content)
-                    }]
-                })
-            };
+                let is_opened = opened_map.get(uri).cloned().unwrap_or(false);
+                let version = versions.get(uri).cloned().unwrap_or(0) + 1;
+                versions.insert(uri.clone(), version);
 
-            let actual_method = if !is_opened {
-                "textDocument/didOpen"
-            } else {
-                method
-            };
+                let params = if method == "textDocument/didOpen" || !is_opened {
+                    serde_json::json!({
+                        "textDocument": {
+                            "uri": virtual_uri,
+                            "languageId": "typst",
+                            "version": version,
+                            "text": transform_to_typst(&content)
+                        }
+                    })
+                } else {
+                    serde_json::json!({
+                        "textDocument": {
+                            "uri": virtual_uri,
+                            "version": version
+                        },
+                        "contentChanges": [{
+                            "text": transform_to_typst(&content)
+                        }]
+                    })
+                };
 
-            if let Err(e) = proxy.send_notification(actual_method, params).await {
-                let _ = self
-                    .client
-                    .log_message(
-                        MessageType::ERROR,
-                        format!("Failed to send to tinymist: {}", e),
-                    )
+                let actual_method = if !is_opened {
+                    "textDocument/didOpen"
+                } else {
+                    method
+                };
+
+                if let Err(e) = proxy.send_notification(actual_method, params).await {
+                    let _ = self
+                        .client
+                        .log_message(
+                            MessageType::ERROR,
+                            format!("Failed to send to tinymist: {}", e),
+                        )
+                        .await;
+                } else if !is_opened {
+                    opened_map.insert(uri.clone(), true);
+                    warm_up = true;
+                }
+            }
+        }
+
+        // --- WARM UP TINYMIST ---
+        // Perform warm-up after releasing the lock to avoid blocking other requests
+        if warm_up {
+            if let (Some(virtual_uri), Some(mut tinymist_guard)) =
+                (virtual_uri_opt, self.state.tinymist.write().await.as_mut())
+            {
+                let warm_up_params = serde_json::json!({
+                    "textDocument": { "uri": virtual_uri }
+                });
+                let _ = tinymist_guard
+                    .send_request("textDocument/documentSymbol", warm_up_params)
                     .await;
-            } else if !is_opened {
-                opened_map.insert(uri.clone(), true);
             }
         }
     }
