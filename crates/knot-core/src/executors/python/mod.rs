@@ -377,6 +377,11 @@ mod tests {
             .unwrap();
 
         assert_eq!(output.warnings.len(), 1);
-        assert!(output.warnings[0].message.to_string().contains("A little warning"));
+        assert!(
+            output.warnings[0]
+                .message
+                .to_string()
+                .contains("A little warning")
+        );
     }
 }

@@ -8,7 +8,7 @@
 use super::metadata::{CacheMetadata, ChunkCacheEntry};
 use crate::executors::side_channel::RuntimeWarning;
 use crate::executors::{ExecutionOutput, ExecutionResult};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chrono::Utc;
 use log::warn;
 use std::fs;

@@ -3,11 +3,11 @@
 // Reads the knot.toml configuration file to extract project settings,
 // particularly the paths to helper files (Typst and R).
 
+pub use crate::parser::ast::ChunkDefaults;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-pub use crate::parser::ast::ChunkDefaults;
 
 #[derive(Debug, Deserialize, Default)]
 pub struct Config {

@@ -99,8 +99,12 @@ pub fn execute(
 pub fn execute_inline(executor: &mut RExecutor, code: &str) -> Result<String> {
     // For inline expressions, we use a simpler approach without the structured wrapper
     // because they don't need rich output/warnings capture and it avoids side-channel issues.
-    let stdin = executor.process.stdin.as_mut().context("R process stdin is not available")?;
-    
+    let stdin = executor
+        .process
+        .stdin
+        .as_mut()
+        .context("R process stdin is not available")?;
+
     // Just wrap in withVisible to get the output
     let inline_code = format!(
         ".knot_res <- withVisible({{ {} }}); if (.knot_res$visible) print(.knot_res$value);",

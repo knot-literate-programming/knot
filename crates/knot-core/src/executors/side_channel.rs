@@ -24,6 +24,15 @@ pub enum StringOrVec {
     Vec(Vec<String>),
 }
 
+impl std::fmt::Display for StringOrVec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StringOrVec::String(s) => write!(f, "{}", s),
+            StringOrVec::Vec(v) => write!(f, "{}", v.join("\n")),
+        }
+    }
+}
+
 impl StringOrVec {
     pub fn as_str(&self) -> &str {
         match self {
@@ -35,13 +44,6 @@ impl StringOrVec {
                     &v[0]
                 }
             }
-        }
-    }
-
-    pub fn to_string(&self) -> String {
-        match self {
-            StringOrVec::String(s) => s.clone(),
-            StringOrVec::Vec(v) => v.join("\n"),
         }
     }
 }
@@ -141,7 +143,10 @@ impl SideChannel {
 
         // Final fallback: if parsing still fails, return empty metadata instead of bailing out.
         // This prevents a single malformed JSON from stopping the whole compilation.
-        log::warn!("Malformed side-channel JSON. Using empty metadata. Content: {}", content);
+        log::warn!(
+            "Malformed side-channel JSON. Using empty metadata. Content: {}",
+            content
+        );
         Ok(KnotMetadata::default())
     }
 

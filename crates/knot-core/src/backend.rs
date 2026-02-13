@@ -105,7 +105,7 @@ impl Backend for TypstBackend {
                 .map(|e| format!("[{}]", e.message))
                 .collect::<Vec<_>>()
                 .join(", ");
-            
+
             // In Typst, (item,) is a single-element array.
             if chunk.errors.len() == 1 {
                 error_list.push(',');
@@ -123,7 +123,7 @@ impl Backend for TypstBackend {
                     let mut warning_list = output
                         .warnings
                         .iter()
-                        .map(|w| format!("[{}]", w.message.to_string()))
+                        .map(|w| format!("[{}]", w.message))
                         .collect::<Vec<_>>()
                         .join(", ");
                     if output.warnings.len() == 1 {
@@ -374,6 +374,10 @@ mod tests {
                 output_inset: None,
                 width_ratio: None,
                 align: None,
+                warning_background: None,
+                warning_stroke: None,
+                warning_radius: None,
+                warning_inset: None,
             },
             codly_options: std::collections::HashMap::new(),
             errors: vec![],
@@ -406,9 +410,7 @@ mod tests {
 
         let output = backend.format_chunk(&chunk, &resolved, &output_data, false);
 
-        assert!(
-            output.contains("errors: ([Unknown option: 'foo'], [Invalid value for 'eval'])")
-        );
+        assert!(output.contains("errors: ([Unknown option: 'foo'], [Invalid value for 'eval'])"));
     }
 
     #[test]

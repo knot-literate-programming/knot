@@ -15,7 +15,7 @@ pub use metadata::{CacheMetadata, ChunkCacheEntry, ConstantObjectInfo, InlineCac
 
 use crate::executors::ExecutionOutput;
 use crate::parser::ChunkOptions;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chrono::Utc;
 use std::fs;
 use std::path::PathBuf;

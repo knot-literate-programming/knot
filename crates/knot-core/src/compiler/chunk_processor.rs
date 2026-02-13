@@ -9,7 +9,7 @@
 //! 6. Format the output using the Typst backend.
 
 use crate::backend::{Backend, TypstBackend};
-use crate::cache::{hash_dependencies, Cache};
+use crate::cache::{Cache, hash_dependencies};
 use crate::config::Config;
 use crate::executors::{ExecutionOutput, ExecutionResult, ExecutorManager, GraphicsOptions};
 use crate::parser::Chunk;
@@ -31,19 +31,17 @@ pub fn process_chunk(
     // --- CONFIG LAYERING (Global < Language < Error) ---
     // We build a single "effective" set of defaults following the priority chain.
     let mut effective_defaults = config.chunk_defaults.clone();
-    
+
     // 1. Layer language-specific defaults ([r-chunks], [python-chunks])
     if let Some(lang_defaults) = config.get_language_defaults(&chunk.language) {
         effective_defaults.merge(lang_defaults);
     }
-    
+
     // 2. Layer error-specific defaults ([r-error], [python-error]) if language is broken
-    if is_inert {
-        if let Some(error_defaults) = config.get_language_error_defaults(&chunk.language) {
-            effective_defaults.merge(error_defaults);
-        }
+    if is_inert && let Some(error_defaults) = config.get_language_error_defaults(&chunk.language) {
+        effective_defaults.merge(error_defaults);
     }
-    
+
     // 3. Apply the final layered defaults to fill Nones in the chunk's own options.
     // Explicit options in the chunk header always have the final word.
     chunk_options.apply_config_defaults(&effective_defaults);
@@ -113,8 +111,12 @@ pub fn process_chunk(
     chunk_with_codly.codly_options = merged_codly_options;
 
     let backend = TypstBackend::new();
-    let chunk_output_final =
-        backend.format_chunk(&chunk_with_codly, &resolved_options, &execution_output, is_inert);
+    let chunk_output_final = backend.format_chunk(
+        &chunk_with_codly,
+        &resolved_options,
+        &execution_output,
+        is_inert,
+    );
 
     Ok((chunk_output_final, chunk_hash))
 }
@@ -540,8 +542,15 @@ mod tests {
             ..Default::default()
         };
 
-        let (output, _hash) =
-            process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &config, false).unwrap();
+        let (output, _hash) = process_chunk(
+            &chunk,
+            &mut manager,
+            &mut cache,
+            "prev_hash",
+            &config,
+            false,
+        )
+        .unwrap();
 
         // Verify that language-specific defaults were applied (show: output means code: none)
         assert!(output.contains("code: none"));
@@ -572,8 +581,15 @@ mod tests {
             ..Default::default()
         };
 
-        let (output, _hash) =
-            process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &config, false).unwrap();
+        let (output, _hash) = process_chunk(
+            &chunk,
+            &mut manager,
+            &mut cache,
+            "prev_hash",
+            &config,
+            false,
+        )
+        .unwrap();
 
         // Chunk-specific option should override everything (show: both means code is shown)
         assert!(output.contains("code: [```python"));
@@ -623,8 +639,15 @@ mod tests {
             ..Default::default()
         };
 
-        let (output, _hash) =
-            process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &config, false).unwrap();
+        let (output, _hash) = process_chunk(
+            &chunk,
+            &mut manager,
+            &mut cache,
+            "prev_hash",
+            &config,
+            false,
+        )
+        .unwrap();
 
         // Should use global defaults (show: output means code is not shown)
         assert!(output.contains("code: none"));

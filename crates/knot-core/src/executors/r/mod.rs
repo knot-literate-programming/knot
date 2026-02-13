@@ -12,8 +12,7 @@ mod formatters;
 mod process;
 
 use super::{
-    ConstantObjectHandler, ExecutionOutput, GraphicsOptions, KnotExecutor,
-    LanguageExecutor,
+    ConstantObjectHandler, ExecutionOutput, GraphicsOptions, KnotExecutor, LanguageExecutor,
 };
 use anyhow::Result;
 use std::path::{Path, PathBuf};
