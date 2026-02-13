@@ -57,6 +57,12 @@ pub fn get_diagnostics(uri: &Url, text: &str) -> Vec<Diagnostic> {
             let line_text = text.lines().nth(target_line).unwrap_or("");
             let line_len_utf16 = line_text.encode_utf16().count() as u32;
 
+            let severity = if error.message.contains("Unknown chunk option") {
+                DiagnosticSeverity::WARNING
+            } else {
+                DiagnosticSeverity::ERROR
+            };
+
             diagnostics.push(Diagnostic {
                 range: Range {
                     start: Position {
@@ -68,7 +74,7 @@ pub fn get_diagnostics(uri: &Url, text: &str) -> Vec<Diagnostic> {
                         character: line_len_utf16,
                     },
                 },
-                severity: Some(DiagnosticSeverity::ERROR),
+                severity: Some(severity),
                 source: Some("knot".to_string()),
                 message: error.message.clone(),
                 ..Diagnostic::default()

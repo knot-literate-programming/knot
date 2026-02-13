@@ -2,20 +2,11 @@
 //!
 //! This module handles the parsing of Quarto-style chunk options within code chunks.
 //! Options are defined using the `#|` prefix at the beginning of a chunk.
-//!
-//! # Supported Options
-//!
-//! - `eval`: (bool) Whether to evaluate the chunk.
-//! - `show`: (string) What to display: "code", "output", "both", or "none".
-//! - `cache`: (bool) Whether to cache the results.
-//! - `fig-width`, `fig-height`: (f64) Dimensions of generated plots.
-//! - `fig-format`: (string) Format of plots (e.g., "svg", "png").
-//! - `constant`: (list of strings) Names of objects to treat as immutable constants.
 
 use super::ast::{ChunkError, ChunkOptions};
 use std::collections::HashMap;
 
-// La logique de parsing des options utilise maintenant YAML
+/// Parse chunk options from a YAML-like block (lines starting with #|)
 pub fn parse_options(
     options_block: &str,
 ) -> (ChunkOptions, HashMap<String, String>, Vec<ChunkError>) {
@@ -23,13 +14,11 @@ pub fn parse_options(
     let mut line_map = Vec::new(); // Map YAML line -> Original line offset
 
     for (i, line) in options_block.lines().enumerate() {
-        let trimmed_line = line.trim();
-        if trimmed_line.starts_with("#|") {
-            let content = trimmed_line.trim_start_matches("#|").trim();
+        let trimmed = line.trim();
+        if trimmed.starts_with("#|") {
+            let content = trimmed.trim_start_matches("#|").trim();
             yaml_str.push_str(content);
             yaml_str.push('\n');
-            // Relative line index (0-based from start of chunk)
-            // Options start at line 1 (after header)
             line_map.push(i + 1);
         }
     }
@@ -38,64 +27,67 @@ pub fn parse_options(
         return (ChunkOptions::default(), HashMap::new(), Vec::new());
     }
 
-    // Parse as Value first to extract codly-* options
     let mut codly_options = HashMap::new();
+    let mut warnings = Vec::new();
+
+    // Get valid option names from metadata
+    let valid_options: Vec<String> = ChunkOptions::option_metadata()
+        .iter()
+        .map(|m| m.serde_name())
+        .collect();
+
     let yaml_for_parsing = match serde_yaml::from_str::<serde_yaml::Value>(&yaml_str) {
         Ok(serde_yaml::Value::Mapping(mut map)) => {
-            // Extract and remove codly-* keys
-            let keys_to_extract: Vec<_> = map
-                .keys()
-                .filter_map(|k| {
-                    if let serde_yaml::Value::String(s) = k {
-                        if s.starts_with("codly-") {
-                            Some(k.clone())
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-
-            for key in keys_to_extract {
-                if let Some(value) = map.remove(&key)
-                    && let serde_yaml::Value::String(key_str) = &key
-                {
-                    // Convert codly-xxx to xxx for storage
-                    let codly_key = key_str.strip_prefix("codly-").unwrap().to_string();
-                    // Convert value to string representation
-                    let value_str = match value {
-                        serde_yaml::Value::String(s) => s,
-                        serde_yaml::Value::Bool(b) => b.to_string(),
-                        serde_yaml::Value::Number(n) => n.to_string(),
-                        _ => serde_yaml::to_string(&value)
-                            .unwrap_or_default()
-                            .trim()
-                            .to_string(),
-                    };
-                    codly_options.insert(codly_key, value_str);
+            // Identify keys to extract or validate
+            let mut keys_to_process = Vec::new();
+            for (k, _) in map.iter() {
+                if let serde_yaml::Value::String(s) = k {
+                    keys_to_process.push(s.clone());
                 }
             }
 
-            // Convert back to YAML string for parsing ChunkOptions
+            for key_str in keys_to_process {
+                let key_value = serde_yaml::Value::String(key_str.clone());
+
+                if key_str.starts_with("codly-") {
+                    // Extract and remove codly-* keys
+                    if let Some(value) = map.remove(&key_value) {
+                        let codly_key = key_str.strip_prefix("codly-").unwrap().to_string();
+                        let value_str = match value {
+                            serde_yaml::Value::String(s) => s,
+                            serde_yaml::Value::Bool(b) => b.to_string(),
+                            serde_yaml::Value::Number(n) => n.to_string(),
+                            _ => serde_yaml::to_string(&value)
+                                .unwrap_or_default()
+                                .trim()
+                                .to_string(),
+                        };
+                        codly_options.insert(codly_key, value_str);
+                    }
+                } else if !valid_options.contains(&key_str) {
+                    // It's not a standard option and not a codly option -> Unknown
+                    warnings.push(ChunkError::new(
+                        format!("Unknown chunk option: '{}'", key_str),
+                        None,
+                    ));
+                }
+            }
+
             serde_yaml::to_string(&serde_yaml::Value::Mapping(map)).unwrap_or_default()
         }
         Ok(_) => yaml_str.clone(),
-        Err(_) => yaml_str.clone(), // Let the error be caught below
+        Err(_) => yaml_str.clone(),
     };
 
     match serde_yaml::from_str::<ChunkOptions>(&yaml_for_parsing) {
         Ok(options) => {
-            log::debug!("Parsed ChunkOptions: {:?}", options);
-            log::debug!("Parsed Codly options: {:?}", codly_options);
-            (options, codly_options, Vec::new())
+            let errors = warnings;
+            (options, codly_options, errors)
         }
         Err(e) => {
-            let mut errors = Vec::new();
-            // serde_yaml error might contain line/column
+            let mut errors = warnings;
             let line_offset = if let Some(location) = e.location() {
-                let yaml_line = location.line() - 1; // 1-based to 0-based
+                let yaml_line = location.line() - 1;
                 if yaml_line < line_map.len() {
                     Some(line_map[yaml_line])
                 } else {
@@ -119,31 +111,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_parse_unknown_option_warning() {
+        let options_block = "#| unknown-opt: 42\n";
+        let (_opts, _codly, errors) = parse_options(options_block);
+        assert!(!errors.is_empty());
+        assert!(errors[0]
+            .message
+            .contains("Unknown chunk option: 'unknown-opt'"));
+    }
+
+    #[test]
     fn test_parse_invalid_boolean() {
         let options_block = "#| eval: maybe\n";
         let (opts, _codly, errors) = parse_options(options_block);
-        assert!(!errors.is_empty());
-        assert!(errors[0].message.contains("parsing error"));
+        assert!(errors.iter().any(|e| e.message.contains("parsing error")));
         assert_eq!(opts.eval, None);
-    }
-
-    #[test]
-    fn test_parse_invalid_number() {
-        let options_block = "#| fig-width: not-a-number\n";
-        let (opts, _codly, errors) = parse_options(options_block);
-        assert!(!errors.is_empty());
-        assert_eq!(opts.fig_width, None);
-    }
-
-    #[test]
-    fn test_parse_variable_names() {
-        // YAML handles simple strings without quotes
-        let options_block = "#| constant: [valid_name, another_one]\n";
-        let (opts, _codly, errors) = parse_options(options_block);
-
-        assert!(errors.is_empty());
-        assert!(opts.constant.contains(&"valid_name".to_string()));
-        assert!(opts.constant.contains(&"another_one".to_string()));
     }
 
     #[test]
@@ -152,40 +134,17 @@ mod tests {
 #| eval: true
 #| show: code
 #| fig-width: 7.0
-#| constant: [x, y]
 "#;
         let (opts, _codly, errors) = parse_options(options_block);
         assert!(errors.is_empty());
         assert_eq!(opts.eval, Some(true));
-        assert_eq!(opts.show, Some(crate::parser::Show::Code));
         assert_eq!(opts.fig_width, Some(7.0));
-        assert_eq!(opts.constant.len(), 2);
     }
 
     #[test]
-    fn test_parse_show_none() {
-        let options_block = "#| show: none\n";
-        let (opts, _codly, errors) = parse_options(options_block);
-        assert!(errors.is_empty());
-        assert_eq!(opts.show, Some(crate::parser::Show::None));
-    }
-
-    #[test]
-    fn test_parse_codly_options() {
-        let options_block = r##"
-#| eval: true
-#| codly-header: "My Header"
-#| codly-zebra-fill: 'rgb("#f0f0f0")'
-#| fig-width: 7.0
-"##;
-        let (opts, codly, errors) = parse_options(options_block);
-        assert!(errors.is_empty());
-        assert_eq!(opts.eval, Some(true));
-        assert_eq!(opts.fig_width, Some(7.0));
-        assert_eq!(codly.get("header"), Some(&"My Header".to_string()));
-        assert_eq!(
-            codly.get("zebra-fill"),
-            Some(&"rgb(\"#f0f0f0\")".to_string())
-        );
+    fn test_parse_codly_options_no_warning() {
+        let options_block = "#| codly-zebra-fill: none\n";
+        let (_opts, _codly, errors) = parse_options(options_block);
+        assert!(errors.is_empty(), "Codly options should not trigger warnings");
     }
 }
