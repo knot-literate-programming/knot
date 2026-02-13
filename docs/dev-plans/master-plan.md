@@ -10,29 +10,31 @@ This document tracks the high-level goals and roadmap for the Knot project. Deta
 
 ## 📊 Current Status (Updated Feb 2026)
 
-**Maturity:** ~85% towards v1.0
+**Maturity:** ~90% towards v1.0
 
-**Core:** ~98% complete
+**Core:** ~99% complete
 - ✅ Parsing, execution, caching
 - ✅ Multi-language (R, Python)
 - ✅ Chunk customization with show: none and aliases
 - ✅ Unified structured error handling & Granular resilience
 - ✅ Customizable warnings (styles & visibility)
+- ✅ Zero-escape robust execution model
 
-**LSP:** ~75% complete
-- ✅ Hover (chunks, R, Python, Typst)
+**LSP:** ~85% complete
+- ✅ Hover (chunks, R, Python, Typst — stable & responsive)
 - ✅ Completion (chunk options, R, Python, Typst)
 - ✅ Diagnostics (parsing errors, structure validation)
+- ✅ **Execution Diagnostics**: Runtime errors and warnings surfaced in the editor from cache.
 - ✅ Document symbols (including all show variants)
 - ⏳ Go to Definition
 - ⏳ Hybrid formatting (Air/Ruff)
 
-**CLI:** ~95% complete
+**CLI:** ~98% complete
 - ✅ Compile, watch, init
 - ✅ Dynamic knot.toml generation (Unified structures)
 
-**Documentation:** ~45% complete
-- ✅ Dev plans (architecture, design docs)
+**Documentation:** ~50% complete
+- ✅ Dev plans (architecture, design docs updated)
 - ⏳ User documentation (getting started, tutorials)
 - ⏳ Example projects (reports, dashboards)
 
@@ -40,67 +42,52 @@ This document tracks the high-level goals and roadmap for the Knot project. Deta
 
 ## 🎯 Current Priorities
 
-### 1. IDE Integration (LSP Diagnostics)
-Now that the Core captures structured errors and warnings, they must be surfaced in the editor.
-- [x] **Core Capture**: Structured errors/warnings are captured and persisted.
-- [ ] **Live Diagnostics**: Feed executor errors back to the LSP for real-time red underlines in code chunks.
-- [ ] **Warning Surfacing**: Display R/Python warnings as diagnostic messages in VS Code.
-
-### 2. Standard IDE Navigation (LSP)
+### 1. IDE Navigation & Polishing (LSP)
 Make Knot feel like a native editor for both Typst and the embedded languages.
-- [x] **Hover**: Implemented for Knot chunks, R, Python, and Typst (via Tinymist proxy).
-- [x] **Completion**: Implemented for chunk options, R, Python, and Typst (via Tinymist proxy).
+- [x] **Stable Hover/Completion**: Reliability across all document sections.
 - [ ] **Go to Definition**: Navigate to function/variable definitions.
 - [ ] **References**: Find all references to symbols.
+- [ ] **Unknown Option Warnings**: Validate YAML options to catch typos.
+
+### 2. Standard Tooling Integration
+- [ ] **Hybrid Formatting**: Air (R) + Ruff (Python) + Tinymist (Typst).
+- [ ] **Julia Support**: Extend the robust execution model to Julia.
 
 ### 3. Documentation & Examples
 Make Knot accessible and showcase its capabilities.
-- [ ] **User Guide**: Getting started, installation, basic usage
-- [ ] **Tutorial**: Step-by-step walkthrough of features
-- [ ] **Example Projects**: Scientific report, data dashboard, technical book
-- [ ] **API Documentation**: Document all chunk options and their effects
+- [ ] **User Guide**: Getting started, installation, basic usage.
+- [ ] **Scientific Proof of Concept**: A complete project demonstrating multi-language constant objects and complex layout.
 
 ### 4. Advanced Features (Future)
 - [ ] **Sync Mapping**: Bidirectional click (Source ↔ PDF). See [sync-mapping.md](sync-mapping.md).
-- [ ] **Julia Support**: Extend to Julia language
-- [ ] **Content Generators**: Mermaid diagrams, LilyPond music notation
+- [ ] **Variable Explorer**: Dynamic introspection of R/Python sessions.
 
 ---
 
 ## 📅 Roadmap by Component
 
 ### Knot Core
-- [x] YAML-based options parsing (standardized).
-- [x] Macro-based options definition (`define_options!`).
 - [x] **Unified Configuration**: Single source of truth for YAML and TOML options.
-- [x] **Chunk display customization**: Integrated `show` option and aliases.
 - [x] **Robust Execution**: Zero-escape model using temp files for all languages.
 - [x] **Graceful Degradation**: Granular per-language resilience.
 - [ ] (Future) Support for Julia executor.
-- [ ] (Future) Support for Content-Generators (Mermaid, LilyPond).
 
 ### Knot LSP
-- [x] Bi-directional diagnostics tunnel for Typst.
-- [x] Precise line-offset for Knot structure errors.
-- [x] **Hover**: For chunks, R/Python code, and Typst (via Tinymist proxy).
-- [x] **Completion**: For chunk options, R/Python code, and Typst.
-- [x] **Document Symbols**: Structure outline.
-- [x] **Position Mapping**: Knot ↔ Typst coordinate translation.
+- [x] **Position Mapping**: Robust UTF-16 aware coordinate translation.
+- [x] **Runtime Diagnostics**: Errors and warnings from build/watch surfaced in VS Code.
 - [ ] **Go to Definition**: Navigate to symbols across languages.
-- [ ] **References**: Find all uses of a symbol.
 - [ ] **Hybrid Formatting**: Air (R) + Ruff (Python) + Tinymist (Typst).
-- [ ] **Variable Explorer**: Dynamic introspection of R/Python sessions.
 
 ### Knot CLI
-- [x] Watch mode.
-- [ ] Improved error logging for CI/CD.
-- [x] Built-in project initialization (`knot init`).
+- [x] **Watch mode**: with real-time feedback loop to the editor.
+- [x] **Project initialization**: `knot init`.
 
 ---
 
 ## 🔗 Design Documents
-- [r-error-handling.md](r-error-handling.md): Unified error model (R implementation).
-- [python-error-handling.md](python-error-handling.md): Unified error model (Python implementation).
+- [lsp-diagnostics.md](lsp-diagnostics.md): Logic for surfacing runtime errors in the editor.
+- [r-error-handling.md](r-error-handling.md): Unified error model implementation.
+- [python-error-handling.md](python-error-handling.md): Unified error model implementation.
 - [sync-mapping.md](sync-mapping.md): PDF-to-Source synchronization plan.
 - [lsp-navigation.md](lsp-navigation.md): Roadmap for navigation features.
 - [formatters.md](formatters.md): Plan for Air (R) and Ruff (Python) integration.

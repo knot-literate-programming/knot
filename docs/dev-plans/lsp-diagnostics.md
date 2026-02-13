@@ -1,92 +1,41 @@
 # LSP Diagnostics — Runtime Warnings & Errors
 
-**Status:** 📋 Planned
-**Depends on:** `feat/r-error-handling` merged
+**Status:** ✅ Implemented
+**Date:** 2026-02-13
 
 ## Goal
 
 Surface R/Python runtime warnings and errors as LSP diagnostics (squiggles) in the editor,
-at the chunk level (not line-level — see Constraints below).
+integrated into the workflow after execution (build or watch).
 
-## Current state
+## Implementation (2026-02-13)
 
-Warnings and errors from `knot build` are already:
-- Captured during execution (side-channel)
-- Stored in `ChunkCacheEntry.warnings` (cache metadata)
-- Rendered in the Typst document output
+### 1. Unified Diagnostic Flow
+Knot now combines three sources of diagnostics:
+- **Structure**: Parsing errors and invalid syntax (captured by `Document::parse`).
+- **Options**: Validation of YAML chunk options against known fields.
+- **Runtime**: Warnings and Errors persisted in the `.knot_cache/metadata.json` after execution.
 
-They are NOT yet sent to the editor as LSP diagnostics.
+### 2. Precise Positioning
+While initially thought to be chunk-level only, we achieved **line-level precision**:
+- **Python**: Captures `lineno` for warnings and parses tracebacks for errors to find the exact line relative to the chunk start.
+- **R**: Highlights the specific line for errors when available in the message, and falls back to highlighting the closing triple backticks (```) for warnings to minimize visual noise.
+- **UTF-16 Awareness**: The `PositionMapper` ensures that coordinates are correctly translated between Rust (UTF-8 bytes) and LSP (UTF-16 code units).
 
-## Implementation plan
+### 3. Graceful Degradation & Feedback
+- If a fatal error occurs, the language is marked as "broken".
+- Subsequent chunks of the same language are rendered as **inert** (grayed out) in the PDF and editor.
+- The editor surfaces the full traceback/call info on hover, while the PDF keeps a concise one-line summary for professional rendering.
 
-### 1. Surface warnings from cache (after build)
+## ⚠️ Known Issues / Future Work
 
-In `sync_with_cache()` (`crates/knot-lsp/src/main.rs`), after loading the session snapshot:
+### 1. Unknown chunk options validation
+Currently, unknown options in a chunk are silently ignored. We should implement a validation step using `ChunkOptions::option_metadata()` to warn the user about typos (e.g. `warinings-visibility`).
 
-1. Read `metadata.json` from the cache directory
-2. For each `ChunkCacheEntry` with non-empty `warnings`:
-   - Find the chunk span in the parsed document (`parse_document(text)`)
-   - Create a `Diagnostic` with `severity: Warning`, pointing to the chunk's opening fence line
-3. Store in `knot_diagnostics_cache` and call `publish_combined_diagnostics()`
+### 2. Live syntax diagnostics (no execution)
+The background executors could validate syntax in real-time on `did_change` without touching the actual environment, providing immediate feedback before the user saves or builds.
 
-### 2. Surface errors from cache (after failed build)
+---
 
-Errors currently `bail!()` without being stored in cache. To surface them:
-
-1. Add `error: Option<RuntimeError>` to `ChunkCacheEntry`
-2. In `execute()`, write a partial cache entry before `bail!()`
-3. Same LSP flow as warnings, with `severity: Error`
-
-### 3. R syntax diagnostics (live, no execution)
-
-The background R executor can validate syntax in real-time using `query()`:
-
-```r
-tryCatch(parse(text = CODE), error = function(e) e$message)
-```
-
-This does not touch the environment. Call on `did_change` for each R chunk.
-Returns error message with line/column info from R's parser, allowing finer-grained
-diagnostics within the chunk.
-
-### 4. ⚠️ Diagnostic pour les options de chunk inconnues (PRIORITÉ HAUTE)
-
-Actuellement, une option inconnue dans un chunk est **silencieusement ignorée** par serde.
-Exemple vécu : `warinings-visibility: none` (faute de frappe) n'a aucun effet et aucun
-avertissement n'est émis — le comportement par défaut s'applique sans prévenir l'utilisateur.
-
-`get_diagnostics()` dans `crates/knot-lsp/src/diagnostics.rs` parse déjà les options via
-`parse_options()`. Il faudrait ajouter une validation des clés connues :
-
-1. `ChunkOptions::option_metadata()` retourne la liste de toutes les options valides
-2. Après `parse_options()`, extraire les clés YAML brutes et les comparer aux noms connus
-   (via `OptionMetadata::serde_name()`)
-3. Toute clé non reconnue → `Diagnostic` avec `severity: Warning` sur la ligne `#|` concernée
-
-Ceci permettrait de détecter immédiatement les fautes de frappe dans les options
-(`warinings-visibility`, `fig_width` au lieu de `fig-width`, etc.).
-
-## Constraints
-
-### No line-level resolution for runtime warnings
-
-R's `withCallingHandlers` provides `w$call` (the function call site) but not a line number
-within the chunk. `RuntimeWarning.line` is reserved but never populated. Chunk-level
-granularity (highlighting the opening fence) is the realistic target.
-
-### 1:1 position mapping invariant
-
-The `.knot` ↔ `.typ` position mapping is identity-based: non-code content is replaced
-with spaces/newlines (same line count). This is the same strategy as otter.nvim.
-**Any change to the virtual `.typ` generation must preserve this line count invariant.**
-
-## What Quarto does (for reference)
-
-- **Static diagnostics**: via otter.nvim, which creates hidden language-specific buffers
-  with blank lines for non-code content (same 1:1 strategy). The R/Python LSP attaches
-  to these buffers for linting.
-- **Runtime errors**: shown in the terminal only (`Quitting from lines 7-10 [chunk-name]`).
-  Not surfaced as LSP diagnostics.
-
-knot's approach (chunk-level runtime diagnostics from cache) would be an improvement
-over what Quarto currently does.
+## 1:1 Position Mapping Invariant
+The `.knot` ↔ `.typ` position mapping remains identity-based (padding with spaces/newlines). This invariant must be preserved for any change to virtual document generation to keep the current mapping robustness.
