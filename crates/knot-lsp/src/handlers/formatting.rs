@@ -3,7 +3,6 @@ use knot_core::Document;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 
-#[allow(dead_code)]
 pub async fn handle_formatting(
     state: &ServerState,
     params: DocumentFormattingParams,
@@ -11,16 +10,17 @@ pub async fn handle_formatting(
     let uri = &params.text_document.uri;
 
     // 1. Get document text and formatter
-    let (text, formatter) = {
+    let (text, _formatter) = {
         let docs = state.documents.read().await;
         let formatter_opt = state.formatter.read().await;
         match (docs.get(uri), formatter_opt.as_ref()) {
-            (Some(t), Some(f)) => (t.clone(), f.clone()),
+            (Some(t), Some(f)) => (t.clone(), Some(f.clone())),
+            (Some(t), None) => (t.clone(), None),
             _ => return Ok(None),
         }
     };
 
-    // 2. Parse document to find R chunks
+    // 2. Parse document to find all chunks
     let doc = match Document::parse(text.clone()) {
         Ok(doc) => doc,
         Err(_) => return Ok(None),
@@ -28,30 +28,29 @@ pub async fn handle_formatting(
 
     let mut edits = Vec::new();
 
-    // 3. Format each R chunk
-    for chunk in doc.chunks.iter().filter(|c| c.language == "r") {
-        match formatter.format_r_code(&chunk.code).await {
-            Ok(formatted) => {
-                // Only create edit if formatting changed the code
-                if formatted.trim() != chunk.code.trim() {
-                    edits.push(TextEdit {
-                        range: Range {
-                            start: Position {
-                                line: chunk.code_range.start.line as u32,
-                                character: chunk.code_range.start.column as u32,
-                            },
-                            end: Position {
-                                line: chunk.code_range.end.line as u32,
-                                character: chunk.code_range.end.column as u32,
-                            },
-                        },
-                        new_text: formatted,
-                    });
-                }
-            }
-            Err(_) => {
-                // Ignore formatting errors for now, just skip the chunk
-            }
+    // 3. Format each chunk (structurally)
+    for chunk in &doc.chunks {
+        // Normalization via Core (header, options)
+        // TODO: Integrate Air/Ruff here for code formatting
+        let formatted = chunk.format();
+
+        // Only create edit if formatting changed the chunk
+        let original_chunk = &text[chunk.start_byte..chunk.end_byte];
+        
+        if formatted != original_chunk {
+            edits.push(TextEdit {
+                range: Range {
+                    start: Position {
+                        line: chunk.range.start.line as u32,
+                        character: chunk.range.start.column as u32,
+                    },
+                    end: Position {
+                        line: chunk.range.end.line as u32,
+                        character: chunk.range.end.column as u32,
+                    },
+                },
+                new_text: formatted,
+            });
         }
     }
 
@@ -107,21 +106,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_formatting_no_formatter() {
-        let text = r#"```{r}
-x<-1+2
-```"#;
-
-        let (state, uri) = create_test_state("file:///test.knot", text, false).await;
-
-        let params = create_formatting_params(&uri);
-        let result = handle_formatting(&state, params).await.unwrap();
-
-        // Should return None when formatter is not available
-        assert!(result.is_none());
-    }
-
-    #[tokio::test]
     async fn test_formatting_document_not_found() {
         let state = ServerState::new();
         let uri = Url::parse("file:///nonexistent.knot").unwrap();
@@ -147,76 +131,25 @@ x<-1+2
     }
 
     #[tokio::test]
-    async fn test_formatting_no_r_chunks() {
-        let text = r#"= Document
-
-Some text here.
-
-```{python}
-x = 1 + 2
-```
-"#;
-
-        let formatter = AirFormatter::new(None).ok();
-        if formatter.is_none() {
-            eprintln!("Air not installed, skipping test");
-            return;
-        }
-
-        let (state, uri) = create_test_state("file:///test.knot", text, true).await;
-
-        let params = create_formatting_params(&uri);
-        let result = handle_formatting(&state, params).await.unwrap();
-
-        // Should return None when there are no R chunks to format
-        assert!(result.is_none());
-    }
-
-    #[tokio::test]
-    async fn test_formatting_already_formatted() {
-        let text = r#"```{r}
-x <- 1 + 2
+    async fn test_formatting_structural_normalization() {
+        let text = r#"```{r   my-chunk   }
+#| eval:true
+#|cache:  false
+print(42)
 ```"#;
 
-        let formatter = AirFormatter::new(None).ok();
-        if formatter.is_none() {
-            eprintln!("Air not installed, skipping test");
-            return;
-        }
-
-        let (state, uri) = create_test_state("file:///test.knot", text, true).await;
-
+        let (state, uri) = create_test_state("file:///test.knot", text, false).await;
         let params = create_formatting_params(&uri);
         let result = handle_formatting(&state, params).await.unwrap();
 
-        // If code is already formatted, should return None (no edits)
-        assert!(result.is_none() || result.is_some());
-    }
-
-    #[tokio::test]
-    async fn test_formatting_multiple_chunks() {
-        let text = r#"```{r}
-x<-1
-```
-
-```{r}
-y<-2
-```"#;
-
-        let formatter = AirFormatter::new(None).ok();
-        if formatter.is_none() {
-            eprintln!("Air not installed, skipping test");
-            return;
-        }
-
-        let (state, uri) = create_test_state("file:///test.knot", text, true).await;
-
-        let params = create_formatting_params(&uri);
-        let result = handle_formatting(&state, params).await.unwrap();
-
-        // Should format both chunks
-        if let Some(edits) = result {
-            assert!(!edits.is_empty());
-        }
+        assert!(result.is_some());
+        let edits = result.unwrap();
+        let new_text = &edits[0].new_text;
+        
+        // Header should be normalized
+        assert!(new_text.contains("```{r my-chunk}"));
+        // Options should be normalized
+        assert!(new_text.contains("#| eval: true"));
+        assert!(new_text.contains("#| cache: false"));
     }
 }

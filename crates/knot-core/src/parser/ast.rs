@@ -94,7 +94,7 @@ impl OptionMetadata {
 }
 
 // ============================================================================
-// Chunk Options Macro System (Unified, Robust)
+// Chunk Options Macro System (Unified, Robust, Formatting Aware)
 // ============================================================================
 
 macro_rules! expand_type {
@@ -144,6 +144,30 @@ macro_rules! apply_config {
     ($kind:ident, $self:expr, $defaults:expr, $name:ident) => {
         if $self.$name.is_none() {
             $self.$name = $defaults.$name.clone();
+        }
+    };
+}
+
+macro_rules! format_field {
+    (col, $self:expr, $name:ident, $serde_name:expr) => {
+        if !$self.$name.is_empty() {
+            let yaml_val = serde_yaml::to_string(&$self.$name).unwrap_or_default().trim().to_string();
+            format!("#| {}: {}\n", $serde_name, yaml_val)
+        } else {
+            String::new()
+        }
+    };
+    ($kind:ident, $self:expr, $name:ident, $serde_name:expr) => {
+        if let Some(ref val) = $self.$name {
+            let yaml_val = match serde_yaml::to_value(val) {
+                Ok(serde_yaml::Value::String(s)) => s,
+                Ok(v) => serde_yaml::to_string(&v).unwrap_or_default().trim().to_string(),
+                Err(_) => String::new(),
+            };
+            // Note: Even if yaml_val is "none", we write it because it overrides defaults.
+            format!("#| {}: {}\n", $serde_name, yaml_val)
+        } else {
+            String::new()
         }
     };
 }
@@ -249,6 +273,18 @@ macro_rules! define_options {
                     )*
                 ]
             }
+
+            /// Format present options back to Quarto-style YAML block (#| key: value)
+            pub fn format_to_quarto(&self) -> String {
+                let mut out = String::new();
+                let meta = Self::option_metadata();
+                
+                $(
+                    let serde_name = meta.iter().find(|m| m.name == stringify!($name)).unwrap().serde_name();
+                    out.push_str(&format_field!($kind, self, $name, serde_name));
+                )*
+                out
+            }
         }
     };
 }
@@ -353,6 +389,55 @@ pub struct Chunk {
     pub code_end_byte: usize,
 }
 
+impl Chunk {
+    /// Format the chunk back to its canonical source representation
+    pub fn format(&self) -> String {
+        let mut out = String::new();
+
+        // 1. Header: ```{lang name}
+        out.push_str("```{");
+        out.push_str(&self.language);
+        if let Some(name) = &self.name {
+            if !name.trim().is_empty() {
+                out.push(' ');
+                out.push_str(name);
+            }
+        }
+        out.push_str("}\n");
+
+        // 2. Options: #| key: value
+        let options_yaml = self.options.format_to_quarto();
+        out.push_str(&options_yaml);
+
+        // 3. Codly options: #| codly-key: value
+        let mut codly_keys: Vec<_> = self.codly_options.keys().collect();
+        codly_keys.sort(); // Deterministic order
+        let mut has_options = !options_yaml.is_empty();
+        for key in codly_keys {
+            let val = self.codly_options.get(key).unwrap();
+            out.push_str(&format!("#| codly-{}: {}\n", key, val));
+            has_options = true;
+        }
+
+        // Add a blank line between options and code if options exist
+        if has_options {
+            out.push('\n');
+        }
+
+        // 4. Code: (Trim to ensure clean boundaries)
+        let trimmed_code = self.code.trim();
+        if !trimmed_code.is_empty() {
+            out.push_str(trimmed_code);
+            out.push('\n');
+        }
+
+        // 5. Footer
+        out.push_str("```");
+
+        out
+    }
+}
+
 macro_rules! define_inline_options {
     (
         $(
@@ -385,7 +470,6 @@ macro_rules! define_inline_options {
         }
 
         impl InlineOptions {
-            /// Resolve all options to concrete values, applying defaults.
             pub fn resolve(&self) -> ResolvedInlineOptions {
                 ResolvedInlineOptions {
                     $(

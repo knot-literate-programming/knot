@@ -18,8 +18,9 @@ from scipy import stats
 np.random.seed(42)
 
 # Create synthetic data
-months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-          'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+months = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 temperatures = np.array([5, 7, 12, 16, 21, 25, 28, 27, 23, 17, 11, 6]) + np.random.normal(0, 1.5, 12)
 humidity = 100 - temperatures * 2 + np.random.normal(0, 5, 12)
 
@@ -82,32 +83,36 @@ Creating a sophisticated multi-panel figure with subplots:
 fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(10, 6))
 
 # Panel 1: Temperature bar chart
-ax1.bar(weather_data['month'], weather_data['temperature'],
-        color='#fd8d3c', alpha=0.7, edgecolor='black')
+ax1.bar(
+    weather_data['month'], weather_data['temperature'],
+    color='#fd8d3c', alpha=0.7, edgecolor='black')
 ax1.set_title('Temperature Bar Chart', fontweight='bold')
 ax1.set_ylabel('Temperature (°C)')
 ax1.tick_params(axis='x', rotation=45)
 
 # Panel 2: Humidity line plot
-ax2.plot(weather_data['month'], weather_data['humidity'],
-         marker='s', linewidth=2, markersize=6,
-         color='#74c476', linestyle='--')
+ax2.plot(
+    weather_data['month'], weather_data['humidity'],
+    marker='s', linewidth=2, markersize=6,
+    color='#74c476', linestyle='--')
 ax2.set_title('Humidity Trends', fontweight='bold')
 ax2.set_ylabel('Humidity (%)')
 ax2.grid(True, alpha=0.3)
 ax2.tick_params(axis='x', rotation=45)
 
 # Panel 3: Scatter plot
-ax3.scatter(weather_data['temperature'], weather_data['humidity'],
-            s=100, alpha=0.6, c=range(12), cmap='viridis',
-            edgecolors='black', linewidth=1)
+ax3.scatter(
+    weather_data['temperature'], weather_data['humidity'],
+    s=100, alpha=0.6, c=range(12), cmap='viridis',
+    edgecolors='black', linewidth=1)
 ax3.set_xlabel('Temperature (°C)')
 ax3.set_ylabel('Humidity (%)')
 ax3.set_title('Temperature vs Humidity', fontweight='bold')
 
 # Panel 4: Histogram
-ax4.hist(weather_data['temperature'], bins=8,
-         color='#6baed6', alpha=0.7, edgecolor='black')
+ax4.hist(
+    weather_data['temperature'], bins=8,
+    color='#6baed6', alpha=0.7, edgecolor='black')
 ax4.set_xlabel('Temperature (°C)')
 ax4.set_ylabel('Frequency')
 ax4.set_title('Temperature Distribution', fontweight='bold')
@@ -134,24 +139,27 @@ Let's add a regression analysis with confidence intervals:
 fig, ax = plt.subplots(figsize=(7, 6))
 
 # Scatter plot
-scatter = ax.scatter(weather_data['temperature'], weather_data['humidity'],
-                     s=150, alpha=0.6, c=weather_data['temperature'],
-                     cmap='coolwarm', edgecolors='black', linewidth=2)
+scatter = ax.scatter(
+    weather_data['temperature'], weather_data['humidity'],
+    s=150, alpha=0.6, c=weather_data['temperature'],
+    cmap='coolwarm', edgecolors='black', linewidth=2)
 
 # Add regression line
 slope, intercept, r_value, p_value, std_err = stats.linregress(
     weather_data['temperature'], weather_data['humidity']
 )
-x_line = np.linspace(weather_data['temperature'].min(),
-                     weather_data['temperature'].max(), 100)
+x_line = np.linspace(
+    weather_data['temperature'].min(),
+    weather_data['temperature'].max(), 100)
 y_line = slope * x_line + intercept
 ax.plot(x_line, y_line, 'r--', linewidth=2, label=f'R² = {r_value**2:.3f}')
 
 # Customize appearance
 ax.set_xlabel('Temperature (°C)', fontsize=13, fontweight='bold')
 ax.set_ylabel('Humidity (%)', fontsize=13, fontweight='bold')
-ax.set_title('Regression Analysis: Temperature vs Humidity',
-             fontsize=14, fontweight='bold', pad=20)
+ax.set_title(
+    'Regression Analysis: Temperature vs Humidity',
+    fontsize=14, fontweight='bold', pad=20)
 ax.legend(loc='upper right', fontsize=11)
 ax.grid(True, alpha=0.3, linestyle='--')
 
@@ -164,7 +172,8 @@ typst(fig)
 ```
 
 #align(center)[
-  _Figure: Advanced regression visualization (code hidden, custom styling)_
+    _Figure: Advanced regression visualization
+    (code hidden, custom styling)_
 ]
 
 The regression analysis shows R² = `{python} f"{r_value**2:.3f}"`, with slope = `{python} f"{slope:.2f}"`.
@@ -208,5 +217,7 @@ Un peu de texte pour vérifier si tout se passe bien !
 ```
 
 ```{r}
+#| eval: false
+#| evval: false
 1:3 + 1:2
 ```

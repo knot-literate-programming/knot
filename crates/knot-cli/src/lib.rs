@@ -288,3 +288,45 @@ fn fix_paths_in_typst(source: &str, typ_file: &Path) -> Result<String> {
 
     Ok(result.to_string())
 }
+
+/// Format a .knot file by normalizing all its chunks
+pub fn format_file(file_path: &PathBuf, check_only: bool) -> Result<bool> {
+    info!("🧹 Formatting {:?}...", file_path);
+    let original_text =
+        fs::read_to_string(file_path).context(format!("Failed to read file: {:?}", file_path))?;
+
+    let doc = Document::parse(original_text.clone()).context("Failed to parse document")?;
+
+    let mut formatted_text = String::with_capacity(original_text.len());
+    let mut last_pos = 0;
+
+    for chunk in &doc.chunks {
+        // Append text before chunk
+        if chunk.start_byte > last_pos {
+            formatted_text.push_str(&original_text[last_pos..chunk.start_byte]);
+        }
+
+        // Append formatted chunk
+        // TODO: In the future, call Air/Ruff here for the code part
+        formatted_text.push_str(&chunk.format());
+
+        last_pos = chunk.end_byte;
+    }
+
+    // Append remaining text
+    if last_pos < original_text.len() {
+        formatted_text.push_str(&original_text[last_pos..]);
+    }
+
+    if original_text == formatted_text {
+        info!("  ✓ Already formatted");
+        Ok(false)
+    } else if check_only {
+        info!("  ✗ Needs formatting");
+        Ok(true)
+    } else {
+        fs::write(file_path, formatted_text)?;
+        info!("  ✓ Formatted successfully");
+        Ok(true)
+    }
+}
