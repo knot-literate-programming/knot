@@ -29,28 +29,27 @@ pub fn process_chunk(
     let mut chunk_options = chunk.options.clone();
 
     // --- CONFIG LAYERING (Global < Language < Error) ---
+    // We build a single "effective" set of defaults following the priority chain.
     let mut effective_defaults = config.chunk_defaults.clone();
     
-    // Layer language-specific defaults
+    // 1. Layer language-specific defaults ([r-chunks], [python-chunks])
     if let Some(lang_defaults) = config.get_language_defaults(&chunk.language) {
         effective_defaults.merge(lang_defaults);
     }
     
-    // Layer error-specific defaults (if inert)
+    // 2. Layer error-specific defaults ([r-error], [python-error]) if language is broken
     if is_inert {
         if let Some(error_defaults) = config.get_language_error_defaults(&chunk.language) {
             effective_defaults.merge(error_defaults);
         }
     }
     
-    // Apply the final layered defaults to the chunk's own options (filling Nones)
+    // 3. Apply the final layered defaults to fill Nones in the chunk's own options.
+    // Explicit options in the chunk header always have the final word.
     chunk_options.apply_config_defaults(&effective_defaults);
 
-    // --- CODLY OPTIONS MERGING (Same Priority) ---
-    // Note: effective_defaults already has merged codly_options due to effective_defaults.merge()
+    // Codly options follow the same priority (already merged in effective_defaults)
     let mut merged_codly_options = effective_defaults.codly_options.clone();
-
-    // Finally, override with chunk-specific options (Highest Priority)
     for (key, value) in &chunk.codly_options {
         merged_codly_options.insert(key.clone(), value.clone());
     }
@@ -196,6 +195,11 @@ mod tests {
                 output_inset: None,
                 width_ratio: None,
                 align: None,
+                // Warning styling
+                warning_background: None,
+                warning_stroke: None,
+                warning_radius: None,
+                warning_inset: None,
             },
             codly_options: std::collections::HashMap::new(),
             errors: vec![],

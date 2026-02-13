@@ -75,7 +75,17 @@ pub struct ChunkDefaults {
     pub output_radius: Option<String>,
     #[serde(rename = "output-inset", alias = "output-padding")]
     pub output_inset: Option<String>,
-    #[serde(rename = "width-ratio")]
+    
+    // Warning styling
+    #[serde(rename = "warning-background")]
+    pub warning_background: Option<String>,
+    #[serde(rename = "warning-stroke", alias = "warning-border")]
+    pub warning_stroke: Option<String>,
+    #[serde(rename = "warning-radius")]
+    pub warning_radius: Option<String>,
+    #[serde(rename = "warning-inset", alias = "warning-padding")]
+    pub warning_inset: Option<String>,
+
     pub width_ratio: Option<String>,
     pub align: Option<String>,
 
@@ -110,6 +120,10 @@ impl ChunkDefaults {
         if other.output_stroke.is_some() { self.output_stroke = other.output_stroke.clone(); }
         if other.output_radius.is_some() { self.output_radius = other.output_radius.clone(); }
         if other.output_inset.is_some() { self.output_inset = other.output_inset.clone(); }
+        if other.warning_background.is_some() { self.warning_background = other.warning_background.clone(); }
+        if other.warning_stroke.is_some() { self.warning_stroke = other.warning_stroke.clone(); }
+        if other.warning_radius.is_some() { self.warning_radius = other.warning_radius.clone(); }
+        if other.warning_inset.is_some() { self.warning_inset = other.warning_inset.clone(); }
         if other.width_ratio.is_some() { self.width_ratio = other.width_ratio.clone(); }
         if other.align.is_some() { self.align = other.align.clone(); }
 

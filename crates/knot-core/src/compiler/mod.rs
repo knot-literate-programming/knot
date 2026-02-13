@@ -141,7 +141,7 @@ impl Compiler {
                         res
                     }
                     ExecutableNode::InlineExpr(inline_expr) => {
-                        format!("`{{{} {}}}`", inline_expr.language, inline_expr.code)
+                        format!("#text(fill: luma(150))[`{{{} {}}}`]", inline_expr.language, inline_expr.code)
                     }
                 };
                 typst_output.push_str(&result_str);

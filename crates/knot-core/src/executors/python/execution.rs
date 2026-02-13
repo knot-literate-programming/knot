@@ -84,6 +84,6 @@ pub fn execute(
     // Read metadata from side-channel
     let metadata = channel.read_metadata()?;
 
-    // Python wrapper frames to skip: 0 (exec/compile frames are user-visible)
-    crate::executors::process_execution_output(code, metadata, &stdout, &stderr, 0)
+    // Python wrapper frames to skip: 1 (skips the internal exec() frame from wrap_python_code_file)
+    crate::executors::process_execution_output(code, metadata, &stdout, &stderr, 1)
 }
