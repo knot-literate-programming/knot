@@ -9,7 +9,6 @@ pub async fn handle_formatting(
 ) -> Result<Option<Vec<TextEdit>>> {
     let uri = &params.text_document.uri;
 
-    // 1. Get document text and formatter
     let (text, _formatter) = {
         let docs = state.documents.read().await;
         let formatter_opt = state.formatter.read().await;
@@ -20,7 +19,6 @@ pub async fn handle_formatting(
         }
     };
 
-    // 2. Parse document to find all chunks
     let doc = match Document::parse(text.clone()) {
         Ok(doc) => doc,
         Err(_) => return Ok(None),
@@ -28,16 +26,10 @@ pub async fn handle_formatting(
 
     let mut edits = Vec::new();
 
-    // 3. Format each chunk (hybrid: code + structure)
     for chunk in &doc.chunks {
-        // Try to format code with external tools
         let formatted_code =
             knot_core::compiler::formatters::format_code(&chunk.code, &chunk.language).ok();
-
-        // Normalization via Core (header, options + optional formatted code)
         let formatted = chunk.format(formatted_code.as_deref());
-
-        // Only create edit if formatting changed the chunk
         let original_chunk = &text[chunk.start_byte..chunk.end_byte];
         
         if formatted != original_chunk {
@@ -64,6 +56,66 @@ pub async fn handle_formatting(
     }
 }
 
+/// Format a single chunk at the given position
+pub async fn handle_format_chunk(
+    state: &ServerState,
+    uri: &Url,
+    pos: Position,
+) -> Result<Option<WorkspaceEdit>> {
+    // 1. Get document text
+    let text = {
+        let docs = state.documents.read().await;
+        match docs.get(uri) {
+            Some(t) => t.clone(),
+            _ => return Ok(None),
+        }
+    };
+
+    // 2. Parse document to find the chunk under cursor
+    let doc = match Document::parse(text.clone()) {
+        Ok(doc) => doc,
+        Err(_) => return Ok(None),
+    };
+
+    let line = pos.line as usize;
+    let target_chunk = doc.chunks.iter().find(|c| line >= c.range.start.line && line <= c.range.end.line);
+
+    if let Some(chunk) = target_chunk {
+        // 3. Format the chunk
+        let formatted_code =
+            knot_core::compiler::formatters::format_code(&chunk.code, &chunk.language).ok();
+        let formatted = chunk.format(formatted_code.as_deref());
+        
+        let original_chunk = &text[chunk.start_byte..chunk.end_byte];
+        
+        if formatted != original_chunk {
+            let edit = TextEdit {
+                range: Range {
+                    start: Position {
+                        line: chunk.range.start.line as u32,
+                        character: chunk.range.start.column as u32,
+                    },
+                    end: Position {
+                        line: chunk.range.end.line as u32,
+                        character: chunk.range.end.column as u32,
+                    },
+                },
+                new_text: formatted,
+            };
+
+            let mut changes = std::collections::HashMap::new();
+            changes.insert(uri.clone(), vec![edit]);
+            
+            return Ok(Some(WorkspaceEdit {
+                changes: Some(changes),
+                ..Default::default()
+            }));
+        }
+    }
+
+    Ok(None)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -80,13 +132,11 @@ mod tests {
         }
         let url = Url::parse(uri).unwrap();
 
-        // Insert document
         {
             let mut docs = state.documents.write().await;
             docs.insert(url.clone(), text.to_string());
         }
 
-        // Insert mapper
         let mapper = PositionMapper::new(text, text);
         {
             let mut mappers = state.mappers.write().await;
@@ -116,7 +166,6 @@ mod tests {
         let params = create_formatting_params(&uri);
         let result = handle_formatting(&state, params).await.unwrap();
 
-        // Should return None when document not found
         assert!(result.is_none());
     }
 
@@ -129,7 +178,6 @@ mod tests {
         let params = create_formatting_params(&uri);
         let result = handle_formatting(&state, params).await.unwrap();
 
-        // Should return None when document parse fails
         assert!(result.is_none());
     }
 
@@ -149,9 +197,7 @@ print(42)
         let edits = result.unwrap();
         let new_text = &edits[0].new_text;
         
-        // Header should be normalized
         assert!(new_text.contains("```{r my-chunk}"));
-        // Options should be normalized
         assert!(new_text.contains("#| eval: true"));
         assert!(new_text.contains("#| cache: false"));
     }

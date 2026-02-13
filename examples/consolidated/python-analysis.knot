@@ -262,7 +262,8 @@ Un peu de texte pour vérifier si tout se passe bien !
 ```
 
 ```{r}
-#| eval: false
-
+#| eval:     false
+{ x <- 1
+}
 1:3 + 1:2
 ```

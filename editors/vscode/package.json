@@ -25,7 +25,8 @@
   "main": "./out/extension.js",
   "activationEvents": [
     "onLanguage:knot",
-    "onView:knotExplorer"
+    "onView:knotExplorer",
+    "onCommand:knot.formatChunk"
   ],
   "contributes": {
     "views": {
@@ -81,9 +82,22 @@
         "title": "Stop Preview (knot watch)",
         "category": "Knot",
         "icon": "$(debug-stop)"
+      },
+      {
+        "command": "knot.formatChunk",
+        "title": "Format Chunk",
+        "category": "Knot",
+        "icon": "$(zap)"
       }
     ],
     "menus": {
+      "editor/context": [
+        {
+          "command": "knot.formatChunk",
+          "when": "resourceLangId == knot",
+          "group": "1_modification"
+        }
+      ],
       "editor/title": [
         {
           "command": "knot.cleanProject",
@@ -108,6 +122,12 @@
         "key": "ctrl+k v",
         "mac": "cmd+k v",
         "when": "resourceLangId == knot"
+      },
+      {
+        "command": "knot.formatChunk",
+        "key": "ctrl+shift+i",
+        "mac": "cmd+shift+i",
+        "when": "resourceLangId == knot && editorTextFocus"
       }
     ],
     "configuration": {

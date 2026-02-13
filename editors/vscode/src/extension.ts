@@ -186,6 +186,38 @@ export async function activate(context: ExtensionContext) {
             }
         })
     );
+
+    context.subscriptions.push(
+        commands.registerCommand('knot.formatChunk', async () => {
+            if (!client) {
+                window.showErrorMessage('Knot LSP client not ready');
+                return;
+            }
+            const editor = window.activeTextEditor;
+            if (!editor || editor.document.languageId !== 'knot') return;
+
+            const uri = editor.document.uri.toString();
+            const position = editor.selection.active;
+
+            outputChannel.appendLine(`Extension: Triggering formatChunk at line ${position.line}`);
+
+            try {
+                // Send custom request to bypass VS Code command interception
+                const result = await client.sendRequest('knot/formatChunk', {
+                    uri: uri,
+                    position: {
+                        line: position.line,
+                        character: position.character
+                    }
+                });
+                
+                outputChannel.appendLine(`Extension: Format result: ${JSON.stringify(result)}`);
+            } catch (error) {
+                outputChannel.appendLine(`Extension Error: ${error}`);
+                window.showErrorMessage(`Format Chunk failed: ${error}`);
+            }
+        })
+    );
 }
 
 export async function deactivate(): Promise<void> {
