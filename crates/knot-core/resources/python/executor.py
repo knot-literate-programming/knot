@@ -27,3 +27,7 @@ def setup_environment(metadata_file, cache_dir, fig_width, fig_height, fig_dpi, 
     os.environ['KNOT_FIG_HEIGHT'] = str(fig_height)
     os.environ['KNOT_FIG_DPI'] = str(fig_dpi)
     os.environ['KNOT_FIG_FORMAT'] = fig_format
+
+    # Clear internal state (results, warnings, error) from previous chunk
+    if '_knot_clear_state' in globals():
+        globals()['_knot_clear_state']()

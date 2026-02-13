@@ -223,3 +223,19 @@ fn test_r_warning_not_error() {
         "Warnings should not cause execution failure"
     );
 }
+
+#[test]
+#[ignore] // Requires R
+fn test_r_message_not_error() {
+    let (_temp, mut executor) = setup_executor();
+    let graphics = default_graphics();
+
+    // message() writes to stderr but is not an error
+    let code = "message('This is just a message, not an error')";
+    let result = executor.execute(code, &graphics);
+
+    assert!(
+        result.is_ok(),
+        "R message() should not cause execution failure even if it writes to stderr"
+    );
+}

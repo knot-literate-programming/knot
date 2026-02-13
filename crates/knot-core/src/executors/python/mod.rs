@@ -340,4 +340,43 @@ mod tests {
         let result = executor2.execute_inline("z").unwrap();
         assert_eq!(result, "999");
     }
+
+    #[test]
+    fn test_python_error_handling() {
+        let (_tmp, mut executor) = setup_executor();
+        let result = executor.execute(
+            "raise ValueError('Something went wrong')",
+            &GraphicsOptions {
+                width: 0.0,
+                height: 0.0,
+                dpi: 0,
+                format: String::new(),
+            },
+        );
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Something went wrong"));
+        assert!(err_msg.contains("ValueError"));
+        assert!(err_msg.contains("Traceback"));
+    }
+
+    #[test]
+    fn test_python_warnings() {
+        let (_tmp, mut executor) = setup_executor();
+        let output = executor
+            .execute(
+                "import warnings; warnings.warn('A little warning')",
+                &GraphicsOptions {
+                    width: 0.0,
+                    height: 0.0,
+                    dpi: 0,
+                    format: String::new(),
+                },
+            )
+            .unwrap();
+
+        assert_eq!(output.warnings.len(), 1);
+        assert!(output.warnings[0].message.to_string().contains("A little warning"));
+    }
 }

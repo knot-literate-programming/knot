@@ -8,24 +8,25 @@
 // If no metadata is provided, stdout text is used as fallback.
 
 use super::{BOUNDARY, RExecutor, formatters, process::RProcess};
-use crate::executors::error_utils::format_code_with_context;
 use crate::executors::path_utils::escape_path_for_code;
 use crate::executors::{ExecutionOutput, GraphicsOptions, SideChannel};
 use anyhow::{Context, Result};
 use std::io::Write;
 use std::path::Path;
 
-/// Wrap R code with error handlers to capture structured errors and warnings.
+/// Wrap R code with error handlers using eval(parse(file=...)).
 ///
-/// NOTE: If you change this wrapper, you MUST update the line offset
-/// in the error reporting logic.
-fn wrap_r_code(code: &str) -> String {
+/// The user code is read from `code_file` at runtime — no string escaping needed.
+/// Using parse() at runtime inside tryCatch means syntax errors are also captured
+/// as structured metadata (locale-independent), unlike direct code embedding.
+///
+/// NOTE: If you change this wrapper, update traceback_skip in execute() below.
+/// Current count: tryCatch(1) + withCallingHandlers(2) + withVisible(3) + eval(4) = 4
+fn wrap_r_code_file(code_file: &str) -> String {
     format!(
         r#"tryCatch({{
   withCallingHandlers({{
-    .knot_res <- withVisible({{
-{code}
-    }})
+    .knot_res <- withVisible(eval(parse(file='{code_file}'), envir=.GlobalEnv))
     if (.knot_res$visible) print(.knot_res$value)
     invisible(.write_metadata(NULL, type = "sync"))
   }}, warning = function(w) {{
@@ -53,6 +54,16 @@ pub fn execute(
     // Create side-channel for this chunk
     let channel = SideChannel::new()?;
 
+    // Write user code to a temp file — R reads it via parse(file=...) so no
+    // escaping is needed and syntax errors are caught inside tryCatch.
+    let code_file = tempfile::Builder::new()
+        .prefix("knot_code_")
+        .suffix(".R")
+        .tempfile()
+        .context("Failed to create temp file for R code")?;
+    std::fs::write(code_file.path(), code).context("Failed to write R code to temp file")?;
+    let code_file_str = escape_path_for_code(code_file.path());
+
     let stdin = process
         .stdin
         .as_mut()
@@ -67,80 +78,21 @@ pub fn execute(
         meta_file, cache_dir_str, graphics.width, graphics.height, graphics.dpi, graphics.format
     )?;
 
-    // Wrap the code with our error handler
-    let wrapped_code = wrap_r_code(code);
-
-    // Write the code, followed by boundary markers
+    // Send the wrapper that reads the code file at runtime
+    let wrapped_code = wrap_r_code_file(&code_file_str);
     writeln!(stdin, "{}", wrapped_code)?;
     writeln!(stdin, "cat('{}\\n', file=stdout())", BOUNDARY)?;
     writeln!(stdin, "cat('{}\\n', file=stderr())", BOUNDARY)?;
     stdin.flush()?;
 
     let (stdout_output, stderr_output) = process.read_until_boundary()?;
+    // code_file is dropped here — temp file cleaned up automatically
 
     // Read metadata from side-channel
     let metadata = channel.read_metadata()?;
 
-    // Check for structured errors first (most precise)
-    if let Some(error) = &metadata.error {
-        // Line offset calculation:
-        // In our wrapper, the user code starts at line 4 of the block.
-        // But R error reporting can be tricky with sys.calls().
-        // For now, we report the message and the call.
-        let error_msg = error.message.as_ref().map(|m| m.to_string()).unwrap_or_else(|| "Unknown R error".to_string());
-        let code_preview = format_code_with_context(code, &error_msg, 3);
-        
-        // Skip the first 3 frames which are knot's own wrappers
-        // (tryCatch, withCallingHandlers, withVisible), then keep
-        // at most 8 of the remaining frames, preferring the innermost
-        // ones (closest to the actual error).
-        const MAX_TRACEBACK_FRAMES: usize = 8;
-        let user_frames: Vec<&String> = error.traceback.iter().skip(3).collect();
-        let traceback_str = if user_frames.len() > MAX_TRACEBACK_FRAMES {
-            let omitted = user_frames.len() - MAX_TRACEBACK_FRAMES;
-            let tail = &user_frames[user_frames.len() - MAX_TRACEBACK_FRAMES..];
-            std::iter::once(format!("... {} frames omitted ...", omitted))
-                .chain(tail.iter().map(|s| s.to_string()))
-                .collect::<Vec<_>>()
-                .join("\n")
-        } else {
-            user_frames.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("\n")
-        };
-
-        anyhow::bail!(
-            "R execution failed.\n\nCode:\n{}\n\nError: {}\nCall: {}\n\nTraceback:\n{}",
-            code_preview,
-            error_msg,
-            error.call.as_ref().map(|c| c.to_string()).unwrap_or_else(|| "unknown".to_string()),
-            traceback_str
-        );
-    }
-
-    // Fallback: Check if stderr contains actual errors (e.g. syntax errors or setup errors)
-    if !stderr_output.trim().is_empty() {
-        let stderr_lower = stderr_output.to_lowercase();
-        let is_error = stderr_lower.contains("error")
-            || stderr_lower.contains("erreur")
-            || stderr_lower.contains("execution arrêtée")
-            || stderr_lower.contains("execution halted")
-            || stderr_lower.contains("could not find function")
-            || stderr_lower.contains("objet") && stderr_lower.contains("introuvable");
-
-        if is_error {
-            let code_preview = format_code_with_context(code, &stderr_output, 3);
-
-            anyhow::bail!(
-                "R execution failed (detected via stderr).\n\nCode:\n{}\n\nError:\n{}",
-                code_preview,
-                stderr_output.trim()
-            );
-        } else {
-            // It might be just messages or warnings that were also printed to stderr
-            log::debug!("R stderr (non-fatal): {}", stderr_output.trim());
-        }
-    }
-
-    crate::executors::metadata_to_execution_result(metadata, &stdout_output)
+    // R wrapper adds 4 frames: tryCatch, withCallingHandlers, withVisible, eval
+    crate::executors::process_execution_output(code, metadata, &stdout_output, &stderr_output, 4)
 }
 
 /// Execute an inline R expression and return formatted result

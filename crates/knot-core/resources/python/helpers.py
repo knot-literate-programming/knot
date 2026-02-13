@@ -4,6 +4,23 @@ import os
 import json
 from pathlib import Path
 
+# Internal state
+_knot_results = []
+_knot_warnings = []
+_knot_error = None
+
+
+def _knot_clear_state():
+    global _knot_results, _knot_warnings, _knot_error
+    _knot_results = []
+    _knot_warnings = []
+    _knot_error = None
+
+
+def _knot_add_warning(message):
+    """Capture a warning into the side-channel state."""
+    _knot_warnings.append({'message': str(message)})
+
 
 def _get_base_dir() -> Path:
     """Get cache directory from environment or temp."""
@@ -17,30 +34,39 @@ def _get_base_dir() -> Path:
     return Path(tempfile.gettempdir())
 
 
-def _write_metadata(metadata: dict) -> bool:
-    """Write metadata to side-channel file."""
+def _write_metadata(metadata, type='result') -> bool:
+    """Write structured metadata to side-channel file.
+
+    Uses auto_unbox-equivalent semantics: all scalar fields are plain JSON
+    values, not arrays. Lists that must stay arrays (traceback) are passed
+    as Python lists directly.
+    """
     metadata_file = os.environ.get('KNOT_METADATA_FILE')
     if not metadata_file:
         return False
 
-    filepath = Path(metadata_file)
+    global _knot_results, _knot_error
 
-    # Read existing metadata
-    existing = []
-    if filepath.exists():
-        try:
-            with open(filepath, 'r') as f:
-                content = f.read().strip()
-                if content:
-                    existing = json.loads(content)
-        except (json.JSONDecodeError, IOError):
-            existing = []
+    # Update internal state
+    if type == 'result' and metadata is not None:
+        _knot_results.append(metadata)
+    elif type == 'error':
+        _knot_error = metadata
 
-    # Append new metadata
-    existing.append(metadata)
+    # Prepare full structured metadata object (mirrors KnotMetadata in Rust)
+    data = {
+        'results': _knot_results,
+        'warnings': _knot_warnings,
+    }
+    if _knot_error is not None:
+        data['error'] = _knot_error
 
-    # Write back as JSON array
-    with open(filepath, 'w') as f:
-        json.dump(existing, f)
+    try:
+        with open(metadata_file, 'w') as f:
+            json.dump(data, f)
+    except Exception:
+        # Fallback: write minimal valid metadata so Rust doesn't hang
+        with open(metadata_file, 'w') as f:
+            f.write('{"results": [], "warnings": []}')
 
     return True

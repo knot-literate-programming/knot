@@ -38,6 +38,77 @@ pub struct GraphicsOptions {
     pub format: String,
 }
 
+/// Process execution output: check for errors, then convert metadata.
+///
+/// Shared post-execution logic for all language executors:
+/// 1. Structured error from side-channel metadata (most precise)
+/// 2. Stderr fallback for errors not caught by the wrapper (e.g. syntax errors)
+/// 3. Successful result via `metadata_to_execution_result`
+///
+/// `traceback_skip` lets each language skip its own wrapper frames from the
+/// traceback (R skips 3: tryCatch/withCallingHandlers/withVisible; Python: 0).
+pub fn process_execution_output(
+    code: &str,
+    metadata: side_channel::KnotMetadata,
+    stdout: &str,
+    stderr: &str,
+    traceback_skip: usize,
+) -> Result<ExecutionOutput> {
+    use crate::executors::error_utils::format_code_with_context;
+
+    // Check for structured errors first (most precise)
+    if let Some(error) = &metadata.error {
+        let error_msg = error
+            .message
+            .as_ref()
+            .map(|m| m.to_string())
+            .unwrap_or_else(|| "Unknown error".to_string());
+
+        let code_preview = format_code_with_context(code, &error_msg, 3);
+
+        const MAX_TRACEBACK_FRAMES: usize = 8;
+        let user_frames: Vec<&String> = error.traceback.iter().skip(traceback_skip).collect();
+        let traceback_str = if user_frames.len() > MAX_TRACEBACK_FRAMES {
+            let omitted = user_frames.len() - MAX_TRACEBACK_FRAMES;
+            let tail = &user_frames[user_frames.len() - MAX_TRACEBACK_FRAMES..];
+            std::iter::once(format!("... {} frames omitted ...", omitted))
+                .chain(tail.iter().map(|s| s.to_string()))
+                .collect::<Vec<_>>()
+                .join("\n")
+        } else {
+            user_frames
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        anyhow::bail!(
+            "Execution failed.\n\nCode:\n{}\n\nError: {}\nCall: {}\n\nTraceback:\n{}",
+            code_preview,
+            error_msg,
+            error
+                .call
+                .as_ref()
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "unknown".to_string()),
+            traceback_str
+        );
+    }
+
+    // Since we now use eval(parse(file=...)) in R and exec(compile(...)) in Python,
+    // all syntax and runtime errors are caught by our wrappers and reported via
+    // the structured metadata checked above.
+    //
+    // Stderr may still contain logs, messages (R), or library warnings.
+    // We log these for debugging but do not treat them as fatal execution failures.
+    if !stderr.trim().is_empty() {
+        log::debug!("Executor stderr (non-fatal): {}", stderr.trim());
+    }
+
+    metadata_to_execution_result(metadata, stdout)
+}
+
 /// Convert side-channel metadata to ExecutionOutput
 ///
 /// This is shared logic used by all language executors (Python, R, Julia...).
