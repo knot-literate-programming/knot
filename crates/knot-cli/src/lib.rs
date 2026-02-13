@@ -307,10 +307,14 @@ pub fn format_file(file_path: &PathBuf, check_only: bool) -> Result<bool> {
         }
 
         // Try to format code with external tools
-        let formatted_code = knot_core::compiler::formatters::format_code(&chunk.code, &chunk.language).ok();
-        
+        let formatted_code =
+            knot_core::compiler::formatters::format_code(&chunk.code, &chunk.language).ok();
+
         if formatted_code.is_none() {
-            log::debug!("External formatter skipped or failed for {}", chunk.language);
+            log::debug!(
+                "External formatter skipped or failed for {}",
+                chunk.language
+            );
         }
 
         // Append formatted chunk (structural + optional code formatting)

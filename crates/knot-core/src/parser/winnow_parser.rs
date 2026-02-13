@@ -522,8 +522,7 @@ More text below."###;
 
     #[test]
     fn test_parse_unknown_option() {
-        // Unknown options are now silently ignored (no deny_unknown_fields)
-        // This allows forward compatibility and custom options like codly-*
+        // Unknown options produce a diagnostic (Options Firewall)
         let content = r###"```{r}
 #| unknown-opt: 42
 1 + 1
@@ -532,8 +531,8 @@ More text below."###;
         assert_eq!(doc.chunks.len(), 1);
         assert_eq!(
             doc.chunks[0].errors.len(),
-            0,
-            "Unknown options should be silently ignored"
+            1,
+            "Unknown options should produce a diagnostic"
         );
     }
 

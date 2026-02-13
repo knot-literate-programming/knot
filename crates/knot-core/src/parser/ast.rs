@@ -151,7 +151,10 @@ macro_rules! apply_config {
 macro_rules! format_field {
     (col, $self:expr, $name:ident, $serde_name:expr) => {
         if !$self.$name.is_empty() {
-            let yaml_val = serde_yaml::to_string(&$self.$name).unwrap_or_default().trim().to_string();
+            let yaml_val = serde_yaml::to_string(&$self.$name)
+                .unwrap_or_default()
+                .trim()
+                .to_string();
             format!("#| {}: {}\n", $serde_name, yaml_val)
         } else {
             String::new()
@@ -161,7 +164,10 @@ macro_rules! format_field {
         if let Some(ref val) = $self.$name {
             let yaml_val = match serde_yaml::to_value(val) {
                 Ok(serde_yaml::Value::String(s)) => s,
-                Ok(v) => serde_yaml::to_string(&v).unwrap_or_default().trim().to_string(),
+                Ok(v) => serde_yaml::to_string(&v)
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string(),
                 Err(_) => String::new(),
             };
             // Note: Even if yaml_val is "none", we write it because it overrides defaults.
@@ -278,7 +284,7 @@ macro_rules! define_options {
             pub fn format_to_quarto(&self) -> String {
                 let mut out = String::new();
                 let meta = Self::option_metadata();
-                
+
                 $(
                     let serde_name = meta.iter().find(|m| m.name == stringify!($name)).unwrap().serde_name();
                     out.push_str(&format_field!($kind, self, $name, serde_name));
@@ -398,11 +404,9 @@ impl Chunk {
         // 1. Header: ```{lang name}
         out.push_str("```{");
         out.push_str(&self.language);
-        if let Some(name) = &self.name {
-            if !name.trim().is_empty() {
-                out.push(' ');
-                out.push_str(name);
-            }
+        if let Some(name) = self.name.as_deref().filter(|n| !n.trim().is_empty()) {
+            out.push(' ');
+            out.push_str(name);
         }
         out.push_str("}\n");
 

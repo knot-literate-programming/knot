@@ -247,9 +247,18 @@ impl TinymistProxy {
             return Err(e);
         }
 
-        match rx.await {
-            Ok(result) => result,
-            Err(_) => Err(anyhow::anyhow!("Tinymist connection closed")),
+        match tokio::time::timeout(std::time::Duration::from_secs(10), rx).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err(anyhow::anyhow!("Tinymist connection closed")),
+            Err(_) => {
+                // Timeout: clean up the pending request
+                let mut map = self.pending_requests.lock().await;
+                map.remove(&id);
+                Err(anyhow::anyhow!(
+                    "Tinymist request '{}' timed out after 10s",
+                    method
+                ))
+            }
         }
     }
 

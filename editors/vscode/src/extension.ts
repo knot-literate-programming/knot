@@ -123,14 +123,7 @@ export async function activate(context: ExtensionContext) {
         clientOptions
     );
 
-    try {
-        await client.start();
-        outputChannel.appendLine('Knot LSP client started successfully');
-    } catch (error) {
-        outputChannel.appendLine(`Failed to start Knot LSP client: ${error}`);
-    }
-
-    // Register commands
+    // Register commands immediately (before LSP start, which can be slow)
     context.subscriptions.push(
         commands.registerCommand('knot.openPreview', async () => {
             await openPreview(outputChannel);
@@ -218,6 +211,13 @@ export async function activate(context: ExtensionContext) {
             }
         })
     );
+
+    // Start LSP after registering commands (fire-and-forget to avoid blocking activation)
+    client.start().then(() => {
+        outputChannel.appendLine('Knot LSP client started successfully');
+    }).catch((error: unknown) => {
+        outputChannel.appendLine(`Failed to start Knot LSP client: ${error}`);
+    });
 }
 
 export async function deactivate(): Promise<void> {

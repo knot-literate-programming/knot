@@ -29,7 +29,8 @@ pub fn format_r(code: &str) -> Result<String> {
         anyhow::bail!("Air formatting failed: {}", stderr);
     }
 
-    let formatted = std::fs::read_to_string(&temp_file).context("Failed to read formatted R code")?;
+    let formatted =
+        std::fs::read_to_string(&temp_file).context("Failed to read formatted R code")?;
     let _ = std::fs::remove_file(&temp_file);
 
     Ok(formatted)
@@ -51,12 +52,14 @@ pub fn format_python(code: &str) -> Result<String> {
 
     let mut stdin = child.stdin.take().context("Failed to open ruff stdin")?;
     let code_to_send = code.to_string();
-    
+
     std::thread::spawn(move || {
         let _ = stdin.write_all(code_to_send.as_bytes());
     });
 
-    let output = child.wait_with_output().context("Failed to read ruff output")?;
+    let output = child
+        .wait_with_output()
+        .context("Failed to read ruff output")?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);

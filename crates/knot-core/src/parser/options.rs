@@ -125,9 +125,11 @@ mod tests {
         let options_block = "#| unknown-opt: 42\n";
         let (_opts, _codly, errors) = parse_options(options_block);
         assert!(!errors.is_empty());
-        assert!(errors[0]
-            .message
-            .contains("Unknown chunk option: 'unknown-opt'"));
+        assert!(
+            errors[0]
+                .message
+                .contains("Unknown chunk option: 'unknown-opt'")
+        );
         assert_eq!(errors[0].line_offset, Some(1));
     }
 
@@ -156,6 +158,9 @@ mod tests {
     fn test_parse_codly_options_no_warning() {
         let options_block = "#| codly-zebra-fill: none\n";
         let (_opts, _codly, errors) = parse_options(options_block);
-        assert!(errors.is_empty(), "Codly options should not trigger warnings");
+        assert!(
+            errors.is_empty(),
+            "Codly options should not trigger warnings"
+        );
     }
 }

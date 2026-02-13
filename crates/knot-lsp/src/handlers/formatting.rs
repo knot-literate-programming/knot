@@ -31,7 +31,7 @@ pub async fn handle_formatting(
             knot_core::compiler::formatters::format_code(&chunk.code, &chunk.language).ok();
         let formatted = chunk.format(formatted_code.as_deref());
         let original_chunk = &text[chunk.start_byte..chunk.end_byte];
-        
+
         if formatted != original_chunk {
             edits.push(TextEdit {
                 range: Range {
@@ -78,16 +78,19 @@ pub async fn handle_format_chunk(
     };
 
     let line = pos.line as usize;
-    let target_chunk = doc.chunks.iter().find(|c| line >= c.range.start.line && line <= c.range.end.line);
+    let target_chunk = doc
+        .chunks
+        .iter()
+        .find(|c| line >= c.range.start.line && line <= c.range.end.line);
 
     if let Some(chunk) = target_chunk {
         // 3. Format the chunk
         let formatted_code =
             knot_core::compiler::formatters::format_code(&chunk.code, &chunk.language).ok();
         let formatted = chunk.format(formatted_code.as_deref());
-        
+
         let original_chunk = &text[chunk.start_byte..chunk.end_byte];
-        
+
         if formatted != original_chunk {
             let edit = TextEdit {
                 range: Range {
@@ -105,7 +108,7 @@ pub async fn handle_format_chunk(
 
             let mut changes = std::collections::HashMap::new();
             changes.insert(uri.clone(), vec![edit]);
-            
+
             return Ok(Some(WorkspaceEdit {
                 changes: Some(changes),
                 ..Default::default()
@@ -183,8 +186,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_formatting_structural_normalization() {
+        // Tests two normalization behaviors:
+        // 1. Chunk header: extra spaces around name are removed
+        // 2. Option lines: missing space after `#|` is added (e.g. `#|cache:` → `#| cache:`)
+        // Note: `eval:true` (no space after colon) is not valid YAML key-value syntax,
+        // so we use `eval: false` (non-default, valid YAML) to verify option preservation.
         let text = r#"```{r   my-chunk   }
-#| eval:true
+#| eval: false
 #|cache:  false
 print(42)
 ```"#;
@@ -196,9 +204,9 @@ print(42)
         assert!(result.is_some());
         let edits = result.unwrap();
         let new_text = &edits[0].new_text;
-        
+
         assert!(new_text.contains("```{r my-chunk}"));
-        assert!(new_text.contains("#| eval: true"));
+        assert!(new_text.contains("#| eval: false"));
         assert!(new_text.contains("#| cache: false"));
     }
 }
