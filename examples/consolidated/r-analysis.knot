@@ -132,3 +132,4 @@ typst(correlation_plot)
 ```
 
 The correlation between temperature and rainfall is `{r} cor_value <- cor(climate_data$temperature, climate_data$rainfall); round(cor_value, 3)`, indicating a negative relationship: warmer months tend to have less rainfall.
+
