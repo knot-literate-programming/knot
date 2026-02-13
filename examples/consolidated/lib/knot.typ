@@ -27,6 +27,7 @@
   output-inset: 0pt,
   width-ratio: "1:1",
   align: none,
+  is-inert: false,
   ..rest,
 ) = {
   // Ensure warnings and errors are arrays (defensive check)
@@ -40,13 +41,22 @@
 
   // Wrap code in styled block
   let code-block = if code != none {
-    block(
+    let b = block(
       fill: code-background,
       stroke: code-stroke,
       radius: code-radius,
       inset: code-inset,
       width: 100%,
+      clip: true,
     )[#code]
+    
+    if is-inert {
+      // Overlay a semi-transparent white box to "gray out" the code
+      // We use a stack with spacing 0 and move the overlay up
+      stack(dir: ttb, spacing: -100%, b, block(width: 100%, height: 100%, fill: white.transparentize(40%), radius: code-radius))
+    } else {
+      b
+    }
   } else { none }
 
   // Wrap output in styled block
