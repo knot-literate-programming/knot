@@ -49,6 +49,23 @@ This does not touch the environment. Call on `did_change` for each R chunk.
 Returns error message with line/column info from R's parser, allowing finer-grained
 diagnostics within the chunk.
 
+### 4. ⚠️ Diagnostic pour les options de chunk inconnues (PRIORITÉ HAUTE)
+
+Actuellement, une option inconnue dans un chunk est **silencieusement ignorée** par serde.
+Exemple vécu : `warinings-visibility: none` (faute de frappe) n'a aucun effet et aucun
+avertissement n'est émis — le comportement par défaut s'applique sans prévenir l'utilisateur.
+
+`get_diagnostics()` dans `crates/knot-lsp/src/diagnostics.rs` parse déjà les options via
+`parse_options()`. Il faudrait ajouter une validation des clés connues :
+
+1. `ChunkOptions::option_metadata()` retourne la liste de toutes les options valides
+2. Après `parse_options()`, extraire les clés YAML brutes et les comparer aux noms connus
+   (via `OptionMetadata::serde_name()`)
+3. Toute clé non reconnue → `Diagnostic` avec `severity: Warning` sur la ligne `#|` concernée
+
+Ceci permettrait de détecter immédiatement les fautes de frappe dans les options
+(`warinings-visibility`, `fig_width` au lieu de `fig-width`, etc.).
+
 ## Constraints
 
 ### No line-level resolution for runtime warnings
