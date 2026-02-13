@@ -527,3 +527,5 @@ from the original design:
 
 See `lsp-diagnostics.md` for the future work of surfacing these warnings/errors as LSP
 diagnostics in the editor.
+
+- **Unification (2026-02-13):** R and Python now share the same `process_execution_output` logic. Both use temporary files for code execution to avoid escaping issues and capture syntax errors. Granular resilience was added: a failure in R only disables subsequent R chunks, while other languages continue normally.
