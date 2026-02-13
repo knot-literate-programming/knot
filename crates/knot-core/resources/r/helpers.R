@@ -12,10 +12,13 @@
 }
 
 .knot_add_warning <- function(w) {
-  warn_obj <- list(
-    message = as.character(w$message),
-    call = if (!is.null(w$call)) deparse(w$call)[1] else NULL
-  )
+  # Build warning object without NULL fields: jsonlite serializes list elements
+  # that are NULL as {} (empty object) rather than null, which breaks Rust
+  # deserialization. Omitting the field entirely lets serde use its Option::None default.
+  warn_obj <- list(message = as.character(w$message))
+  if (!is.null(w$call)) {
+    warn_obj$call <- deparse(w$call)[1]
+  }
   .knot_warnings <<- c(.knot_warnings, list(warn_obj))
 }
 
@@ -54,10 +57,11 @@
     data$error <- .knot_error
   }
 
-  # Write JSON without any unboxing to avoid "Tried to unbox" errors
-  # We handle the array structures in Rust.
+  # Write JSON with auto_unbox = TRUE so scalar fields become JSON scalars.
+  # Vectors that must stay as arrays (traceback, warnings list) are wrapped
+  # with as.list() at the call site before being stored in the data object.
   tryCatch({
-    json_content <- jsonlite::toJSON(data, auto_unbox = FALSE, pretty = TRUE)
+    json_content <- jsonlite::toJSON(data, auto_unbox = TRUE, pretty = TRUE)
     writeLines(json_content, meta_file, useBytes = TRUE)
   }, error = function(e) {
     # If JSON fails, write a minimal error so Rust doesn't hang

@@ -28,6 +28,10 @@
   align: none,
   ..rest,
 ) = {
+  // Ensure warnings and errors are arrays (defensive check)
+  let warnings = if type(warnings) == array { warnings } else if warnings == none { () } else { (warnings,) }
+  let errors = if type(errors) == array { errors } else if errors == none { () } else { (errors,) }
+
   // Parse width-ratio for horizontal layout
   let ratio-parts = width-ratio.split(":")
   let left-ratio = if ratio-parts.len() >= 1 { float(ratio-parts.at(0)) } else { 1.0 }

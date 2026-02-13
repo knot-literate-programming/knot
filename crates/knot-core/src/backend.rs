@@ -92,23 +92,33 @@ impl Backend for TypstBackend {
 
         // Include errors as a special argument to code-chunk (if any)
         if !chunk.errors.is_empty() {
-            let error_list = chunk
+            let mut error_list = chunk
                 .errors
                 .iter()
-                .map(|e| format!("\"{}\"", e.message.replace('\"', "\\\"")))
+                .map(|e| format!("[{}]", e.message))
                 .collect::<Vec<_>>()
                 .join(", ");
+            
+            // In Typst, (item,) is a single-element array.
+            if chunk.errors.len() == 1 {
+                error_list.push(',');
+            }
             args.push(format!("errors: ({})", error_list));
         }
 
         // Include runtime warnings if any
         if !output.warnings.is_empty() {
-            let warning_list = output
+            let mut warning_list = output
                 .warnings
                 .iter()
-                .map(|w| format!("\"{}\"", w.message.replace('\"', "\\\"")))
+                .map(|w| format!("[{}]", w.message.to_string()))
                 .collect::<Vec<_>>()
                 .join(", ");
+            
+            // Same trailing comma rule for warnings
+            if output.warnings.len() == 1 {
+                warning_list.push(',');
+            }
             args.push(format!("warnings: ({})", warning_list));
         }
 
@@ -368,7 +378,7 @@ mod tests {
         let output = backend.format_chunk(&chunk, &resolved, &output_data);
 
         assert!(
-            output.contains("errors: (\"Unknown option: 'foo'\", \"Invalid value for 'eval'\")")
+            output.contains("errors: ([Unknown option: 'foo'], [Invalid value for 'eval'])")
         );
     }
 

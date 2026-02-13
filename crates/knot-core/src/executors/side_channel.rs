@@ -9,7 +9,14 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-/// Helper enum to handle R's tendency to wrap scalars in arrays
+/// A JSON value that can be either a plain string or an array of strings.
+///
+/// R serializes scalar values as plain strings with `auto_unbox = TRUE` (our
+/// default), so in practice the `String` variant is produced by R for scalar
+/// fields. The `Vec` variant handles any residual arrays (e.g. multi-line
+/// call stacks) and acts as a defensive fallback.
+///
+/// `#[serde(untagged)]` tries `String` first, then `Vec`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
 pub enum StringOrVec {
@@ -32,7 +39,10 @@ impl StringOrVec {
     }
 
     pub fn to_string(&self) -> String {
-        self.as_str().to_string()
+        match self {
+            StringOrVec::String(s) => s.clone(),
+            StringOrVec::Vec(v) => v.join("\n"),
+        }
     }
 }
 
@@ -56,6 +66,10 @@ pub enum OutputMetadata {
 pub struct RuntimeWarning {
     pub message: StringOrVec,
     pub call: Option<StringOrVec>,
+    /// Source line number where the warning was triggered.
+    ///
+    /// Not yet implemented: R does not populate this field and the
+    /// Typst backend does not display it. Reserved for future use.
     pub line: Option<usize>,
 }
 
@@ -64,6 +78,10 @@ pub struct RuntimeWarning {
 pub struct RuntimeError {
     pub message: Option<StringOrVec>,
     pub call: Option<StringOrVec>,
+    /// Source line number where the error was triggered.
+    ///
+    /// Not yet implemented: R does not populate this field and the
+    /// Typst backend does not display it. Reserved for future use.
     pub line: Option<usize>,
     #[serde(default)]
     pub traceback: Vec<String>,
@@ -146,7 +164,7 @@ impl SideChannel {
 
 impl Drop for SideChannel {
     fn drop(&mut self) {
-        // self.cleanup();
+        self.cleanup();
     }
 }
 
@@ -180,7 +198,7 @@ mod tests {
         let metadata = KnotMetadata {
             results: vec![OutputMetadata::Plot {
                 path: PathBuf::from("/tmp/plot.svg"),
-                format: "svg".to_string(),
+                format: StringOrVec::String("svg".to_string()),
             }],
             ..Default::default()
         };
@@ -195,7 +213,7 @@ mod tests {
         match &read_metadata.results[0] {
             OutputMetadata::Plot { path, format } => {
                 assert_eq!(path, &PathBuf::from("/tmp/plot.svg"));
-                assert_eq!(format, "svg");
+                assert_eq!(format.to_string(), "svg");
             }
             _ => panic!("Expected Plot metadata"),
         }
@@ -207,7 +225,7 @@ mod tests {
 
         // Old list format
         let results = vec![OutputMetadata::Text {
-            content: "Legacy".to_string(),
+            content: StringOrVec::String("Legacy".to_string()),
         }];
 
         let json = serde_json::to_string(&results).unwrap();
@@ -219,7 +237,7 @@ mod tests {
         assert_eq!(
             read_metadata.results[0],
             OutputMetadata::Text {
-                content: "Legacy".to_string()
+                content: StringOrVec::String("Legacy".to_string()),
             }
         );
     }

@@ -33,11 +33,9 @@ fn wrap_r_code(code: &str) -> String {
     invokeRestart("muffleWarning")
   }})
 }}, error = function(e) {{
-  err_obj <- list(
-    message = e$message,
-    call = if(!is.null(e$call)) deparse(e$call)[1] else NULL,
-    traceback = as.character(sys.calls())
-  )
+  err_obj <- list(message = e$message)
+  if (!is.null(e$call)) err_obj$call <- deparse(e$call)[1]
+  err_obj$traceback <- as.list(as.character(sys.calls()))
   .write_metadata(err_obj, type = "error")
   stop(e)
 }})
@@ -92,12 +90,29 @@ pub fn execute(
         let error_msg = error.message.as_ref().map(|m| m.to_string()).unwrap_or_else(|| "Unknown R error".to_string());
         let code_preview = format_code_with_context(code, &error_msg, 3);
         
+        // Skip the first 3 frames which are knot's own wrappers
+        // (tryCatch, withCallingHandlers, withVisible), then keep
+        // at most 8 of the remaining frames, preferring the innermost
+        // ones (closest to the actual error).
+        const MAX_TRACEBACK_FRAMES: usize = 8;
+        let user_frames: Vec<&String> = error.traceback.iter().skip(3).collect();
+        let traceback_str = if user_frames.len() > MAX_TRACEBACK_FRAMES {
+            let omitted = user_frames.len() - MAX_TRACEBACK_FRAMES;
+            let tail = &user_frames[user_frames.len() - MAX_TRACEBACK_FRAMES..];
+            std::iter::once(format!("... {} frames omitted ...", omitted))
+                .chain(tail.iter().map(|s| s.to_string()))
+                .collect::<Vec<_>>()
+                .join("\n")
+        } else {
+            user_frames.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("\n")
+        };
+
         anyhow::bail!(
             "R execution failed.\n\nCode:\n{}\n\nError: {}\nCall: {}\n\nTraceback:\n{}",
             code_preview,
             error_msg,
             error.call.as_ref().map(|c| c.to_string()).unwrap_or_else(|| "unknown".to_string()),
-            error.traceback.join("\n")
+            traceback_str
         );
     }
 
