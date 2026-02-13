@@ -188,6 +188,7 @@ pub fn save_result(
 }
 
 /// Creates a new ChunkCacheEntry
+#[allow(clippy::too_many_arguments)]
 pub fn create_chunk_entry(
     chunk_index: usize,
     chunk_name: Option<String>,

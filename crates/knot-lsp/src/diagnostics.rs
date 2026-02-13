@@ -29,8 +29,14 @@ pub fn get_diagnostics(uri: &Url, text: &str) -> Vec<Diagnostic> {
     for error in doc.errors {
         diagnostics.push(Diagnostic {
             range: Range {
-                start: Position { line: 0, character: 0 },
-                end: Position { line: 0, character: 1 },
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 0,
+                    character: 1,
+                },
             },
             severity: Some(DiagnosticSeverity::ERROR),
             source: Some("knot".to_string()),
@@ -53,8 +59,14 @@ pub fn get_diagnostics(uri: &Url, text: &str) -> Vec<Diagnostic> {
 
             diagnostics.push(Diagnostic {
                 range: Range {
-                    start: Position { line: target_line as u32, character: 0 },
-                    end: Position { line: target_line as u32, character: line_len_utf16 },
+                    start: Position {
+                        line: target_line as u32,
+                        character: 0,
+                    },
+                    end: Position {
+                        line: target_line as u32,
+                        character: line_len_utf16,
+                    },
                 },
                 severity: Some(DiagnosticSeverity::ERROR),
                 source: Some("knot".to_string()),
@@ -83,12 +95,19 @@ pub fn get_diagnostics(uri: &Url, text: &str) -> Vec<Diagnostic> {
                         for warning in chunk_cache.warnings {
                             let range = if let Some(line_num) = warning.line {
                                 // line_num is 1-indexed relative to the code start
-                                let absolute_line = parsed_chunk.code_range.start.line + line_num - 1;
+                                let absolute_line =
+                                    parsed_chunk.code_range.start.line + line_num - 1;
                                 let line_text = text.lines().nth(absolute_line).unwrap_or("");
                                 let line_len_utf16 = line_text.encode_utf16().count() as u32;
                                 Range {
-                                    start: Position { line: absolute_line as u32, character: 0 },
-                                    end: Position { line: absolute_line as u32, character: line_len_utf16 },
+                                    start: Position {
+                                        line: absolute_line as u32,
+                                        character: 0,
+                                    },
+                                    end: Position {
+                                        line: absolute_line as u32,
+                                        character: line_len_utf16,
+                                    },
                                 }
                             } else {
                                 // Fallback: highlight only the closing triple backticks of the chunk
@@ -119,12 +138,19 @@ pub fn get_diagnostics(uri: &Url, text: &str) -> Vec<Diagnostic> {
                             let error_line_in_chunk = extract_line_from_traceback(&error.traceback);
 
                             let range = if let Some(line_num) = error_line_in_chunk {
-                                let absolute_line = parsed_chunk.code_range.start.line + line_num - 1;
+                                let absolute_line =
+                                    parsed_chunk.code_range.start.line + line_num - 1;
                                 let line_text = text.lines().nth(absolute_line).unwrap_or("");
                                 let line_len_utf16 = line_text.encode_utf16().count() as u32;
                                 Range {
-                                    start: Position { line: absolute_line as u32, character: 0 },
-                                    end: Position { line: absolute_line as u32, character: line_len_utf16 },
+                                    start: Position {
+                                        line: absolute_line as u32,
+                                        character: 0,
+                                    },
+                                    end: Position {
+                                        line: absolute_line as u32,
+                                        character: line_len_utf16,
+                                    },
                                 }
                             } else {
                                 // Fallback: highlight only the closing triple backticks of the chunk

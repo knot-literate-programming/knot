@@ -9,7 +9,7 @@
 //! 6. Format the output using the Typst backend.
 
 use crate::backend::{Backend, TypstBackend};
-use crate::cache::{hash_dependencies, Cache};
+use crate::cache::{Cache, hash_dependencies};
 use crate::config::Config;
 use crate::executors::{ExecutionOutput, ExecutionResult, ExecutorManager, GraphicsOptions};
 use crate::parser::Chunk;
@@ -564,8 +564,15 @@ mod tests {
             ..Default::default()
         };
 
-        let (output, _hash) =
-            process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &config, false).unwrap();
+        let (output, _hash) = process_chunk(
+            &chunk,
+            &mut manager,
+            &mut cache,
+            "prev_hash",
+            &config,
+            false,
+        )
+        .unwrap();
 
         // Verify that language-specific defaults were applied (show: output means code: none)
         assert!(output.contains("code: none"));
@@ -596,8 +603,15 @@ mod tests {
             ..Default::default()
         };
 
-        let (output, _hash) =
-            process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &config, false).unwrap();
+        let (output, _hash) = process_chunk(
+            &chunk,
+            &mut manager,
+            &mut cache,
+            "prev_hash",
+            &config,
+            false,
+        )
+        .unwrap();
 
         // Chunk-specific option should override everything (show: both means code is shown)
         assert!(output.contains("code: [```python"));
@@ -647,8 +661,15 @@ mod tests {
             ..Default::default()
         };
 
-        let (output, _hash) =
-            process_chunk(&chunk, &mut manager, &mut cache, "prev_hash", &config, false).unwrap();
+        let (output, _hash) = process_chunk(
+            &chunk,
+            &mut manager,
+            &mut cache,
+            "prev_hash",
+            &config,
+            false,
+        )
+        .unwrap();
 
         // Should use global defaults (show: output means code is not shown)
         assert!(output.contains("code: none"));

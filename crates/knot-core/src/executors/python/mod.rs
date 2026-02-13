@@ -344,18 +344,21 @@ mod tests {
     #[test]
     fn test_python_error_handling() {
         let (_tmp, mut executor) = setup_executor();
-        let result = executor.execute(
-            "raise ValueError('Something went wrong')",
-            &GraphicsOptions {
-                width: 0.0,
-                height: 0.0,
-                dpi: 0,
-                format: String::new(),
-            },
-        );
+        let output = executor
+            .execute(
+                "raise ValueError('Something went wrong')",
+                &GraphicsOptions {
+                    width: 0.0,
+                    height: 0.0,
+                    dpi: 0,
+                    format: String::new(),
+                },
+            )
+            .unwrap();
 
-        assert!(result.is_err());
-        let err_msg = result.unwrap_err().to_string();
+        assert!(output.error.is_some());
+        let err = output.error.unwrap();
+        let err_msg = err.detailed_message();
         assert!(err_msg.contains("Something went wrong"));
         assert!(err_msg.contains("ValueError"));
         assert!(err_msg.contains("Traceback"));

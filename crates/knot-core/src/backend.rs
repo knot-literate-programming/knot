@@ -3,16 +3,6 @@ use crate::parser::{Chunk, Layout, ResolvedChunkOptions, Show};
 use std::collections::HashMap;
 
 /// Formats a HashMap of codly options into a Typst #codly() function call.
-///
-/// # Example
-/// ```
-/// use std::collections::HashMap;
-/// use knot_core::backend::format_codly_call;
-/// let mut options = HashMap::new();
-/// options.insert("lang-radius".to_string(), "10pt".to_string());
-/// let result = format_codly_call(&options);
-/// // result: "#codly(lang-radius: 10pt)"
-/// ```
 pub fn format_codly_call(options: &HashMap<String, String>) -> String {
     let args: Vec<String> = options
         .iter()
@@ -22,19 +12,6 @@ pub fn format_codly_call(options: &HashMap<String, String>) -> String {
 }
 
 /// Formats a HashMap of codly options into a Typst #local() function call.
-///
-/// #local() applies codly configuration only to the next code block,
-/// preventing global scope pollution.
-///
-/// # Example
-/// ```
-/// use std::collections::HashMap;
-/// use knot_core::backend::format_local_call;
-/// let mut options = HashMap::new();
-/// options.insert("lang-radius".to_string(), "10pt".to_string());
-/// let result = format_local_call(&options);
-/// // result: "#local(lang-radius: 10pt)"
-/// ```
 pub fn format_local_call(options: &HashMap<String, String>) -> String {
     let args: Vec<String> = options
         .iter()
@@ -300,7 +277,7 @@ impl Backend for TypstBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::{Chunk, ChunkOptions, Position, Range};
+    use crate::parser::ast::{Chunk, ChunkOptions, Position, Range};
     use std::path::PathBuf;
 
     #[test]
@@ -374,6 +351,7 @@ mod tests {
                 output_inset: None,
                 width_ratio: None,
                 align: None,
+                // Warning styling
                 warning_background: None,
                 warning_stroke: None,
                 warning_radius: None,
@@ -405,6 +383,7 @@ mod tests {
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("[1] 2".to_string()),
             warnings: vec![],
+            error: None,
         };
         let resolved = chunk.options.resolve();
 
@@ -420,6 +399,7 @@ mod tests {
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("[1] 5.5".to_string()),
             warnings: vec![],
+            error: None,
         };
         let resolved = chunk.options.resolve();
 
@@ -438,6 +418,7 @@ mod tests {
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("[1] 5.5".to_string()),
             warnings: vec![],
+            error: None,
         };
         let resolved = chunk.options.resolve();
 
@@ -454,6 +435,7 @@ mod tests {
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("".to_string()),
             warnings: vec![],
+            error: None,
         };
         let resolved = chunk.options.resolve();
 
@@ -476,6 +458,7 @@ mod tests {
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("[1] 1  2  3  4  5  6  7  8  9 10".to_string()),
             warnings: vec![],
+            error: None,
         };
         let resolved = chunk.options.resolve();
 
@@ -502,6 +485,7 @@ mod tests {
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("".to_string()),
             warnings: vec![],
+            error: None,
         };
         let resolved = chunk.options.resolve();
 
@@ -520,6 +504,7 @@ mod tests {
         let output_data = ExecutionOutput {
             result: ExecutionResult::Plot(plot_path.clone()),
             warnings: vec![],
+            error: None,
         };
         let resolved = chunk.options.resolve();
 
@@ -537,6 +522,7 @@ mod tests {
         let output_data = ExecutionOutput {
             result: ExecutionResult::DataFrame(csv_path.clone()),
             warnings: vec![],
+            error: None,
         };
         let resolved = chunk.options.resolve();
 
@@ -558,6 +544,7 @@ mod tests {
                 plot: plot_path.clone(),
             },
             warnings: vec![],
+            error: None,
         };
         let resolved = chunk.options.resolve();
 
@@ -581,6 +568,7 @@ mod tests {
                 plot: plot_path.clone(),
             },
             warnings: vec![],
+            error: None,
         };
         let resolved = chunk.options.resolve();
 
@@ -599,6 +587,7 @@ mod tests {
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("[1] 2".to_string()),
             warnings: vec![],
+            error: None,
         };
         let resolved = chunk.options.resolve();
 
@@ -616,6 +605,7 @@ mod tests {
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("".to_string()),
             warnings: vec![],
+            error: None,
         };
         let resolved = chunk.options.resolve();
 
@@ -641,6 +631,7 @@ mod tests {
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("[1] 1  2  3  4  5  6  7  8  9 10".to_string()),
             warnings: vec![],
+            error: None,
         };
         let resolved = chunk.options.resolve();
 
@@ -663,6 +654,7 @@ mod tests {
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("[1] 1  2  3  4  5  6  7  8  9 10".to_string()),
             warnings: vec![],
+            error: None,
         };
         let resolved = chunk.options.resolve();
 

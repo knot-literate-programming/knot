@@ -6,11 +6,16 @@ pub mod hover;
 
 /// Extract the token at the given position in the text.
 /// `bidirectional` determines if we look forward as well as backward.
-pub fn get_token_at_pos(text: &str, pos: Position, lang: &str, bidirectional: bool) -> Option<String> {
+pub fn get_token_at_pos(
+    text: &str,
+    pos: Position,
+    lang: &str,
+    bidirectional: bool,
+) -> Option<String> {
     let lines: Vec<&str> = text.lines().collect();
     let line = lines.get(pos.line as usize)?;
     let col = pos.character as usize;
-    
+
     // Convert UTF-16 character position to character index
     let chars: Vec<char> = line.chars().collect();
     let mut char_idx = 0;

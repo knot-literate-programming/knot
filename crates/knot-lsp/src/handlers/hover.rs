@@ -1,8 +1,8 @@
+use super::get_token_at_pos;
 use crate::state::ServerState;
 use knot_core::parser::parse_document;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
-use super::get_token_at_pos;
 
 pub async fn handle_hover(state: &ServerState, params: HoverParams) -> Result<Option<Hover>> {
     let uri = &params.text_document_position_params.text_document.uri;
