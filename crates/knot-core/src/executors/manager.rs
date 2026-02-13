@@ -224,7 +224,7 @@ mod tests {
         let result = exec2.execute("print(test_var)", &graphics);
         assert!(result.is_ok());
 
-        if let crate::executors::ExecutionResult::Text(output) = result.unwrap() {
+        if let crate::executors::ExecutionResult::Text(output) = result.unwrap().result {
             assert!(output.contains("42"));
         } else {
             panic!("Expected Text result");

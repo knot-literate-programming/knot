@@ -10,36 +10,43 @@
 // Document configuration belongs in your main.knot file.
 
 #let code-chunk(
-  input: none,
+  code: none,
   output: none,
-  layout: "horizontal",
-  gutter: 1em,
+  warnings: (),
+  errors: (),
+  warnings-position: "below", // "below" or "inline"
+  layout: none, // Optional: only used when both code and output are present
+  gutter: 0.5em,
   code-background: none,
   code-stroke: none,
   code-radius: 0pt,
   code-inset: 0pt,
-  output-background: rgb(244, 244, 244),
+  output-background: rgb(255, 255, 255),
   output-stroke: none,
-  output-radius: 4pt,
-  output-inset: 8pt,
+  output-radius: 0pt,
+  output-inset: 0pt,
   width-ratio: "1:1",
   align: none,
-  ..rest
+  ..rest,
 ) = {
+  // Ensure warnings and errors are arrays (defensive check)
+  let warnings = if type(warnings) == array { warnings } else if warnings == none { () } else { (warnings,) }
+  let errors = if type(errors) == array { errors } else if errors == none { () } else { (errors,) }
+
   // Parse width-ratio for horizontal layout
   let ratio-parts = width-ratio.split(":")
   let left-ratio = if ratio-parts.len() >= 1 { float(ratio-parts.at(0)) } else { 1.0 }
   let right-ratio = if ratio-parts.len() >= 2 { float(ratio-parts.at(1)) } else { 1.0 }
 
-  // Wrap input in styled block
-  let code-block = if input != none {
+  // Wrap code in styled block
+  let code-block = if code != none {
     block(
       fill: code-background,
       stroke: code-stroke,
       radius: code-radius,
       inset: code-inset,
-      width: 100%
-    )[#input]
+      width: 100%,
+    )[#code]
   } else { none }
 
   // Wrap output in styled block
@@ -49,29 +56,82 @@
       stroke: output-stroke,
       radius: output-radius,
       inset: output-inset,
-      width: 100%
+      width: 100%,
     )[#output]
   } else { none }
 
-  // Layout based on mode
-  if layout == "vertical" {
-    stack(
-      dir: ttb,
-      spacing: gutter,
-      code-block,
+  // Warning blocks (reused for both inline and below positioning)
+  let warning-blocks = warnings.map(w => block(
+    fill: rgb("#fff4ce"),
+    stroke: 1pt + rgb("#facc15"),
+    radius: 2pt,
+    inset: 0.5em,
+    width: 100%,
+  )[
+    #set text(fill: rgb("#854d0e"), size: 0.85em)
+    *Warning:* #w
+  ])
+
+  // Layout based on what's being displayed
+  let main-content = if code == none and output != none {
+    // Only output: single column
+    if warnings-position == "inline" and warning-blocks.len() > 0 {
+      stack(dir: ttb, spacing: 0.5em, output-block, ..warning-blocks)
+    } else {
       output-block
-    )
-  } else if layout == "input-only" {
+    }
+  } else if output == none and code != none {
+    // Only code: single column (warnings not applicable here)
     code-block
-  } else if layout == "output-only" {
-    output-block
-  } else {
-    // horizontal (default)
-    grid(
-      columns: (left-ratio * 1fr, right-ratio * 1fr),
-      gutter: gutter,
-      code-block,
-      output-block
-    )
+  } else if code != none and output != none {
+    // Both code and output: use layout
+    if layout == "vertical" {
+      if warnings-position == "inline" and warning-blocks.len() > 0 {
+        stack(dir: ttb, spacing: gutter, code-block, output-block, ..warning-blocks)
+      } else {
+        stack(dir: ttb, spacing: gutter, code-block, output-block)
+      }
+    } else {
+      // horizontal (default when layout is none or "horizontal")
+      if warnings-position == "inline" and warning-blocks.len() > 0 {
+        let right-col = stack(dir: ttb, spacing: gutter, output-block, ..warning-blocks)
+        grid(
+          columns: (left-ratio * 1fr, right-ratio * 1fr),
+          gutter: gutter,
+          code-block, right-col,
+        )
+      } else {
+        grid(
+          columns: (left-ratio * 1fr, right-ratio * 1fr),
+          gutter: gutter,
+          code-block, output-block,
+        )
+      }
+    }
+  } else { none }
+
+  // Assemble final content
+  if main-content == none and warnings.len() == 0 and errors.len() == 0 {
+    return none
   }
+
+  // Warnings below: appended after main-content (inline: already embedded above)
+  let below-warnings = if warnings-position == "inline" { () } else { warning-blocks }
+
+  stack(
+    dir: ttb,
+    spacing: 0.5em,
+    main-content,
+    ..below-warnings,
+    ..errors.map(e => block(
+      fill: rgb("#fee2e2"),
+      stroke: 1pt + rgb("#ef4444"),
+      radius: 2pt,
+      inset: 0.5em,
+      width: 100%,
+    )[
+      #set text(fill: rgb("#991b1b"), size: 0.85em)
+      *Error:* #e
+    ])
+  )
 }

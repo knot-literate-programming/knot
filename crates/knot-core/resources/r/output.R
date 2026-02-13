@@ -30,10 +30,9 @@ base_plot <- function(expr, width = NULL, height = NULL, dpi = NULL, format = NU
     grDevices::dev.off()
   })
 
-  # Write metadata
   metadata <- list(
-    type = "plot",
-    path = normalizePath(filepath, mustWork = FALSE),
+    type   = "plot",
+    path   = normalizePath(filepath, mustWork = FALSE),
     format = format
   )
 
@@ -78,8 +77,8 @@ typst.default <- function(obj, ...) {
   ggplot2::ggsave(filepath, plot = plot_obj, width = width, height = height, dpi = dpi, device = format)
 
   metadata <- list(
-    type = "plot",
-    path = normalizePath(filepath, mustWork = FALSE),
+    type   = "plot",
+    path   = normalizePath(filepath, mustWork = FALSE),
     format = format
   )
 
@@ -116,8 +115,8 @@ typst.default <- function(obj, ...) {
   grDevices::dev.off()  # Close the copy device
 
   metadata <- list(
-    type = "plot",
-    path = normalizePath(filepath, mustWork = FALSE),
+    type   = "plot",
+    path   = normalizePath(filepath, mustWork = FALSE),
     format = format
   )
 

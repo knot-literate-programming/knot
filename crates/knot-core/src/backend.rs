@@ -1,4 +1,4 @@
-use crate::executors::ExecutionResult;
+use crate::executors::{ExecutionOutput, ExecutionResult};
 use crate::parser::{Chunk, Layout, ResolvedChunkOptions, Show};
 use std::collections::HashMap;
 
@@ -49,7 +49,7 @@ pub trait Backend {
         &self,
         chunk: &Chunk,
         resolved_options: &ResolvedChunkOptions,
-        result: &ExecutionResult,
+        output: &ExecutionOutput,
     ) -> String;
 }
 
@@ -72,7 +72,7 @@ impl Backend for TypstBackend {
         &self,
         chunk: &Chunk,
         resolved_options: &ResolvedChunkOptions,
-        result: &ExecutionResult,
+        output: &ExecutionOutput,
     ) -> String {
         // If show is none, return empty string immediately
         if matches!(resolved_options.show, Show::None) {
@@ -92,13 +92,42 @@ impl Backend for TypstBackend {
 
         // Include errors as a special argument to code-chunk (if any)
         if !chunk.errors.is_empty() {
-            let error_list = chunk
+            let mut error_list = chunk
                 .errors
                 .iter()
-                .map(|e| format!("\"{}\"", e.message.replace('\"', "\\\"")))
+                .map(|e| format!("[{}]", e.message))
                 .collect::<Vec<_>>()
                 .join(", ");
+            
+            // In Typst, (item,) is a single-element array.
+            if chunk.errors.len() == 1 {
+                error_list.push(',');
+            }
             args.push(format!("errors: ({})", error_list));
+        }
+
+        // Include runtime warnings based on visibility setting
+        if !output.warnings.is_empty() {
+            match resolved_options.warnings_visibility {
+                crate::parser::WarningsVisibility::None => {
+                    // Suppress warnings entirely — don't add to args
+                }
+                visibility => {
+                    let mut warning_list = output
+                        .warnings
+                        .iter()
+                        .map(|w| format!("[{}]", w.message.to_string()))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    if output.warnings.len() == 1 {
+                        warning_list.push(',');
+                    }
+                    args.push(format!("warnings: ({})", warning_list));
+                    if matches!(visibility, crate::parser::WarningsVisibility::Inline) {
+                        args.push("warnings-position: \"inline\"".to_string());
+                    }
+                }
+            }
         }
 
         // Generate code based on show option
@@ -126,7 +155,7 @@ impl Backend for TypstBackend {
         let should_show_output = matches!(resolved_options.show, Show::Both | Show::Output);
 
         if should_show_output {
-            let output_str = match result {
+            let output_str = match &output.result {
                 ExecutionResult::Text(text) if !text.trim().is_empty() => {
                     format!("[```output\n{}```]", text.trim())
                 }
@@ -313,6 +342,7 @@ mod tests {
                 constant: vec![],
                 // Presentation options (use defaults for tests)
                 layout: None,
+                warnings_visibility: None,
                 gutter: None,
                 code_background: None,
                 code_stroke: None,
@@ -348,13 +378,16 @@ mod tests {
             "Invalid value for 'eval'",
             None,
         ));
-        let result = ExecutionResult::Text("[1] 2".to_string());
+        let output_data = ExecutionOutput {
+            result: ExecutionResult::Text("[1] 2".to_string()),
+            warnings: vec![],
+        };
         let resolved = chunk.options.resolve();
 
-        let output = backend.format_chunk(&chunk, &resolved, &result);
+        let output = backend.format_chunk(&chunk, &resolved, &output_data);
 
         assert!(
-            output.contains("errors: (\"Unknown option: 'foo'\", \"Invalid value for 'eval'\")")
+            output.contains("errors: ([Unknown option: 'foo'], [Invalid value for 'eval'])")
         );
     }
 
@@ -362,10 +395,13 @@ mod tests {
     fn test_format_chunk_text_output_with_echo() {
         let backend = TypstBackend::new();
         let chunk = create_test_chunk("r", "x <- 1:10\nmean(x)", None, true, true, None);
-        let result = ExecutionResult::Text("[1] 5.5".to_string());
+        let output_data = ExecutionOutput {
+            result: ExecutionResult::Text("[1] 5.5".to_string()),
+            warnings: vec![],
+        };
         let resolved = chunk.options.resolve();
 
-        let output = backend.format_chunk(&chunk, &resolved, &result);
+        let output = backend.format_chunk(&chunk, &resolved, &output_data);
 
         assert!(output.contains("lang: \"r\""));
         assert!(output.contains("code: [```r\nx <- 1:10\nmean(x)```]"));
@@ -377,10 +413,13 @@ mod tests {
     fn test_format_chunk_text_output_without_echo() {
         let backend = TypstBackend::new();
         let chunk = create_test_chunk("r", "x <- 1:10\nmean(x)", None, false, true, None);
-        let result = ExecutionResult::Text("[1] 5.5".to_string());
+        let output_data = ExecutionOutput {
+            result: ExecutionResult::Text("[1] 5.5".to_string()),
+            warnings: vec![],
+        };
         let resolved = chunk.options.resolve();
 
-        let output = backend.format_chunk(&chunk, &resolved, &result);
+        let output = backend.format_chunk(&chunk, &resolved, &output_data);
 
         assert!(output.contains("code: none"));
         assert!(output.contains("output: [```output\n[1] 5.5```]"));
@@ -390,10 +429,13 @@ mod tests {
     fn test_format_chunk_no_output() {
         let backend = TypstBackend::new();
         let chunk = create_test_chunk("r", "x <- 1", None, true, false, None);
-        let result = ExecutionResult::Text("".to_string());
+        let output_data = ExecutionOutput {
+            result: ExecutionResult::Text("".to_string()),
+            warnings: vec![],
+        };
         let resolved = chunk.options.resolve();
 
-        let output = backend.format_chunk(&chunk, &resolved, &result);
+        let output = backend.format_chunk(&chunk, &resolved, &output_data);
 
         assert!(output.contains("output: none"));
     }
@@ -409,10 +451,13 @@ mod tests {
             true,
             Some("[My Caption]".to_string()),
         );
-        let result = ExecutionResult::Text("[1] 1  2  3  4  5  6  7  8  9 10".to_string());
+        let output_data = ExecutionOutput {
+            result: ExecutionResult::Text("[1] 1  2  3  4  5  6  7  8  9 10".to_string()),
+            warnings: vec![],
+        };
         let resolved = chunk.options.resolve();
 
-        let output = backend.format_chunk(&chunk, &resolved, &result);
+        let output = backend.format_chunk(&chunk, &resolved, &output_data);
 
         assert!(output.contains("#figure("));
         assert!(output.contains("kind: raw"));
@@ -432,10 +477,13 @@ mod tests {
             true,
             Some("[My Caption]".to_string()),
         );
-        let result = ExecutionResult::Text("".to_string());
+        let output_data = ExecutionOutput {
+            result: ExecutionResult::Text("".to_string()),
+            warnings: vec![],
+        };
         let resolved = chunk.options.resolve();
 
-        let output = backend.format_chunk(&chunk, &resolved, &result);
+        let output = backend.format_chunk(&chunk, &resolved, &output_data);
 
         // Caption should be passed directly to code-chunk when no name
         assert!(output.contains("caption: [[My Caption]]"));
@@ -447,10 +495,13 @@ mod tests {
         let backend = TypstBackend::new();
         let chunk = create_test_chunk("r", "plot(1:10)", None, false, true, None);
         let plot_path = PathBuf::from("/tmp/plot.svg");
-        let result = ExecutionResult::Plot(plot_path.clone());
+        let output_data = ExecutionOutput {
+            result: ExecutionResult::Plot(plot_path.clone()),
+            warnings: vec![],
+        };
         let resolved = chunk.options.resolve();
 
-        let output = backend.format_chunk(&chunk, &resolved, &result);
+        let output = backend.format_chunk(&chunk, &resolved, &output_data);
 
         assert!(output.contains("output: [#image("));
         assert!(output.contains("plot.svg"));
@@ -461,10 +512,13 @@ mod tests {
         let backend = TypstBackend::new();
         let chunk = create_test_chunk("r", "mtcars", None, false, true, None);
         let csv_path = PathBuf::from("/tmp/data.csv");
-        let result = ExecutionResult::DataFrame(csv_path.clone());
+        let output_data = ExecutionOutput {
+            result: ExecutionResult::DataFrame(csv_path.clone()),
+            warnings: vec![],
+        };
         let resolved = chunk.options.resolve();
 
-        let output = backend.format_chunk(&chunk, &resolved, &result);
+        let output = backend.format_chunk(&chunk, &resolved, &output_data);
 
         assert!(output.contains("output: [#{ let data = csv("));
         assert!(output.contains("data.csv"));
@@ -476,13 +530,16 @@ mod tests {
         let backend = TypstBackend::new();
         let chunk = create_test_chunk("r", "plot(1:10); summary(1:10)", None, false, true, None);
         let plot_path = PathBuf::from("/tmp/plot.svg");
-        let result = ExecutionResult::TextAndPlot {
-            text: "Min: 1\nMax: 10".to_string(),
-            plot: plot_path.clone(),
+        let output_data = ExecutionOutput {
+            result: ExecutionResult::TextAndPlot {
+                text: "Min: 1\nMax: 10".to_string(),
+                plot: plot_path.clone(),
+            },
+            warnings: vec![],
         };
         let resolved = chunk.options.resolve();
 
-        let output = backend.format_chunk(&chunk, &resolved, &result);
+        let output = backend.format_chunk(&chunk, &resolved, &output_data);
 
         assert!(output.contains("#image("));
         assert!(output.contains("plot.svg"));
@@ -496,13 +553,16 @@ mod tests {
         let chunk = create_test_chunk("r", "plot(mtcars); mtcars", None, false, true, None);
         let csv_path = PathBuf::from("/tmp/data.csv");
         let plot_path = PathBuf::from("/tmp/plot.svg");
-        let result = ExecutionResult::DataFrameAndPlot {
-            dataframe: csv_path.clone(),
-            plot: plot_path.clone(),
+        let output_data = ExecutionOutput {
+            result: ExecutionResult::DataFrameAndPlot {
+                dataframe: csv_path.clone(),
+                plot: plot_path.clone(),
+            },
+            warnings: vec![],
         };
         let resolved = chunk.options.resolve();
 
-        let output = backend.format_chunk(&chunk, &resolved, &result);
+        let output = backend.format_chunk(&chunk, &resolved, &output_data);
 
         assert!(output.contains("let data = csv("));
         assert!(output.contains("data.csv"));
@@ -514,10 +574,13 @@ mod tests {
     fn test_format_chunk_empty_name_no_figure_wrapper() {
         let backend = TypstBackend::new();
         let chunk = create_test_chunk("r", "1 + 1", Some("".to_string()), true, true, None);
-        let result = ExecutionResult::Text("[1] 2".to_string());
+        let output_data = ExecutionOutput {
+            result: ExecutionResult::Text("[1] 2".to_string()),
+            warnings: vec![],
+        };
         let resolved = chunk.options.resolve();
 
-        let output = backend.format_chunk(&chunk, &resolved, &result);
+        let output = backend.format_chunk(&chunk, &resolved, &output_data);
 
         // Empty name should not create figure wrapper
         assert!(!output.contains("#figure("));
@@ -528,10 +591,13 @@ mod tests {
     fn test_format_chunk_empty_text_output() {
         let backend = TypstBackend::new();
         let chunk = create_test_chunk("r", "invisible(1)", None, false, true, None);
-        let result = ExecutionResult::Text("".to_string());
+        let output_data = ExecutionOutput {
+            result: ExecutionResult::Text("".to_string()),
+            warnings: vec![],
+        };
         let resolved = chunk.options.resolve();
 
-        let output = backend.format_chunk(&chunk, &resolved, &result);
+        let output = backend.format_chunk(&chunk, &resolved, &output_data);
 
         // Empty text should result in output: none
         assert!(output.contains("output: none"));
@@ -550,10 +616,13 @@ mod tests {
             .codly_options
             .insert("lang-radius".to_string(), "10pt".to_string());
 
-        let result = ExecutionResult::Text("[1] 1  2  3  4  5  6  7  8  9 10".to_string());
+        let output_data = ExecutionOutput {
+            result: ExecutionResult::Text("[1] 1  2  3  4  5  6  7  8  9 10".to_string()),
+            warnings: vec![],
+        };
         let resolved = chunk.options.resolve();
 
-        let output = backend.format_chunk(&chunk, &resolved, &result);
+        let output = backend.format_chunk(&chunk, &resolved, &output_data);
 
         // Should use #local() for chunk-specific codly options
         assert!(output.contains("#local("));
@@ -569,10 +638,13 @@ mod tests {
         let backend = TypstBackend::new();
         let chunk = create_test_chunk("r", "x <- 1:10", None, true, true, None);
 
-        let result = ExecutionResult::Text("[1] 1  2  3  4  5  6  7  8  9 10".to_string());
+        let output_data = ExecutionOutput {
+            result: ExecutionResult::Text("[1] 1  2  3  4  5  6  7  8  9 10".to_string()),
+            warnings: vec![],
+        };
         let resolved = chunk.options.resolve();
 
-        let output = backend.format_chunk(&chunk, &resolved, &result);
+        let output = backend.format_chunk(&chunk, &resolved, &output_data);
 
         // Without codly options, should NOT have #local()
         assert!(!output.contains("#local("));

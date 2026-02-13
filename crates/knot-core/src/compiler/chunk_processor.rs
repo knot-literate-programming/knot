@@ -9,10 +9,9 @@
 //! 6. Format the output using the Typst backend.
 
 use crate::backend::{Backend, TypstBackend};
-use crate::cache::{Cache, hash_dependencies};
+use crate::cache::{hash_dependencies, Cache};
 use crate::config::Config;
-use crate::executors::ExecutionResult;
-use crate::executors::{ExecutorManager, GraphicsOptions};
+use crate::executors::{ExecutionOutput, ExecutionResult, ExecutorManager, GraphicsOptions};
 use crate::parser::Chunk;
 use anyhow::Result;
 use log::info;
@@ -72,8 +71,11 @@ pub fn process_chunk(
         &constants_hash,
     );
 
-    let execution_result = if !resolved_options.eval {
-        ExecutionResult::Text(String::new())
+    let execution_output = if !resolved_options.eval {
+        ExecutionOutput {
+            result: ExecutionResult::Text(String::new()),
+            warnings: vec![],
+        }
     } else if resolved_options.cache && cache.has_cached_result(&chunk_hash) {
         info!("  ✓ {} [cached]", chunk_name);
         cache.get_cached_result(&chunk_hash)?
@@ -89,7 +91,7 @@ pub fn process_chunk(
         };
 
         let exec = executor_manager.get_executor(&chunk.language)?;
-        let result = exec.execute(&chunk.code, &graphics_opts)?;
+        let output = exec.execute(&chunk.code, &graphics_opts)?;
 
         if resolved_options.cache {
             cache.save_result(
@@ -97,11 +99,11 @@ pub fn process_chunk(
                 chunk.name.clone(),
                 chunk.language.clone(),
                 chunk_hash.clone(),
-                &result,
+                &output,
                 chunk_options.depends.clone(),
             )?;
         }
-        result
+        output
     };
 
     // Create a chunk with merged codly options for the backend
@@ -110,7 +112,7 @@ pub fn process_chunk(
 
     let backend = TypstBackend::new();
     let chunk_output_final =
-        backend.format_chunk(&chunk_with_codly, &resolved_options, &execution_result);
+        backend.format_chunk(&chunk_with_codly, &resolved_options, &execution_output);
 
     Ok((chunk_output_final, chunk_hash))
 }
@@ -179,6 +181,7 @@ mod tests {
                 constant: vec![],
                 // Presentation options (use defaults for tests)
                 layout: None,
+                warnings_visibility: None,
                 gutter: None,
                 code_background: None,
                 code_stroke: None,

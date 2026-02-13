@@ -11,6 +11,11 @@ use anyhow::Result;
 pub fn format_inline_output(output: &str) -> Result<String> {
     let trimmed = output.trim();
 
+    // Allow empty results (e.g. from assignments like x <- 1)
+    if trimmed.is_empty() {
+        return Ok(String::new());
+    }
+
     // Check if it's a scalar (single value with [1] prefix)
     if let Some(scalar_value) = extract_scalar_value(trimmed) {
         // Return just the value without [1] prefix

@@ -11,7 +11,8 @@ mod formatters;
 mod process;
 
 use super::{
-    ConstantObjectHandler, ExecutionResult, GraphicsOptions, KnotExecutor, LanguageExecutor,
+    ConstantObjectHandler, ExecutionOutput, ExecutionResult, GraphicsOptions, KnotExecutor,
+    LanguageExecutor,
 };
 use crate::parser::ChunkOptions;
 use anyhow::Result;
@@ -54,7 +55,7 @@ impl LanguageExecutor for PythonExecutor {
         Ok(())
     }
 
-    fn execute(&mut self, code: &str, graphics: &GraphicsOptions) -> Result<ExecutionResult> {
+    fn execute(&mut self, code: &str, graphics: &GraphicsOptions) -> Result<ExecutionOutput> {
         execution::execute(&mut self.process, &self.cache_dir, code, graphics)
     }
 
@@ -62,7 +63,7 @@ impl LanguageExecutor for PythonExecutor {
         let defaults = ChunkOptions::default_resolved();
         // Wrap in print() to get output if it's just an expression
         let wrapped_code = format!("print({})", code);
-        let result = self.execute(
+        let output = self.execute(
             &wrapped_code,
             &crate::executors::GraphicsOptions {
                 width: defaults.fig_width,
@@ -72,7 +73,7 @@ impl LanguageExecutor for PythonExecutor {
             },
         )?;
 
-        match result {
+        match output.result {
             ExecutionResult::Text(t) => formatters::format_inline_output(&t),
             _ => anyhow::bail!(
                 "Inline expression returned a complex object (plot or dataframe).\n\
@@ -238,7 +239,7 @@ mod tests {
     #[test]
     fn test_python_execute_simple() {
         let (_tmp, mut executor) = setup_executor();
-        let result = executor
+        let output = executor
             .execute(
                 "print(1 + 1)",
                 &GraphicsOptions {
@@ -250,7 +251,7 @@ mod tests {
             )
             .unwrap();
 
-        if let ExecutionResult::Text(t) = result {
+        if let ExecutionResult::Text(t) = output.result {
             assert_eq!(t.trim(), "2");
         } else {
             panic!("Expected Text result");

@@ -502,7 +502,28 @@ library(ggplot2)
 
 ---
 
-**Status:** 📋 Planned
+**Status:** ✅ Implemented
 **Assigned to:** TBD
 **Created:** 2026-02-06
-**Last Updated:** 2026-02-06
+**Last Updated:** 2026-02-13
+
+---
+
+## ✅ Implementation notes (2026-02-13)
+
+The plan above was implemented on branch `feat/r-error-handling`, with some differences
+from the original design:
+
+- The structured error capture uses the **side-channel** (JSON file via `KNOT_METADATA_FILE`)
+  rather than stderr markers (`__KNOT_ERROR_START__`). This is more robust and consistent
+  with the existing plot/dataframe metadata flow.
+- Warnings are captured via `withCallingHandlers` and stored in `KnotMetadata.warnings`,
+  then persisted in `ChunkCacheEntry.warnings` and rendered in the Typst document.
+- JSON serialization uses `auto_unbox = TRUE` in `.write_metadata()`. Vectors that must
+  remain JSON arrays regardless of length are wrapped with `as.list()` at the call site
+  (e.g. `err_obj$traceback <- as.list(as.character(sys.calls()))`).
+- The `RExecutionStatus` enum from the plan was not needed — Rust pattern matches directly
+  on `KnotMetadata.error: Option<RuntimeError>`.
+
+See `lsp-diagnostics.md` for the future work of surfacing these warnings/errors as LSP
+diagnostics in the editor.

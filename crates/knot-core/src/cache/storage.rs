@@ -6,8 +6,9 @@
 // - Loading cached results from files
 
 use super::metadata::{CacheMetadata, ChunkCacheEntry};
-use crate::executors::ExecutionResult;
-use anyhow::{Result, anyhow};
+use crate::executors::side_channel::RuntimeWarning;
+use crate::executors::{ExecutionOutput, ExecutionResult};
+use anyhow::{anyhow, Result};
 use chrono::Utc;
 use log::warn;
 use std::fs;
@@ -69,7 +70,7 @@ pub fn get_cached_result(
     cache_dir: &Path,
     hash: &str,
     metadata: &CacheMetadata,
-) -> Result<ExecutionResult> {
+) -> Result<ExecutionOutput> {
     let entry = metadata
         .chunks
         .iter()
@@ -78,7 +79,10 @@ pub fn get_cached_result(
 
     // Handle chunks with no output files (e.g., assignments without print)
     if entry.files.is_empty() {
-        return Ok(ExecutionResult::Text(String::new()));
+        return Ok(ExecutionOutput {
+            result: ExecutionResult::Text(String::new()),
+            warnings: entry.warnings.clone(),
+        });
     }
 
     // Verify all files exist
@@ -95,15 +99,20 @@ pub fn get_cached_result(
     let result_path = cache_dir.join(&entry.files[0]);
     let ext = result_path.extension().and_then(|e| e.to_str());
 
-    match ext {
+    let result = match ext {
         Some("txt") => {
             let text = fs::read_to_string(&result_path)?;
-            Ok(ExecutionResult::Text(text))
+            ExecutionResult::Text(text)
         }
-        Some("svg") | Some("png") => Ok(ExecutionResult::Plot(result_path)),
-        Some("csv") => Ok(ExecutionResult::DataFrame(result_path)),
-        _ => Err(anyhow!("Unknown cache file type: {:?}", result_path)),
-    }
+        Some("svg") | Some("png") => ExecutionResult::Plot(result_path),
+        Some("csv") => ExecutionResult::DataFrame(result_path),
+        _ => return Err(anyhow!("Unknown cache file type: {:?}", result_path)),
+    };
+
+    Ok(ExecutionOutput {
+        result,
+        warnings: entry.warnings.clone(),
+    })
 }
 
 /// Saves chunk execution result to cache
@@ -114,10 +123,10 @@ pub fn save_result(
     _chunk_index: usize,
     _chunk_name: Option<String>,
     hash: String,
-    result: &ExecutionResult,
+    output: &ExecutionOutput,
     _dependencies: Vec<PathBuf>,
 ) -> Result<Vec<String>> {
-    let files_to_cache = match result {
+    let files_to_cache = match &output.result {
         ExecutionResult::Text(text) if !text.trim().is_empty() => {
             let filename = format!("chunk_{}.txt", hash);
             let path = cache_dir.join(&filename);
@@ -183,6 +192,7 @@ pub fn create_chunk_entry(
     language: String,
     hash: String,
     files: Vec<String>,
+    warnings: Vec<RuntimeWarning>,
     dependencies: Vec<PathBuf>,
 ) -> ChunkCacheEntry {
     ChunkCacheEntry {
@@ -191,6 +201,7 @@ pub fn create_chunk_entry(
         language,
         hash,
         files,
+        warnings,
         dependencies: dependencies
             .iter()
             .map(|p| p.to_string_lossy().to_string())
