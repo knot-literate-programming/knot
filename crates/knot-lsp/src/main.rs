@@ -230,11 +230,11 @@ impl KnotLanguageServer {
     fn resolve_virtual_uri(&self, uri: &Url) -> Url {
         if uri.scheme() == "knot-virtual" {
             let mut original_uri = uri.clone();
-            if let Ok(_) = original_uri.set_scheme("file") {
+            if original_uri.set_scheme("file").is_ok() {
                 let path = original_uri.path().to_string();
                 if path.ends_with(".typ") {
                     let new_path = path.trim_end_matches(".typ").to_string();
-                    let _ = original_uri.set_path(&new_path);
+                    original_uri.set_path(&new_path);
                 }
                 return original_uri;
             }

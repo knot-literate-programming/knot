@@ -21,7 +21,7 @@ pub fn get_document_symbols(text: &str) -> Option<Vec<DocumentSymbol>> {
             .clone()
             .unwrap_or_else(|| format!("Unnamed {} chunk", chunk.language));
 
-        // Use the chunk's range
+        // Use the chunk's range for both full and selection ranges
         let range = Range {
             start: Position {
                 line: chunk.range.start.line as u32,
@@ -33,17 +33,7 @@ pub fn get_document_symbols(text: &str) -> Option<Vec<DocumentSymbol>> {
             },
         };
 
-        // Use code range for selection
-        let selection_range = Range {
-            start: Position {
-                line: chunk.code_range.start.line as u32,
-                character: chunk.code_range.start.column as u32,
-            },
-            end: Position {
-                line: chunk.code_range.end.line as u32,
-                character: chunk.code_range.end.column as u32,
-            },
-        };
+        let selection_range = range;
 
         // Create detail string with chunk options
         let mut details = vec![format!("Language: {}", chunk.language)];

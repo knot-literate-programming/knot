@@ -20,14 +20,15 @@ This document tracks the high-level goals and roadmap for the Knot project. Deta
 - ✅ Customizable warnings (styles & visibility)
 - ✅ Zero-escape robust execution model (temp files)
 
-**LSP:** ~85% complete
+**LSP:** ~90% complete
 - ✅ Hover (chunks, R, Python, Typst — stable & responsive)
 - ✅ Completion (chunk options, R, Python, Typst)
 - ✅ Diagnostics (parsing errors, structure validation)
 - ✅ **Execution Diagnostics**: Runtime errors and warnings surfaced in the editor from cache.
 - ✅ Document symbols (including all show variants)
+- ✅ **Architectural Hardening**: Consolidated state, deadlock-free locking, and secure virtual URI scheme.
+- ✅ **Hybrid formatting**: Integrated Air (R), Ruff (Python) and Tinymist (Typst).
 - ⏳ Go to Definition & References
-- ⏳ Hybrid formatting (Air/Ruff)
 
 **CLI:** ~98% complete
 - ✅ Compile, watch, init
