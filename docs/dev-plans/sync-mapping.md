@@ -3,13 +3,23 @@
 **Date:** 2026-02-05
 **Objectif:** Permettre le sync (forward/backward) entre PDF et source .knot en mappant les positions via des marqueurs de chunks dans le .typ compilé.
 
-## 🎯 Problème à résoudre
+## 🔄 Real-time LSP Synchronization (LSP-Only)
 
-Actuellement :
-- Typst génère un PDF avec SyncTeX pointant vers le `.typ` compilé
-- Le `.typ` compilé contient les résultats R insérés, pas le code source original
-- Pas de mapping `.typ` compilé ↔ `.knot` source
-- **Résultat :** Impossible de faire du sync PDF ↔ source .knot
+Before the final PDF synchronization, Knot implements a real-time synchronization layer for the IDE (LSP).
+
+### knot-virtual:// Scheme
+To avoid conflicts with local files and provide immediate feedback, the Knot LSP uses a virtual URI scheme:
+- **Source**: `file:///path/to/doc.knot`
+- **Virtual Typst**: `knot-virtual:///path/to/doc.knot.typ`
+
+**Characteristics:**
+- ✅ **Atomic State**: The `DocumentState` in the LSP ensures text, version, and position mappers are always in sync.
+- ✅ **Isolation**: Tinymist sees a pure Typst document, while Knot manages the underlying R/Python code.
+- ✅ **Position Mapping**: A robust `PositionMapper` translates coordinates between the raw Knot source and the virtual Typst mask in real-time.
+
+---
+
+## 🎯 Problème à résoudre (PDF Sync)
 
 ## 💡 Solution proposée
 
