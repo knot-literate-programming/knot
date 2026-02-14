@@ -13,8 +13,8 @@ pub async fn handle_formatting(
         let docs = state.documents.read().await;
         let formatter_opt = state.formatter.read().await;
         match (docs.get(uri), formatter_opt.as_ref()) {
-            (Some(t), Some(f)) => (t.clone(), Some(f.clone())),
-            (Some(t), None) => (t.clone(), None),
+            (Some(doc), Some(f)) => (doc.text.clone(), Some(f.clone())),
+            (Some(doc), None) => (doc.text.clone(), None),
             _ => return Ok(None),
         }
     };
@@ -66,7 +66,7 @@ pub async fn handle_format_chunk(
     let text = {
         let docs = state.documents.read().await;
         match docs.get(uri) {
-            Some(t) => t.clone(),
+            Some(doc) => doc.text.clone(),
             _ => return Ok(None),
         }
     };
@@ -135,15 +135,17 @@ mod tests {
         }
         let url = Url::parse(uri).unwrap();
 
-        {
-            let mut docs = state.documents.write().await;
-            docs.insert(url.clone(), text.to_string());
-        }
-
         let mapper = PositionMapper::new(text, text);
         {
-            let mut mappers = state.mappers.write().await;
-            mappers.insert(url.clone(), mapper);
+            let mut docs = state.documents.write().await;
+            docs.insert(url.clone(), crate::state::DocumentState {
+                text: text.to_string(),
+                version: 1,
+                mapper,
+                opened_in_tinymist: false,
+                knot_diagnostics: Vec::new(),
+                tinymist_diagnostics: Vec::new(),
+            });
         }
 
         (state, url)

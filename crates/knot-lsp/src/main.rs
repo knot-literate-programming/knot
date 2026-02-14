@@ -110,13 +110,8 @@ impl LanguageServer for KnotLanguageServer {
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri;
         let text = params.text_document.text;
-        self.state
-            .documents
-            .write()
-            .await
-            .insert(uri.clone(), text.clone());
-        self.update_mapper(&uri, &text).await;
-        self.publish_diagnostics(&uri, &text).await;
+        self.update_document(&uri, &text).await;
+        self.publish_combined_diagnostics(&uri).await;
         self.sync_with_cache(&uri).await;
         self.forward_to_tinymist("textDocument/didOpen", &uri).await;
     }
@@ -125,13 +120,8 @@ impl LanguageServer for KnotLanguageServer {
         let uri = params.text_document.uri;
         if let Some(change) = params.content_changes.first() {
             let text = change.text.clone();
-            self.state
-                .documents
-                .write()
-                .await
-                .insert(uri.clone(), text.clone());
-            self.update_mapper(&uri, &text).await;
-            self.publish_diagnostics(&uri, &text).await;
+            self.update_document(&uri, &text).await;
+            self.publish_combined_diagnostics(&uri).await;
             self.forward_to_tinymist("textDocument/didChange", &uri)
                 .await;
         }
@@ -167,7 +157,7 @@ impl LanguageServer for KnotLanguageServer {
         let uri = params.text_document.uri;
         let docs = self.state.documents.read().await;
         let text = match docs.get(&uri) {
-            Some(t) => t,
+            Some(doc) => &doc.text,
             None => return Ok(None),
         };
         if let Some(symbols) = get_document_symbols(text) {
@@ -226,16 +216,11 @@ impl KnotLanguageServer {
             client: self.client.clone(),
             state: ServerState {
                 documents: self.state.documents.clone(),
-                mappers: self.state.mappers.clone(),
-                knot_diagnostics_cache: self.state.knot_diagnostics_cache.clone(),
-                tinymist_diagnostics_cache: self.state.tinymist_diagnostics_cache.clone(),
-                opened_in_tinymist: self.state.opened_in_tinymist.clone(),
-                document_versions: self.state.document_versions.clone(),
-                formatter: self.state.formatter.clone(),
+                tinymist: self.state.tinymist.clone(),
                 executors: self.state.executors.clone(),
+                formatter: self.state.formatter.clone(),
                 air_path_override: self.state.air_path_override.clone(),
                 tinymist_path_override: self.state.tinymist_path_override.clone(),
-                tinymist: self.state.tinymist.clone(),
                 loaded_snapshot_hash: self.state.loaded_snapshot_hash.clone(),
             },
             root_uri: self.root_uri.clone(),
@@ -243,119 +228,110 @@ impl KnotLanguageServer {
     }
 
     fn resolve_virtual_uri(&self, uri: &Url) -> Url {
-        let s = uri.to_string();
-        if s.ends_with(".typ") && s.contains(".knot") {
-            if let Ok(u) = Url::parse(s.trim_end_matches(".typ")) {
-                return u;
+        if uri.scheme() == "knot-virtual" {
+            let mut original_uri = uri.clone();
+            if let Ok(_) = original_uri.set_scheme("file") {
+                let path = original_uri.path().to_string();
+                if path.ends_with(".typ") {
+                    let new_path = path.trim_end_matches(".typ").to_string();
+                    let _ = original_uri.set_path(&new_path);
+                }
+                return original_uri;
             }
         }
         uri.clone()
     }
 
-    async fn update_mapper(&self, uri: &Url, text: &str) {
+    async fn update_document(&self, uri: &Url, text: &str) {
         let typ_text = transform_to_typst(text);
         let mapper = PositionMapper::new(text, &typ_text);
-        self.state.mappers.write().await.insert(uri.clone(), mapper);
-    }
-
-    async fn publish_diagnostics(&self, uri: &Url, text: &str) {
-        let diagnostics = get_diagnostics(uri, text);
-        self.state
-            .knot_diagnostics_cache
-            .write()
-            .await
-            .insert(uri.clone(), diagnostics);
-        self.publish_combined_diagnostics(uri).await;
+        let knot_diagnostics = get_diagnostics(uri, text);
+        
+        let mut docs = self.state.documents.write().await;
+        if let Some(doc) = docs.get_mut(uri) {
+            doc.text = text.to_string();
+            doc.mapper = mapper;
+            doc.knot_diagnostics = knot_diagnostics;
+            doc.version += 1;
+        } else {
+            docs.insert(uri.clone(), crate::state::DocumentState {
+                text: text.to_string(),
+                version: 1,
+                mapper,
+                opened_in_tinymist: false,
+                knot_diagnostics,
+                tinymist_diagnostics: Vec::new(),
+            });
+        }
     }
 
     async fn publish_combined_diagnostics(&self, uri: &Url) {
-        let knot_diag = self
-            .state
-            .knot_diagnostics_cache
-            .read()
-            .await
-            .get(uri)
-            .cloned()
-            .unwrap_or_default();
-        let tiny_diag = self
-            .state
-            .tinymist_diagnostics_cache
-            .read()
-            .await
-            .get(uri)
-            .cloned()
-            .unwrap_or_default();
-        let mut combined = knot_diag;
-        combined.extend(tiny_diag);
-        let _ = self
-            .client
-            .publish_diagnostics(uri.clone(), combined, None)
-            .await;
+        let docs = self.state.documents.read().await;
+        if let Some(doc) = docs.get(uri) {
+            let mut combined = doc.knot_diagnostics.clone();
+            combined.extend(doc.tinymist_diagnostics.clone());
+            let _ = self
+                .client
+                .publish_diagnostics(uri.clone(), combined, None)
+                .await;
+        }
     }
 
     async fn forward_to_tinymist(&self, method: &str, uri: &Url) {
         let mut warm_up = false;
-        let mut virtual_uri_opt = None;
-        {
+
+        // 1. Prepare data under a short-lived lock
+        let sync_data = {
+            let docs = self.state.documents.read().await;
+            docs.get(uri).map(|doc| (
+                doc.text.clone(),
+                doc.version,
+                doc.opened_in_tinymist,
+            ))
+        };
+
+        let (content, version, is_opened) = match sync_data {
+            Some(data) => data,
+            None => return,
+        };
+
+        let virtual_uri = transform::to_virtual_uri(uri);
+
+        let params = if method == "didOpen" || !is_opened {
+            serde_json::json!({ "textDocument": { "uri": virtual_uri, "languageId": "typst", "version": version, "text": transform_to_typst(&content) } })
+        } else {
+            serde_json::json!({ "textDocument": { "uri": virtual_uri, "version": version }, "contentChanges": [{ "text": transform_to_typst(&content) }] })
+        };
+
+        let actual_method = if !is_opened {
+            "textDocument/didOpen"
+        } else {
+            method
+        };
+
+        // 2. Send to Tinymist (no state locks held)
+        let send_result = {
             let mut tinymist_guard = self.state.tinymist.write().await;
             if let Some(proxy) = tinymist_guard.as_mut() {
-                let content = self
-                    .state
-                    .documents
-                    .read()
-                    .await
-                    .get(uri)
-                    .cloned()
-                    .unwrap_or_default();
-                let virtual_uri = transform::to_virtual_uri(uri);
-                virtual_uri_opt = Some(virtual_uri.clone());
-                let is_opened = self
-                    .state
-                    .opened_in_tinymist
-                    .read()
-                    .await
-                    .get(uri)
-                    .cloned()
-                    .unwrap_or(false);
-                let version = self
-                    .state
-                    .document_versions
-                    .read()
-                    .await
-                    .get(uri)
-                    .cloned()
-                    .unwrap_or(0)
-                    + 1;
-                self.state
-                    .document_versions
-                    .write()
-                    .await
-                    .insert(uri.clone(), version);
-                let params = if method == "didOpen" || !is_opened {
-                    serde_json::json!({ "textDocument": { "uri": virtual_uri, "languageId": "typst", "version": version, "text": transform_to_typst(&content) } })
-                } else {
-                    serde_json::json!({ "textDocument": { "uri": virtual_uri, "version": version }, "contentChanges": [{ "text": transform_to_typst(&content) }] })
-                };
-                let actual_method = if !is_opened {
-                    "textDocument/didOpen"
-                } else {
-                    method
-                };
-                if proxy.send_notification(actual_method, params).await.is_ok() && !is_opened {
-                    self.state
-                        .opened_in_tinymist
-                        .write()
-                        .await
-                        .insert(uri.clone(), true);
-                    warm_up = true;
-                }
+                proxy.send_notification(actual_method, params).await
+            } else {
+                return;
+            }
+        };
+
+        // 3. Update state if successful
+        if send_result.is_ok() && !is_opened {
+            let mut docs = self.state.documents.write().await;
+            if let Some(doc) = docs.get_mut(uri) {
+                doc.opened_in_tinymist = true;
+                warm_up = true;
             }
         }
+
         if warm_up {
-            if let (Some(virtual_uri), Some(tinymist_guard)) =
-                (virtual_uri_opt, self.state.tinymist.write().await.as_mut())
-            {
-                let _ = tinymist_guard
+            let mut tinymist_guard = self.state.tinymist.write().await;
+            if let Some(proxy) = tinymist_guard.as_mut() {
+                let _ = proxy
                     .send_request(
                         "textDocument/documentSymbol",
                         serde_json::json!({ "textDocument": { "uri": virtual_uri } }),
@@ -472,21 +448,19 @@ impl KnotLanguageServer {
                             serde_json::from_value::<Vec<Diagnostic>>(diagnostics_val.clone()),
                         ) {
                             let uri = self.resolve_virtual_uri(&virtual_uri);
-                            if let Some(mapper) = self.state.mappers.read().await.get(&uri) {
+                            let mut docs = self.state.documents.write().await;
+                            if let Some(doc) = docs.get_mut(&uri) {
                                 for d in &mut diagnostics {
                                     if let (Some(start), Some(end)) = (
-                                        mapper.typ_to_knot_position(d.range.start),
-                                        mapper.typ_to_knot_position(d.range.end),
+                                        doc.mapper.typ_to_knot_position(d.range.start),
+                                        doc.mapper.typ_to_knot_position(d.range.end),
                                     ) {
                                         d.range = Range { start, end };
                                     }
                                 }
+                                doc.tinymist_diagnostics = diagnostics;
                             }
-                            self.state
-                                .tinymist_diagnostics_cache
-                                .write()
-                                .await
-                                .insert(uri.clone(), diagnostics);
+                            drop(docs);
                             self.publish_combined_diagnostics(&uri).await;
                         }
                     }

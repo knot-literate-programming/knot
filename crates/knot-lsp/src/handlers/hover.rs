@@ -10,9 +10,8 @@ pub async fn handle_hover(state: &ServerState, params: HoverParams) -> Result<Op
 
     let (text, mapper) = {
         let docs = state.documents.read().await;
-        let mappers = state.mappers.read().await;
-        match (docs.get(uri), mappers.get(uri)) {
-            (Some(t), Some(m)) => (t.clone(), m.clone()),
+        match docs.get(uri) {
+            Some(doc) => (doc.text.clone(), doc.mapper.clone()),
             _ => return Ok(None),
         }
     };
