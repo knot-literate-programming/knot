@@ -318,7 +318,7 @@ pub fn format_file(file_path: &PathBuf, check_only: bool) -> Result<bool> {
         }
 
         // Append formatted chunk (structural + optional code formatting)
-        formatted_text.push_str(&chunk.format(formatted_code.as_deref()));
+        formatted_text.push_str(&chunk.format(formatted_code.as_deref(), None));
 
         last_pos = chunk.end_byte;
     }

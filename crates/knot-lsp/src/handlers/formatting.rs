@@ -39,7 +39,7 @@ pub async fn handle_formatting(
             knot_core::compiler::formatters::format_code(&chunk.code, &chunk.language).ok();
 
         // Append formatted chunk (structural + code)
-        clean_knot_text.push_str(&chunk.format(formatted_code.as_deref()));
+        clean_knot_text.push_str(&chunk.format(formatted_code.as_deref(), None));
 
         last_pos = chunk.end_byte;
     }
@@ -299,12 +299,9 @@ fn reconstruct_knot_document(formatted_typst: &str, clean_knot: &str) -> String 
                 ""
             };
 
-            // B. Prepare the chunk with the NEW indentation from Typst
-            let mut clean_chunk = original_doc.chunks[index].clone();
-            clean_chunk.base_indentation = indent_str.to_string();
-
-            // C. Format and append (format() now handles the indentation)
-            final_text.push_str(&clean_chunk.format(None));
+            // B. Format with the indentation detected by Typst, without
+            // cloning or mutating the AST node.
+            final_text.push_str(&original_doc.chunks[index].format(None, Some(indent_str)));
         } else {
             let clean_inline = &original_doc.inline_exprs[index];
             final_text.push_str(&format!(
@@ -353,7 +350,7 @@ pub async fn handle_format_chunk(
         // 3. Format the chunk
         let formatted_code =
             knot_core::compiler::formatters::format_code(&chunk.code, &chunk.language).ok();
-        let formatted = chunk.format(formatted_code.as_deref());
+        let formatted = chunk.format(formatted_code.as_deref(), None);
 
         let original_chunk = &text[chunk.start_byte..chunk.end_byte];
 

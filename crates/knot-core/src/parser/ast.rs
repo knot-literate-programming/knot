@@ -399,7 +399,9 @@ pub struct Chunk {
 impl Chunk {
     /// Format the chunk back to its canonical source representation.
     /// If `formatted_code` is provided, it replaces the internal code.
-    pub fn format(&self, formatted_code: Option<&str>) -> String {
+    /// If `indentation` is provided, it overrides `self.base_indentation`; pass
+    /// `None` to use the indentation that was recorded during parsing.
+    pub fn format(&self, formatted_code: Option<&str>, indentation: Option<&str>) -> String {
         let mut out = String::new();
 
         // 1. Header: ```{lang name}
@@ -440,9 +442,13 @@ impl Chunk {
         // 5. Footer
         out.push_str("```");
 
-        // 6. Apply base indentation to the whole formatted block
-        if !self.base_indentation.is_empty() {
-            super::indent::indent(&out, &self.base_indentation)
+        // 6. Apply indentation to the whole formatted block.
+        // The caller may pass an explicit override (e.g. indentation detected
+        // by an external formatter); otherwise fall back to what the parser
+        // recorded.
+        let effective_indent = indentation.unwrap_or(&self.base_indentation);
+        if !effective_indent.is_empty() {
+            super::indent::indent(&out, effective_indent)
         } else {
             out
         }
