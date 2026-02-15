@@ -26,39 +26,77 @@ pub fn to_virtual_uri(uri: &Url) -> Url {
 ///
 /// Replaces code chunks and inline expressions with spaces/newlines.
 pub fn transform_to_typst(knot_content: &str) -> String {
-    // 1. Parse the document using the core parser
     let doc = match Document::parse(knot_content.to_string()) {
         Ok(d) => d,
         Err(_) => return knot_content.to_string(),
     };
 
-    // 2. Identify all ranges to mask (Chunks and InlineExprs)
-    let mut ranges_to_mask = Vec::new();
-    for chunk in &doc.chunks {
-        ranges_to_mask.push((chunk.start_byte, chunk.end_byte));
-    }
-    for inline in &doc.inline_exprs {
-        ranges_to_mask.push((inline.start, inline.end));
-    }
-    ranges_to_mask.sort_by_key(|r| r.0);
-
-    // 3. Reconstruct the content
     let mut output = String::with_capacity(knot_content.len());
     let mut last_pos = 0;
 
-    for (start, end) in ranges_to_mask {
+    let mut executable_nodes: Vec<(usize, usize, bool, usize)> = Vec::new();
+    for (i, chunk) in doc.chunks.iter().enumerate() {
+        executable_nodes.push((chunk.start_byte, chunk.end_byte, true, i));
+    }
+    for (i, inline) in doc.inline_exprs.iter().enumerate() {
+        executable_nodes.push((inline.start, inline.end, false, i));
+    }
+    executable_nodes.sort_by_key(|n| n.0);
+
+    for (start, end, is_chunk, index) in executable_nodes {
         if start < last_pos {
             continue;
         }
         output.push_str(&knot_content[last_pos..start]);
 
-        let mask_content = &knot_content[start..end];
-        for c in mask_content.chars() {
-            if c == '\n' {
-                output.push('\n');
+        if is_chunk {
+            let chunk = &doc.chunks[index];
+            
+            // 1. Header line: keep it exactly, append marker before the newline
+            let header_raw = &knot_content[start..chunk.code_start_byte];
+            if let Some(pos) = header_raw.find('\n') {
+                output.push_str(&header_raw[..pos]);
+                output.push_str(&format!(" // #KNOT-S:{}", index));
+                output.push_str(&header_raw[pos..]);
             } else {
-                let len_utf16 = c.len_utf16();
-                for _ in 0..len_utf16 {
+                output.push_str(header_raw);
+                output.push_str(&format!(" // #KNOT-S:{}", index));
+            }
+            
+            // 2. Body: just empty lines to keep line count
+            for c in chunk.code.chars() {
+                if c == '\n' {
+                    output.push('\n');
+                }
+            }
+            
+            // 3. Footer line: keep it exactly, append marker before the newline
+            let footer_raw = &knot_content[chunk.code_end_byte..end];
+            if let Some(pos) = footer_raw.find('\n') {
+                output.push_str(&footer_raw[..pos]);
+                output.push_str(&format!(" // #KNOT-E:{}", index));
+                output.push_str(&footer_raw[pos..]);
+            } else {
+                output.push_str(footer_raw);
+                output.push_str(&format!(" // #KNOT-E:{}", index));
+            }
+        } else {
+            // Inlines: Use protected spaces. Calculate exact UTF-16 width to match VS Code columns.
+            let original_inline = &knot_content[start..end];
+            let mut total_width = 0;
+            for c in original_inline.chars() {
+                total_width += c.len_utf16();
+            }
+
+            if total_width >= 2 {
+                output.push('`');
+                for _ in 0..(total_width - 2) {
+                    output.push(' ');
+                }
+                output.push('`');
+            } else {
+                // Fallback for extremely short inlines (should not happen with `{r} `)
+                for _ in 0..total_width {
                     output.push(' ');
                 }
             }
@@ -80,22 +118,25 @@ mod tests {
     #[test]
     fn test_transform_simple_inline() {
         let input = "Text `{r} 1+1` end";
-        let expected_typ = "Text           end";
-
-        assert_eq!(transform_to_typst(input), expected_typ);
+        let output = transform_to_typst(input);
+        
+        // Should contain protected spaces (backticks)
+        assert!(output.contains("`       `"));
+        assert_eq!(input.len(), output.len());
     }
 
     #[test]
     fn test_transform_chunk_preserves_lines() {
-        let input = r###"Start
-```{r}
-x <- 1
-y <- 2
-```
-End"###;
+        let input = "Start\n```{r}\nx <- 1\n```\nEnd";
         let output_typ = transform_to_typst(input);
 
+        // Should have exactly the same number of lines
+        // Original has 5 lines (if counting trailing \n as part of lines)
         assert_eq!(input.lines().count(), output_typ.lines().count());
+        
+        // Should contain our markers
+        assert!(output_typ.contains("// #KNOT-S:0"));
+        assert!(output_typ.contains("// #KNOT-E:0"));
     }
 
     #[test]
@@ -103,6 +144,8 @@ End"###;
         let input = "A `{r} 'é'` B";
         let output_typ = transform_to_typst(input);
 
+        // For inlines, we use backticks to protect spaces.
+        // `A `{r} 'é'` B` -> `A `       ` B` (length should be identical)
         assert_eq!(
             input.encode_utf16().count(),
             output_typ.encode_utf16().count()

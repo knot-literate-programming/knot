@@ -9,51 +9,136 @@ pub async fn handle_formatting(
 ) -> Result<Option<Vec<TextEdit>>> {
     let uri = &params.text_document.uri;
 
-    let (text, _formatter) = {
+    // 1. Get current document state
+    let (text, version) = {
         let docs = state.documents.read().await;
-        let formatter_opt = state.formatter.read().await;
-        match (docs.get(uri), formatter_opt.as_ref()) {
-            (Some(doc), Some(f)) => (doc.text.clone(), Some(f.clone())),
-            (Some(doc), None) => (doc.text.clone(), None),
+        match docs.get(uri) {
+            Some(doc) => (doc.text.clone(), doc.version),
             _ => return Ok(None),
         }
     };
 
+    // 2. Parse document
     let doc = match Document::parse(text.clone()) {
         Ok(doc) => doc,
         Err(_) => return Ok(None),
     };
 
-    let mut edits = Vec::new();
+    // --- PHASE A: Internal Chunk Formatting (Air/Ruff) ---
+    let mut clean_knot_text = String::with_capacity(text.len());
+    let mut last_pos = 0;
 
     for chunk in &doc.chunks {
+        // Append text before chunk
+        if chunk.start_byte > last_pos {
+            clean_knot_text.push_str(&text[last_pos..chunk.start_byte]);
+        }
+
+        // Format code with external tools
         let formatted_code =
             knot_core::compiler::formatters::format_code(&chunk.code, &chunk.language).ok();
-        let formatted = chunk.format(formatted_code.as_deref());
-        let original_chunk = &text[chunk.start_byte..chunk.end_byte];
-
-        if formatted != original_chunk {
-            edits.push(TextEdit {
-                range: Range {
-                    start: Position {
-                        line: chunk.range.start.line as u32,
-                        character: chunk.range.start.column as u32,
-                    },
-                    end: Position {
-                        line: chunk.range.end.line as u32,
-                        character: chunk.range.end.column as u32,
-                    },
-                },
-                new_text: formatted,
-            });
-        }
+        
+        // Append formatted chunk (structural + code)
+        clean_knot_text.push_str(&chunk.format(formatted_code.as_deref()));
+        
+        last_pos = chunk.end_byte;
     }
 
-    if edits.is_empty() {
+    if last_pos < text.len() {
+        clean_knot_text.push_str(&text[last_pos..]);
+    }
+
+    // --- PHASE B: Global Typst Formatting (Tinymist) ---
+    // Generate the structured mask for Tinymist
+    let typst_mask = crate::transform::transform_to_typst(&clean_knot_text);
+    let virtual_uri = crate::transform::to_virtual_uri(uri);
+
+    let formatted_typst = {
+        let mut tinymist_guard = state.tinymist.write().await;
+        if let Some(proxy) = tinymist_guard.as_mut() {
+            // First, update Tinymist with the current mask
+            let _ = proxy.send_notification("textDocument/didOpen", serde_json::json!({
+                "textDocument": {
+                    "uri": virtual_uri,
+                    "languageId": "typst",
+                    "version": version + 1000, // Use a high version to avoid conflicts
+                    "text": typst_mask
+                }
+            })).await;
+
+            // Request formatting
+            let resp = proxy.send_request("textDocument/formatting", serde_json::json!({
+                "textDocument": { "uri": virtual_uri },
+                "options": params.options
+            })).await;
+
+            match resp {
+                Ok(res) => {
+                    if let Some(edits_val) = res.get("result") {
+                        if let Ok(edits) = serde_json::from_value::<Vec<TextEdit>>(edits_val.clone()) {
+                            // Apply edits to the mask to get the final Typst structure
+                            apply_edits(&typst_mask, edits)
+                        } else {
+                            typst_mask
+                        }
+                    } else {
+                        typst_mask
+                    }
+                }
+                Err(_) => typst_mask,
+            }
+        } else {
+            typst_mask
+        }
+    };
+
+    // --- PHASE C: Final Document Reconstruction ---
+    // We need to extract the clean Knot chunks from the masked document 
+    // and re-insert them into the formatted Typst structure.
+    let final_text = reconstruct_knot_document(&formatted_typst, &clean_knot_text);
+
+    if final_text == text {
         Ok(None)
     } else {
-        Ok(Some(edits))
+        // Return a single full-document replacement for simplicity and robustness
+        Ok(Some(vec![TextEdit {
+            range: Range {
+                start: Position { line: 0, character: 0 },
+                end: Position {
+                    line: text.lines().count() as u32,
+                    character: text.lines().last().unwrap_or("").len() as u32,
+                },
+            },
+            new_text: final_text,
+        }]))
     }
+}
+
+/// Simple utility to apply LSP TextEdits to a string
+fn apply_edits(text: &str, mut edits: Vec<TextEdit>) -> String {
+    // Sort edits in reverse order to keep offsets valid
+    edits.sort_by(|a, b| {
+        if a.range.start.line != b.range.start.line {
+            b.range.start.line.cmp(&a.range.start.line)
+        } else {
+            b.range.start.character.cmp(&a.range.start.character)
+        }
+    });
+
+    for edit in edits {
+        // Implementation of apply_edits for the mask will be finalized tomorrow
+        // For now we just iterate to keep the skeleton valid
+        let _ = edit;
+    }
+    
+    // For now, return original mask to avoid corruption during development
+    text.to_string()
+}
+
+/// Reconstructs the Knot document by finding our markers in the formatted Typst.
+fn reconstruct_knot_document(_formatted_typst: &str, clean_knot: &str) -> String {
+    // Reconstruction logic using markers will be implemented tomorrow
+    clean_knot.to_string()
 }
 
 /// Format a single chunk at the given position
