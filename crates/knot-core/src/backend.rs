@@ -308,8 +308,7 @@ mod tests {
         language: &str,
         code: &str,
         name: Option<String>,
-        echo: bool,
-        output: bool,
+        show: Show,
         caption: Option<String>,
     ) -> Chunk {
         let dummy_range = Range {
@@ -324,12 +323,7 @@ mod tests {
             base_indentation: String::new(),
             options: ChunkOptions {
                 eval: Some(true),
-                show: Some(match (echo, output) {
-                    (true, true) => Show::Both,
-                    (true, false) => Show::Code,
-                    (false, true) => Show::Output,
-                    (false, false) => Show::Output, // fallback to output
-                }),
+                show: Some(show),
                 cache: Some(true),
                 caption,
                 depends: vec![],
@@ -372,7 +366,7 @@ mod tests {
     #[test]
     fn test_format_chunk_with_errors() {
         let backend = TypstBackend::new();
-        let mut chunk = create_test_chunk("r", "1 + 1", None, true, true, None);
+        let mut chunk = create_test_chunk("r", "1 + 1", None, Show::Both, None);
         chunk.errors.push(crate::parser::ChunkError::new(
             "Unknown option: 'foo'",
             None,
@@ -394,9 +388,9 @@ mod tests {
     }
 
     #[test]
-    fn test_format_chunk_text_output_with_echo() {
+    fn test_format_chunk_text_output_with_code() {
         let backend = TypstBackend::new();
-        let chunk = create_test_chunk("r", "x <- 1:10\nmean(x)", None, true, true, None);
+        let chunk = create_test_chunk("r", "x <- 1:10\nmean(x)", None, Show::Both, None);
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("[1] 5.5".to_string()),
             warnings: vec![],
@@ -413,9 +407,9 @@ mod tests {
     }
 
     #[test]
-    fn test_format_chunk_text_output_without_echo() {
+    fn test_format_chunk_text_output_without_code() {
         let backend = TypstBackend::new();
-        let chunk = create_test_chunk("r", "x <- 1:10\nmean(x)", None, false, true, None);
+        let chunk = create_test_chunk("r", "x <- 1:10\nmean(x)", None, Show::Output, None);
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("[1] 5.5".to_string()),
             warnings: vec![],
@@ -432,7 +426,7 @@ mod tests {
     #[test]
     fn test_format_chunk_no_output() {
         let backend = TypstBackend::new();
-        let chunk = create_test_chunk("r", "x <- 1", None, true, false, None);
+        let chunk = create_test_chunk("r", "x <- 1", None, Show::Both, None);
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("".to_string()),
             warnings: vec![],
@@ -452,8 +446,7 @@ mod tests {
             "r",
             "x <- 1:10",
             Some("my-chunk".to_string()),
-            true,
-            true,
+            Show::Both,
             Some("[My Caption]".to_string()),
         );
         let output_data = ExecutionOutput {
@@ -479,8 +472,7 @@ mod tests {
             "r",
             "x <- 1:10",
             None,
-            true,
-            true,
+            Show::Both,
             Some("[My Caption]".to_string()),
         );
         let output_data = ExecutionOutput {
@@ -500,7 +492,7 @@ mod tests {
     #[test]
     fn test_format_chunk_plot_output() {
         let backend = TypstBackend::new();
-        let chunk = create_test_chunk("r", "plot(1:10)", None, false, true, None);
+        let chunk = create_test_chunk("r", "plot(1:10)", None, Show::Output, None);
         let plot_path = PathBuf::from("/tmp/plot.svg");
         let output_data = ExecutionOutput {
             result: ExecutionResult::Plot(plot_path.clone()),
@@ -518,7 +510,7 @@ mod tests {
     #[test]
     fn test_format_chunk_dataframe_output() {
         let backend = TypstBackend::new();
-        let chunk = create_test_chunk("r", "mtcars", None, false, true, None);
+        let chunk = create_test_chunk("r", "mtcars", None, Show::Output, None);
         let csv_path = PathBuf::from("/tmp/data.csv");
         let output_data = ExecutionOutput {
             result: ExecutionResult::DataFrame(csv_path.clone()),
@@ -537,7 +529,7 @@ mod tests {
     #[test]
     fn test_format_chunk_text_and_plot() {
         let backend = TypstBackend::new();
-        let chunk = create_test_chunk("r", "plot(1:10); summary(1:10)", None, false, true, None);
+        let chunk = create_test_chunk("r", "plot(1:10); summary(1:10)", None, Show::Output, None);
         let plot_path = PathBuf::from("/tmp/plot.svg");
         let output_data = ExecutionOutput {
             result: ExecutionResult::TextAndPlot {
@@ -560,7 +552,7 @@ mod tests {
     #[test]
     fn test_format_chunk_dataframe_and_plot() {
         let backend = TypstBackend::new();
-        let chunk = create_test_chunk("r", "plot(mtcars); mtcars", None, false, true, None);
+        let chunk = create_test_chunk("r", "plot(mtcars); mtcars", None, Show::Output, None);
         let csv_path = PathBuf::from("/tmp/data.csv");
         let plot_path = PathBuf::from("/tmp/plot.svg");
         let output_data = ExecutionOutput {
@@ -584,7 +576,7 @@ mod tests {
     #[test]
     fn test_format_chunk_empty_name_no_figure_wrapper() {
         let backend = TypstBackend::new();
-        let chunk = create_test_chunk("r", "1 + 1", Some("".to_string()), true, true, None);
+        let chunk = create_test_chunk("r", "1 + 1", Some("".to_string()), Show::Both, None);
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("[1] 2".to_string()),
             warnings: vec![],
@@ -602,7 +594,7 @@ mod tests {
     #[test]
     fn test_format_chunk_empty_text_output() {
         let backend = TypstBackend::new();
-        let chunk = create_test_chunk("r", "invisible(1)", None, false, true, None);
+        let chunk = create_test_chunk("r", "invisible(1)", None, Show::Output, None);
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("".to_string()),
             warnings: vec![],
@@ -619,7 +611,7 @@ mod tests {
     #[test]
     fn test_format_chunk_with_codly_options() {
         let backend = TypstBackend::new();
-        let mut chunk = create_test_chunk("r", "x <- 1:10", None, true, true, None);
+        let mut chunk = create_test_chunk("r", "x <- 1:10", None, Show::Both, None);
 
         // Add codly options
         chunk
@@ -650,7 +642,7 @@ mod tests {
     #[test]
     fn test_format_chunk_without_codly_options() {
         let backend = TypstBackend::new();
-        let chunk = create_test_chunk("r", "x <- 1:10", None, true, true, None);
+        let chunk = create_test_chunk("r", "x <- 1:10", None, Show::Both, None);
 
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("[1] 1  2  3  4  5  6  7  8  9 10".to_string()),

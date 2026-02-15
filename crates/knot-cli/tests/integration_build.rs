@@ -6,8 +6,6 @@
 // - Error when file is outside project root
 // - Clear error messages when included file fails to compile
 //
-// Note: These tests use set_current_dir() which is not thread-safe.
-// Run with: cargo test -- --test-threads=1
 
 use std::fs;
 use std::path::PathBuf;
@@ -88,15 +86,8 @@ These are the results chapter with more content.
 fn test_successful_build_with_includes() {
     let (_temp, project_root) = setup_test_project();
 
-    // Change to project directory
-    let original_dir = std::env::current_dir().unwrap();
-    std::env::set_current_dir(&project_root).unwrap();
-
     // Build project
-    let result = knot_cli::build_project();
-
-    // Restore original directory (ignore error if it doesn't exist anymore)
-    let _ = std::env::set_current_dir(original_dir);
+    let result = knot_cli::build_project(Some(&project_root));
 
     // Check that build succeeded
     assert!(result.is_ok(), "Build should succeed: {:?}", result.err());
@@ -155,15 +146,8 @@ This is the end.
 "#;
     fs::write(project_root.join("main.knot"), main_knot_no_placeholder).unwrap();
 
-    // Change to project directory
-    let original_dir = std::env::current_dir().unwrap();
-    std::env::set_current_dir(&project_root).unwrap();
-
     // Attempt to build project
-    let result = knot_cli::build_project();
-
-    // Restore original directory (ignore error if it doesn't exist anymore)
-    let _ = std::env::set_current_dir(original_dir);
+    let result = knot_cli::build_project(Some(&project_root));
 
     // Check that build failed with appropriate error
     assert!(
@@ -206,15 +190,8 @@ typst = "lib/knot.typ"
     );
     fs::write(project_root.join("knot.toml"), malicious_knot_toml).unwrap();
 
-    // Change to project directory
-    let original_dir = std::env::current_dir().unwrap();
-    std::env::set_current_dir(&project_root).unwrap();
-
     // Attempt to build project
-    let result = knot_cli::build_project();
-
-    // Restore original directory (ignore error if it doesn't exist anymore)
-    let _ = std::env::set_current_dir(original_dir);
+    let result = knot_cli::build_project(Some(&project_root));
 
     // Check that build failed with security error
     assert!(
@@ -238,20 +215,14 @@ fn test_error_when_included_file_has_syntax_error() {
 = Bad Chapter
 
 ```{r}
+#| eval: true
 # This code fence is never closed
 x <- 1 + 1
 "#;
     fs::write(project_root.join("chapters/01-intro.knot"), invalid_chapter).unwrap();
 
-    // Change to project directory
-    let original_dir = std::env::current_dir().unwrap();
-    std::env::set_current_dir(&project_root).unwrap();
-
     // Attempt to build project
-    let result = knot_cli::build_project();
-
-    // Restore original directory (ignore error if it doesn't exist anymore)
-    let _ = std::env::set_current_dir(original_dir);
+    let result = knot_cli::build_project(Some(&project_root));
 
     // Check that build failed
     // Note: The error might come from parsing, R execution, or Typst compilation
@@ -292,15 +263,8 @@ typst = "lib/knot.typ"
 "#;
     fs::write(project_root.join("knot.toml"), knot_toml).unwrap();
 
-    // Change to project directory
-    let original_dir = std::env::current_dir().unwrap();
-    std::env::set_current_dir(&project_root).unwrap();
-
     // Attempt to build project
-    let result = knot_cli::build_project();
-
-    // Restore original directory (ignore error if it doesn't exist anymore)
-    let _ = std::env::set_current_dir(original_dir);
+    let result = knot_cli::build_project(Some(&project_root));
 
     // Check that build failed with file not found error
     assert!(

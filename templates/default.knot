@@ -30,8 +30,7 @@ This is a knot document with executable R code.
 
 ```{r}
 #| eval: true
-#| echo: true
-#| output: true
+#| show: both
 
 # Load data
 data <- iris

@@ -84,20 +84,19 @@ pub async fn handle_hover(state: &ServerState, params: HoverParams) -> Result<Op
             let virtual_uri = crate::transform::to_virtual_uri(uri);
             let params =
                 serde_json::json!({ "textDocument": { "uri": virtual_uri }, "position": typ_pos });
-            if let Ok(response) = proxy.send_request(lsp::HOVER, params).await {
-                if let Some(result) = response.get("result") {
-                    if let Ok(mut hover) = serde_json::from_value::<Hover>(result.clone()) {
-                        if let Some(range) = &mut hover.range {
-                            if let (Some(s), Some(e)) = (
-                                mapper.typ_to_knot_position(range.start),
-                                mapper.typ_to_knot_position(range.end),
-                            ) {
-                                *range = Range { start: s, end: e };
-                            }
-                        }
-                        return Ok(Some(hover));
-                    }
+            if let Ok(response) = proxy.send_request(lsp::HOVER, params).await
+                && let Some(result) = response.get("result")
+                && let Ok(mut hover) = serde_json::from_value::<Hover>(result.clone())
+            {
+                if let Some(range) = &mut hover.range
+                    && let (Some(s), Some(e)) = (
+                        mapper.typ_to_knot_position(range.start),
+                        mapper.typ_to_knot_position(range.end),
+                    )
+                {
+                    *range = Range { start: s, end: e };
                 }
+                return Ok(Some(hover));
             }
         }
     }

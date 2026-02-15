@@ -65,7 +65,7 @@ fn main() -> Result<()> {
             watch()?;
         }
         Commands::Build => {
-            build_project()?;
+            build_project(None)?;
         }
         Commands::Clean => {
             knot_core::clean_project(None)?;
@@ -199,17 +199,13 @@ fn watch() -> Result<()> {
 
     // Step 4: Initial build
     println!("🔨 Initial build...");
-    let original_dir = std::env::current_dir()?;
-    std::env::set_current_dir(&project_root)?;
 
-    if let Err(e) = build_project() {
+    if let Err(e) = build_project(Some(&project_root)) {
         eprintln!("❌ Initial build failed: {}", e);
         eprintln!("⚠️  Continuing in watch mode...");
     } else {
         println!("✅ Initial build succeeded");
     }
-
-    std::env::set_current_dir(original_dir)?;
 
     // Step 5: Determine .typ output path for typst watch (without dot prefix)
     let typ_output_path = {
@@ -303,18 +299,13 @@ fn watch() -> Result<()> {
                     println!("🔨 Rebuilding...");
 
                     // Rebuild the project
-                    let original_dir = std::env::current_dir()?;
-                    std::env::set_current_dir(&project_root)?;
-
-                    match build_project() {
+                    match build_project(Some(&project_root)) {
                         Ok(_) => println!("✅ Build succeeded\n"),
                         Err(e) => {
                             eprintln!("❌ Build failed: {}\n", e);
                             eprintln!("⚠️  Fix errors and save again to retry.\n");
                         }
                     }
-
-                    std::env::set_current_dir(original_dir)?;
                 }
             }
             Ok(Err(e)) => eprintln!("⚠️  Watch error: {}", e),

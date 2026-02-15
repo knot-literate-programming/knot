@@ -46,7 +46,7 @@ fn generate_knot_toml(options: &[OptionMetadata]) -> String {
     output.push_str("# individual chunk headers using YAML syntax:\n");
     output.push_str("#\n");
     output.push_str("#   ```{r}\n");
-    output.push_str("#   #| echo: false\n");
+    output.push_str("#   #| show: output\n");
     output.push_str("#   #| fig-width: 10\n");
     output.push_str("#   ...\n");
     output.push_str("#   ```\n");

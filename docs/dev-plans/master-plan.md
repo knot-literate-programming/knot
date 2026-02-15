@@ -10,7 +10,7 @@ This document tracks the high-level goals and roadmap for the Knot project. Deta
 
 ## 📊 Current Status (Updated Feb 2026)
 
-**Maturity:** ~90% towards v1.0
+**Maturity:** ~92% towards v1.0
 
 **Core:** ~99% complete
 - ✅ Parsing, execution, caching
@@ -19,26 +19,25 @@ This document tracks the high-level goals and roadmap for the Knot project. Deta
 - ✅ Unified structured error handling & Granular resilience
 - ✅ Customizable warnings (styles & visibility)
 - ✅ Zero-escape robust execution model (temp files)
+- ✅ **Centralized Structural Formatting**: Unified logic for CLI and LSP in `Document::format`.
 
-**LSP:** ~95% complete
+**LSP:** ~97% complete
 - ✅ Hover (chunks, R, Python, Typst — stable & responsive)
-- ✅ Completion (chunk options, R, Python, Typst)
+- ✅ **Dynamic Completion**: Chunk options suggested based on core metadata (with docs & defaults).
 - ✅ Diagnostics (parsing errors, structure validation)
+- ✅ **Unknown Option Warnings**: Validated against `OptionMetadata` to catch typos.
 - ✅ **Execution Diagnostics**: Runtime errors and warnings surfaced in the editor from cache.
 - ✅ Document symbols (including all show variants)
-- ✅ **Architectural Hardening**: Consolidated state, deadlock-free locking, and secure virtual URI scheme.
-- ✅ **Hybrid formatting**: Full 3-phase pipeline (Air → Tinymist → reconstruction) with graceful fallbacks. See [formatters.md](formatters.md).
+- ✅ **Architectural Hardening**: Consolidated state, lock contention minimized, and proper virtual URI versioning.
+- ✅ **Hybrid formatting**: Full 3-phase pipeline (Air → Tinymist → reconstruction) with async pre-calculation and graceful fallbacks.
 - ⏳ Go to Definition & References
-- ⏳ Error surfacing for formatter/Tinymist failures (`window/showMessage`)
+- ⏳ Error surfacing for Tinymist failures (`window/showMessage`)
 
-**CLI:** ~98% complete
+**CLI:** ~99% complete
 - ✅ Compile, watch, init
 - ✅ Dynamic knot.toml generation (Unified structures)
-
-**Documentation:** ~50% complete
-- ✅ Dev plans (architecture, design docs updated)
-- ⏳ User documentation (getting started, tutorials)
-- ⏳ Example projects (reports, dashboards)
+- ✅ **Thread-safe Integration Tests**: Validated for parallel execution.
+- ✅ **Centralized Formatting**: `knot format` uses the same engine as the LSP.
 
 ---
 

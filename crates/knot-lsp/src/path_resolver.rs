@@ -17,12 +17,10 @@ pub fn resolve_binary(name: &str) -> Result<PathBuf> {
     ];
 
     // Add OS-specific paths
-    if cfg!(target_os = "windows") {
-        if let Ok(appdata) = std::env::var("LOCALAPPDATA") {
-            let win_path = PathBuf::from(appdata).join("Programs").join(name);
-            if let Some(s) = win_path.to_str() {
-                search_paths.push(s.to_string());
-            }
+    if cfg!(target_os = "windows") && let Ok(appdata) = std::env::var("LOCALAPPDATA") {
+        let win_path = PathBuf::from(appdata).join("Programs").join(name);
+        if let Some(s) = win_path.to_str() {
+            search_paths.push(s.to_string());
         }
     }
 
@@ -36,33 +34,31 @@ pub fn resolve_binary(name: &str) -> Result<PathBuf> {
         if (name == "tinymist" || name == "air") && cfg!(target_os = "macos") {
             let extensions_dir =
                 Path::new(&shellexpand::tilde("~/.vscode/extensions").to_string()).to_path_buf();
-            if extensions_dir.exists() {
-                if let Ok(entries) = std::fs::read_dir(extensions_dir) {
-                    let prefix = if name == "tinymist" {
-                        "myriad-dreamin.tinymist-"
-                    } else {
-                        "posit.air-"
-                    };
+            if extensions_dir.exists() && let Ok(entries) = std::fs::read_dir(extensions_dir) {
+                let prefix = if name == "tinymist" {
+                    "myriad-dreamin.tinymist-"
+                } else {
+                    "posit.air-"
+                };
 
-                    for entry in entries.flatten() {
-                        let dirname = entry.file_name().to_string_lossy().to_string();
-                        if dirname.starts_with(prefix) {
-                            let candidate = if name == "tinymist" {
-                                entry.path().join("out").join("tinymist")
+                for entry in entries.flatten() {
+                    let dirname = entry.file_name().to_string_lossy().to_string();
+                    if dirname.starts_with(prefix) {
+                        let candidate = if name == "tinymist" {
+                            entry.path().join("out").join("tinymist")
+                        } else {
+                            // Try common air subpaths
+                            let p1 = entry.path().join("bin").join("air");
+                            let p2 = entry.path().join("bundled").join("bin").join("air");
+                            if p2.exists() {
+                                p2
                             } else {
-                                // Try common air subpaths
-                                let p1 = entry.path().join("bin").join("air");
-                                let p2 = entry.path().join("bundled").join("bin").join("air");
-                                if p2.exists() {
-                                    p2
-                                } else {
-                                    p1
-                                }
-                            };
-
-                            if candidate.exists() && candidate.is_file() {
-                                return Ok(candidate);
+                                p1
                             }
+                        };
+
+                        if candidate.exists() && candidate.is_file() {
+                            return Ok(candidate);
                         }
                     }
                 }

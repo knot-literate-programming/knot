@@ -118,7 +118,7 @@ knot watch
 ### Chunk Customization
 - ✅ 12+ presentation options (layout, colors, borders, spacing)
 - ✅ Graphics options (size, format, DPI)
-- ✅ Execution control (eval, echo, output, cache)
+- ✅ Execution control (eval, show, cache)
 
 ---
 

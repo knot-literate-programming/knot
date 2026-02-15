@@ -522,7 +522,7 @@ mod tests {
         use crate::config::{ChunkDefaults, Config};
         use crate::parser::{ChunkOptions, Position, Range};
 
-        // Create a chunk with minimal explicit options (echo is None)
+        // Create a chunk with minimal explicit options (show is None)
         let dummy_range = Range {
             start: Position { line: 0, column: 0 },
             end: Position { line: 0, column: 0 },

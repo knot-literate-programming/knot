@@ -83,101 +83,99 @@ pub fn get_diagnostics(uri: &Url, text: &str) -> Vec<Diagnostic> {
     }
 
     // 2. Runtime Diagnostics (from Cache)
-    if let Ok(path) = uri.to_file_path() {
-        if let Ok(project_root) = Config::find_project_root(&path) {
-            let file_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("main");
-            let cache_dir = get_cache_dir(&project_root, file_stem);
+    if let Ok(path) = uri.to_file_path()
+        && let Ok(project_root) = Config::find_project_root(&path)
+    {
+        let file_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("main");
+        let cache_dir = get_cache_dir(&project_root, file_stem);
 
-            if let Ok(cache) = Cache::new(cache_dir) {
-                for chunk_cache in cache.metadata.chunks {
-                    // Match cache entry with parsed chunk by byte offset (start_byte)
-                    // This is reliable as long as the content before the chunk hasn't changed.
-                    if let Some(parsed_chunk) = doc
-                        .chunks
-                        .iter()
-                        .find(|c| c.start_byte == chunk_cache.index)
-                    {
-                        // Add Warnings
-                        for warning in chunk_cache.warnings {
-                            let range = if let Some(line_num) = warning.line {
-                                // line_num is 1-indexed relative to the code start
-                                let absolute_line =
-                                    parsed_chunk.code_range.start.line + line_num - 1;
-                                let line_text = text.lines().nth(absolute_line).unwrap_or("");
-                                let line_len_utf16 = line_text.encode_utf16().count() as u32;
-                                Range {
-                                    start: Position {
-                                        line: absolute_line as u32,
-                                        character: 0,
-                                    },
-                                    end: Position {
-                                        line: absolute_line as u32,
-                                        character: line_len_utf16,
-                                    },
-                                }
-                            } else {
-                                // Fallback: highlight only the closing triple backticks of the chunk
-                                let end_pos = mapper.position_at_offset(parsed_chunk.end_byte);
-                                Range {
-                                    start: Position {
-                                        line: end_pos.line,
-                                        character: end_pos.character.saturating_sub(3),
-                                    },
-                                    end: end_pos,
-                                }
-                            };
+        if let Ok(cache) = Cache::new(cache_dir) {
+            for chunk_cache in cache.metadata.chunks {
+                // Match cache entry with parsed chunk by byte offset (start_byte)
+                // This is reliable as long as the content before the chunk hasn't changed.
+                if let Some(parsed_chunk) = doc
+                    .chunks
+                    .iter()
+                    .find(|c| c.start_byte == chunk_cache.index)
+                {
+                    // Add Warnings
+                    for warning in chunk_cache.warnings {
+                        let range = if let Some(line_num) = warning.line {
+                            // line_num is 1-indexed relative to the code start
+                            let absolute_line = parsed_chunk.code_range.start.line + line_num - 1;
+                            let line_text = text.lines().nth(absolute_line).unwrap_or("");
+                            let line_len_utf16 = line_text.encode_utf16().count() as u32;
+                            Range {
+                                start: Position {
+                                    line: absolute_line as u32,
+                                    character: 0,
+                                },
+                                end: Position {
+                                    line: absolute_line as u32,
+                                    character: line_len_utf16,
+                                },
+                            }
+                        } else {
+                            // Fallback: highlight only the closing triple backticks of the chunk
+                            let end_pos = mapper.position_at_offset(parsed_chunk.end_byte);
+                            Range {
+                                start: Position {
+                                    line: end_pos.line,
+                                    character: end_pos.character.saturating_sub(3),
+                                },
+                                end: end_pos,
+                            }
+                        };
 
-                            diagnostics.push(Diagnostic {
-                                range,
-                                severity: Some(DiagnosticSeverity::WARNING),
-                                source: Some(format!("knot-{}", chunk_cache.language)),
-                                message: warning.detailed_message(),
-                                ..Diagnostic::default()
-                            });
-                        }
+                        diagnostics.push(Diagnostic {
+                            range,
+                            severity: Some(DiagnosticSeverity::WARNING),
+                            source: Some(format!("knot-{}", chunk_cache.language)),
+                            message: warning.detailed_message(),
+                            ..Diagnostic::default()
+                        });
+                    }
 
-                        // Add Fatal Error with precise line if possible
-                        if let Some(error) = chunk_cache.error {
-                            let msg = error.detailed_message();
+                    // Add Fatal Error with precise line if possible
+                    if let Some(error) = chunk_cache.error {
+                        let msg = error.detailed_message();
 
-                            // Try to find exact line within chunk
-                            let error_line_in_chunk = extract_line_from_traceback(&error.traceback);
+                        // Try to find exact line within chunk
+                        let error_line_in_chunk = extract_line_from_traceback(&error.traceback);
 
-                            let range = if let Some(line_num) = error_line_in_chunk {
-                                let absolute_line =
-                                    parsed_chunk.code_range.start.line + line_num - 1;
-                                let line_text = text.lines().nth(absolute_line).unwrap_or("");
-                                let line_len_utf16 = line_text.encode_utf16().count() as u32;
-                                Range {
-                                    start: Position {
-                                        line: absolute_line as u32,
-                                        character: 0,
-                                    },
-                                    end: Position {
-                                        line: absolute_line as u32,
-                                        character: line_len_utf16,
-                                    },
-                                }
-                            } else {
-                                // Fallback: highlight only the closing triple backticks of the chunk
-                                let end_pos = mapper.position_at_offset(parsed_chunk.end_byte);
-                                Range {
-                                    start: Position {
-                                        line: end_pos.line,
-                                        character: end_pos.character.saturating_sub(3),
-                                    },
-                                    end: end_pos,
-                                }
-                            };
+                        let range = if let Some(line_num) = error_line_in_chunk {
+                            let absolute_line = parsed_chunk.code_range.start.line + line_num - 1;
+                            let line_text = text.lines().nth(absolute_line).unwrap_or("");
+                            let line_len_utf16 = line_text.encode_utf16().count() as u32;
+                            Range {
+                                start: Position {
+                                    line: absolute_line as u32,
+                                    character: 0,
+                                },
+                                end: Position {
+                                    line: absolute_line as u32,
+                                    character: line_len_utf16,
+                                },
+                            }
+                        } else {
+                            // Fallback: highlight only the closing triple backticks of the chunk
+                            let end_pos = mapper.position_at_offset(parsed_chunk.end_byte);
+                            Range {
+                                start: Position {
+                                    line: end_pos.line,
+                                    character: end_pos.character.saturating_sub(3),
+                                },
+                                end: end_pos,
+                            }
+                        };
 
-                            diagnostics.push(Diagnostic {
-                                range,
-                                severity: Some(DiagnosticSeverity::ERROR),
-                                source: Some(format!("knot-{}", chunk_cache.language)),
-                                message: msg,
-                                ..Diagnostic::default()
-                            });
-                        }
+                        diagnostics.push(Diagnostic {
+                            range,
+                            severity: Some(DiagnosticSeverity::ERROR),
+                            source: Some(format!("knot-{}", chunk_cache.language)),
+                            message: msg,
+                            ..Diagnostic::default()
+                        });
                     }
                 }
             }

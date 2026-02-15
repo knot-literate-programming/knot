@@ -38,23 +38,19 @@ pub async fn handle_completion(
         let trimmed = lines.get(line).map(|l| l.trim_start()).unwrap_or("");
 
         if trimmed.starts_with("#|") {
-            let options = vec![
-                "eval",
-                "echo",
-                "output",
-                "cache",
-                "fig-width",
-                "fig-height",
-                "dpi",
-                "constant",
-            ];
-            let items = options
+            let metadata = knot_core::parser::ChunkOptions::option_metadata();
+            let items = metadata
                 .into_iter()
-                .map(|o| CompletionItem {
-                    label: o.to_string(),
-                    kind: Some(CompletionItemKind::FIELD),
-                    insert_text: Some(format!("{}: ", o)),
-                    ..Default::default()
+                .map(|m| {
+                    let serde_name = m.serde_name();
+                    CompletionItem {
+                        label: serde_name.clone(),
+                        kind: Some(CompletionItemKind::FIELD),
+                        insert_text: Some(format!("{}: ", serde_name)),
+                        documentation: Some(Documentation::String(m.doc.to_string())),
+                        detail: Some(format!("Default: {}", m.default_value)),
+                        ..Default::default()
+                    }
                 })
                 .collect();
             return Ok(Some(CompletionResponse::Array(items)));
@@ -95,35 +91,33 @@ pub async fn handle_completion(
             let mut typ_params = serde_json::to_value(&params).unwrap_or_default();
             let virtual_uri = crate::transform::to_virtual_uri(uri);
 
-            if let Some(doc_obj) = typ_params.pointer_mut("/textDocument") {
-                if let Some(uri_val) = doc_obj.get_mut("uri") {
-                    *uri_val = serde_json::to_value(virtual_uri).unwrap_or_default();
-                }
+            if let Some(doc_obj) = typ_params.pointer_mut("/textDocument")
+                && let Some(uri_val) = doc_obj.get_mut("uri")
+            {
+                *uri_val = serde_json::to_value(virtual_uri).unwrap_or_default();
             }
 
             if let Some(pos_obj) = typ_params.pointer_mut("/position") {
                 *pos_obj = serde_json::to_value(typ_pos).unwrap_or_default();
             }
 
-            if let Ok(resp) = proxy.send_request(lsp::COMPLETION, typ_params).await {
-                if let Some(res) = resp.get("result") {
-                    if let Ok(mut comp) = serde_json::from_value::<CompletionResponse>(res.clone())
-                    {
-                        match &mut comp {
-                            CompletionResponse::Array(items) => {
-                                for i in items {
-                                    map_item(i, &mapper);
-                                }
-                            }
-                            CompletionResponse::List(l) => {
-                                for i in &mut l.items {
-                                    map_item(i, &mapper);
-                                }
-                            }
+            if let Ok(resp) = proxy.send_request(lsp::COMPLETION, typ_params).await
+                && let Some(res) = resp.get("result")
+                && let Ok(mut comp) = serde_json::from_value::<CompletionResponse>(res.clone())
+            {
+                match &mut comp {
+                    CompletionResponse::Array(items) => {
+                        for i in items {
+                            map_item(i, &mapper);
                         }
-                        return Ok(Some(comp));
+                    }
+                    CompletionResponse::List(l) => {
+                        for i in &mut l.items {
+                            map_item(i, &mapper);
+                        }
                     }
                 }
+                return Ok(Some(comp));
             }
         }
     }

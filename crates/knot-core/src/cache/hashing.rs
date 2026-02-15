@@ -15,7 +15,7 @@ use std::path::PathBuf;
 ///
 /// Hash includes:
 /// - Code content
-/// - Serialized options (eval, echo, output, cache, graphics, etc.)
+/// - Serialized options (eval, show, cache, graphics, etc.)
 /// - Previous chunk hash (for sequential invalidation)
 /// - Dependencies hash (for file-based invalidation)
 pub fn get_chunk_hash(
@@ -40,7 +40,7 @@ pub fn get_chunk_hash(
 ///
 /// Hash includes:
 /// - Code content
-/// - Options (echo, eval, output, digits)
+/// - Options (show, eval, digits)
 /// - Previous inline expression hash (for sequential invalidation)
 pub fn get_inline_expr_hash(
     code: &str,

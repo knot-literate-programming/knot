@@ -16,14 +16,23 @@ use std::path::{Path, PathBuf};
 /// - Compiles main file to .typ
 /// - Injects chapter content directly into main .typ file (preserving imports scope)
 /// - Compiles final PDF with typst (using --root for imports)
-pub fn build_project() -> Result<()> {
+///
+/// # Arguments
+/// * `start_path` - Optional path to start searching for knot.toml.
+///   If None, uses current working directory.
+pub fn build_project(start_path: Option<&Path>) -> Result<()> {
     use knot_core::config::Config;
 
     info!("🔨 Building project...");
 
     // Step 1: Find project root by searching for knot.toml
-    let current_dir = std::env::current_dir().context("Failed to get current directory")?;
-    let (config, project_root) = Config::find_and_load(&current_dir)?;
+    let search_path = if let Some(path) = start_path {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().context("Failed to get current directory")?
+    };
+
+    let (config, project_root) = Config::find_and_load(&search_path)?;
 
     // Step 2: Get main file from knot.toml
     let main_file_name = config.document.main.ok_or_else(|| {
@@ -213,7 +222,7 @@ pub fn build_project() -> Result<()> {
 /// - Executes R chunks and caches results
 /// - Generates a hidden .typ file (dotfile convention)
 /// - Returns the path to the generated .typ file
-pub fn compile_file(file: &PathBuf, output_path: Option<&PathBuf>) -> Result<PathBuf> {
+pub fn compile_file(file: &Path, output_path: Option<&PathBuf>) -> Result<PathBuf> {
     info!("📄 Compiling {:?}...", file);
     let source = fs::read_to_string(file).context(format!("Failed to read file: {:?}", file))?;
 
@@ -290,43 +299,25 @@ fn fix_paths_in_typst(source: &str, typ_file: &Path) -> Result<String> {
 }
 
 /// Format a .knot file by normalizing all its chunks
-pub fn format_file(file_path: &PathBuf, check_only: bool) -> Result<bool> {
+pub fn format_file(file_path: &Path, check_only: bool) -> Result<bool> {
     info!("🧹 Formatting {:?}...", file_path);
     let original_text =
         fs::read_to_string(file_path).context(format!("Failed to read file: {:?}", file_path))?;
 
     let doc = Document::parse(original_text.clone()).context("Failed to parse document")?;
 
-    let mut formatted_text = String::with_capacity(original_text.len());
-    let mut last_pos = 0;
-
-    for chunk in &doc.chunks {
-        // Append text before chunk
-        if chunk.start_byte > last_pos {
-            formatted_text.push_str(&original_text[last_pos..chunk.start_byte]);
-        }
-
-        // Try to format code with external tools
-        let formatted_code =
-            knot_core::compiler::formatters::format_code(&chunk.code, &chunk.language).ok();
-
-        if formatted_code.is_none() {
+    let formatter = knot_core::CodeFormatter::new(None, None);
+    let formatted_text = doc.format(|_index, code, lang| {
+        let result = formatter.format_code(code, lang);
+        if result.is_err() {
             log::debug!(
-                "External formatter skipped or failed for {}",
-                chunk.language
+                "External formatter skipped or failed for {}: {:?}",
+                lang,
+                result.as_ref().err()
             );
         }
-
-        // Append formatted chunk (structural + optional code formatting)
-        formatted_text.push_str(&chunk.format(formatted_code.as_deref(), None));
-
-        last_pos = chunk.end_byte;
-    }
-
-    // Append remaining text
-    if last_pos < original_text.len() {
-        formatted_text.push_str(&original_text[last_pos..]);
-    }
+        result.ok()
+    });
 
     if original_text == formatted_text {
         info!("  ✓ Already formatted");

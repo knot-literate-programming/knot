@@ -12,11 +12,11 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::io::AsyncWriteExt;
 use tokio::process::{Child, ChildStdin, Command};
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio_util::bytes::{Buf, BufMut, BytesMut};
 use tokio_util::codec::{Decoder, Encoder, FramedRead};
 use tower_lsp::lsp_types::Url;
@@ -41,10 +41,10 @@ impl Decoder for LspCodec {
             let headers = std::str::from_utf8(&src_buf[..end_pos])?;
             let mut content_length = None;
             for line in headers.lines() {
-                if line.to_lowercase().starts_with("content-length:") {
-                    if let Some(len_str) = line.split(':').nth(1) {
-                        content_length = Some(len_str.trim().parse::<usize>()?);
-                    }
+                if line.to_lowercase().starts_with("content-length:")
+                    && let Some(len_str) = line.split(':').nth(1)
+                {
+                    content_length = Some(len_str.trim().parse::<usize>()?);
                 }
             }
 

@@ -45,30 +45,29 @@ struct KnotLanguageServer {
 #[tower_lsp::async_trait]
 impl LanguageServer for KnotLanguageServer {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
-        if let Some(folders) = params.workspace_folders {
-            if !folders.is_empty() {
-                let mut root = self.root_uri.write().await;
-                *root = Some(folders[0].uri.clone());
-            }
+        if let Some(folders) = params.workspace_folders
+            && !folders.is_empty()
+        {
+            let mut root = self.root_uri.write().await;
+            *root = Some(folders[0].uri.clone());
         }
 
         // Read binary paths sent by the client (VS Code extension).
         if let Some(opts) = params.initialization_options {
-            if let Some(air) = opts.get("airPath").and_then(|v| v.as_str()) {
-                if !air.is_empty() && air != "air" {
-                    *self.state.air_path_override.write().await = Some(PathBuf::from(air));
-                }
+            if let Some(air) = opts.get("airPath").and_then(|v| v.as_str())
+                && !air.is_empty() && air != "air"
+            {
+                *self.state.air_path_override.write().await = Some(PathBuf::from(air));
             }
-            if let Some(ruff) = opts.get("ruffPath").and_then(|v| v.as_str()) {
-                if !ruff.is_empty() && ruff != "ruff" {
-                    *self.state.ruff_path_override.write().await = Some(PathBuf::from(ruff));
-                }
+            if let Some(ruff) = opts.get("ruffPath").and_then(|v| v.as_str())
+                && !ruff.is_empty() && ruff != "ruff"
+            {
+                *self.state.ruff_path_override.write().await = Some(PathBuf::from(ruff));
             }
-            if let Some(tinymist) = opts.get("tinymistPath").and_then(|v| v.as_str()) {
-                if !tinymist.is_empty() {
-                    *self.state.tinymist_path_override.write().await =
-                        Some(PathBuf::from(tinymist));
-                }
+            if let Some(tinymist) = opts.get("tinymistPath").and_then(|v| v.as_str())
+                && !tinymist.is_empty()
+            {
+                *self.state.tinymist_path_override.write().await = Some(PathBuf::from(tinymist));
             }
         }
 
@@ -168,7 +167,7 @@ impl LanguageServer for KnotLanguageServer {
     }
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
-        handle_formatting(&self.state, params).await
+        handle_formatting(&self.state, &self.client, params).await
     }
 
     async fn document_symbol(
@@ -191,17 +190,16 @@ impl LanguageServer for KnotLanguageServer {
         &self,
         params: ExecuteCommandParams,
     ) -> Result<Option<serde_json::Value>> {
-        if params.command == "knot.cleanProject" {
-            if let Some(arg) = params.arguments.first() {
-                let uri_str = arg.as_str().map(|s| s.to_string());
-                if let Some(s) = uri_str {
-                    if let Ok(uri) = Url::parse(&s).or_else(|_| Url::from_file_path(&s)) {
-                        if let Ok(path) = uri.to_file_path() {
-                            let _ = knot_core::clean_project(Some(&path));
-                            return Ok(Some(serde_json::json!({"status": "success"})));
-                        }
-                    }
-                }
+        if params.command == "knot.cleanProject"
+            && let Some(arg) = params.arguments.first()
+        {
+            let uri_str = arg.as_str().map(|s| s.to_string());
+            if let Some(s) = uri_str
+                && let Ok(uri) = Url::parse(&s).or_else(|_| Url::from_file_path(&s))
+                && let Ok(path) = uri.to_file_path()
+            {
+                let _ = knot_core::clean_project(Some(&path));
+                return Ok(Some(serde_json::json!({"status": "success"})));
             }
         }
         Ok(None)
@@ -274,8 +272,10 @@ impl KnotLanguageServer {
                     version: 1,
                     mapper,
                     opened_in_tinymist: false,
+                    virtual_version: 0,
                     knot_diagnostics,
                     tinymist_diagnostics: Vec::new(),
+                    formatting_error_notified: false,
                 },
             );
         }
@@ -397,60 +397,55 @@ impl KnotLanguageServer {
         let snapshot_path = cache.get_snapshot_path(&last_chunk.hash, extension);
         let chunk_index = last_chunk.index;
 
-        if let Some(manager) = self.state.executors.write().await.get_mut(uri) {
-            if let Ok(executor) = manager.get_executor(language) {
-                if executor.load_session(&snapshot_path).is_ok() {
-                    self.state
-                        .loaded_snapshot_hash
-                        .write()
-                        .await
-                        .insert(reload_key, last_chunk.hash.clone());
-                    self.client
-                        .log_message(
-                            MessageType::INFO,
-                            format!(
-                                "Synced {} session (chunk {})",
-                                language.to_uppercase(),
-                                chunk_index
-                            ),
-                        )
-                        .await;
-                }
-            }
+        if let Some(manager) = self.state.executors.write().await.get_mut(uri)
+            && let Ok(executor) = manager.get_executor(language)
+            && executor.load_session(&snapshot_path).is_ok()
+        {
+            self.state
+                .loaded_snapshot_hash
+                .write()
+                .await
+                .insert(reload_key, last_chunk.hash.clone());
+            self.client
+                .log_message(
+                    MessageType::INFO,
+                    format!(
+                        "Synced {} session (chunk {})",
+                        language.to_uppercase(),
+                        chunk_index
+                    ),
+                )
+                .await;
         }
     }
 
     async fn handle_tinymist_notification(&self, msg: serde_json::Value) {
-        if let Some(method) = msg.get("method").and_then(|m| m.as_str()) {
-            if method == lsp::PUBLISH_DIAGNOSTICS {
-                if let Some(params) = msg.get("params") {
-                    if let (Some(uri_str), Some(diagnostics_val)) = (
-                        params.get("uri").and_then(|u| u.as_str()),
-                        params.get("diagnostics"),
+        if let Some(method) = msg.get("method").and_then(|m| m.as_str())
+            && method == lsp::PUBLISH_DIAGNOSTICS
+            && let Some(params) = msg.get("params")
+            && let (Some(uri_str), Some(diagnostics_val)) = (
+                params.get("uri").and_then(|u| u.as_str()),
+                params.get("diagnostics"),
+            )
+            && let (Ok(virtual_uri), Ok(mut diagnostics)) = (
+                Url::parse(uri_str),
+                serde_json::from_value::<Vec<Diagnostic>>(diagnostics_val.clone()),
+            ) {
+            let uri = self.resolve_virtual_uri(&virtual_uri);
+            let mut docs = self.state.documents.write().await;
+            if let Some(doc) = docs.get_mut(&uri) {
+                for d in &mut diagnostics {
+                    if let (Some(start), Some(end)) = (
+                        doc.mapper.typ_to_knot_position(d.range.start),
+                        doc.mapper.typ_to_knot_position(d.range.end),
                     ) {
-                        if let (Ok(virtual_uri), Ok(mut diagnostics)) = (
-                            Url::parse(uri_str),
-                            serde_json::from_value::<Vec<Diagnostic>>(diagnostics_val.clone()),
-                        ) {
-                            let uri = self.resolve_virtual_uri(&virtual_uri);
-                            let mut docs = self.state.documents.write().await;
-                            if let Some(doc) = docs.get_mut(&uri) {
-                                for d in &mut diagnostics {
-                                    if let (Some(start), Some(end)) = (
-                                        doc.mapper.typ_to_knot_position(d.range.start),
-                                        doc.mapper.typ_to_knot_position(d.range.end),
-                                    ) {
-                                        d.range = Range { start, end };
-                                    }
-                                }
-                                doc.tinymist_diagnostics = diagnostics;
-                            }
-                            drop(docs);
-                            self.publish_combined_diagnostics(&uri).await;
-                        }
+                        d.range = Range { start, end };
                     }
                 }
+                doc.tinymist_diagnostics = diagnostics;
             }
+            drop(docs);
+            self.publish_combined_diagnostics(&uri).await;
         }
     }
 }

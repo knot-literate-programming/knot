@@ -29,7 +29,7 @@ Entourer chaque chunk transformé dans le `.typ` compilé avec des commentaires 
 
 ```typst
 // #BEGIN-CHUNK chunk-1-abc123
-#code-chunk(lang: "r", echo: true, input: [...], output: [...])
+#code-chunk(lang: "r", show: both, input: [...], output: [...])
 // #END-CHUNK chunk-1-abc123
 ```
 

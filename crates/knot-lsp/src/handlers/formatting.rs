@@ -6,12 +6,13 @@ use tower_lsp::lsp_types::*;
 
 pub async fn handle_formatting(
     state: &ServerState,
+    client: &tower_lsp::Client,
     params: DocumentFormattingParams,
 ) -> Result<Option<Vec<TextEdit>>> {
     let uri = &params.text_document.uri;
 
     // 1. Get current document state
-    let (text, version) = {
+    let (text, _version) = {
         let docs = state.documents.read().await;
         match docs.get(uri) {
             Some(doc) => (doc.text.clone(), doc.version),
@@ -29,41 +30,60 @@ pub async fn handle_formatting(
     };
 
     // --- PHASE A: Internal Chunk Formatting (Air/Ruff) ---
-    let mut clean_knot_text = String::with_capacity(text.len());
-    let mut last_pos = 0;
+    // Perform code formatting for each chunk asynchronously before document-wide normalization.
+    let mut formatted_chunks = std::collections::HashMap::new();
+    let fmt = state.formatter.read().await.clone();
 
-    for chunk in &doc.chunks {
-        // Append text before chunk
-        if chunk.start_byte > last_pos {
-            clean_knot_text.push_str(&text[last_pos..chunk.start_byte]);
+    if let Some(f) = fmt {
+        // Collect all chunks that need formatting
+        let mut tasks = Vec::new();
+        for (i, chunk) in doc.chunks.iter().enumerate() {
+            let f_inner = f.clone();
+            let code = chunk.code.clone();
+            let lang = chunk.language.clone();
+            tasks.push(tokio::task::spawn_blocking(move || {
+                (i, lang.clone(), f_inner.format_code(&code, &lang))
+            }));
         }
 
-        // Format code with external tools (Air for R, Ruff for Python).
-        // CodeFormatter is sync; wrap in spawn_blocking to avoid blocking the runtime.
-        let formatted_code = {
-            let fmt = state.formatter.read().await;
-            if let Some(f) = fmt.as_ref() {
-                let f = f.clone();
-                let code = chunk.code.clone();
-                let lang = chunk.language.clone();
-                tokio::task::spawn_blocking(move || f.format_code(&code, &lang))
-                    .await
-                    .ok()
-                    .and_then(|r| r.ok())
-            } else {
-                None
+        // Wait for all formatting tasks to complete
+        for task in tasks {
+            if let Ok((index, lang, result)) = task.await {
+                match result {
+                    Ok(formatted) => {
+                        formatted_chunks.insert(index, formatted);
+                    }
+                    Err(e) => {
+                        log::debug!(
+                            "External formatter failed for chunk {} ({}): {:?}",
+                            index,
+                            lang,
+                            e
+                        );
+                        // Notify user once per session for this document
+                        let mut docs = state.documents.write().await;
+                        if let Some(doc_state) = docs.get_mut(uri)
+                            && !doc_state.formatting_error_notified
+                        {
+                            doc_state.formatting_error_notified = true;
+                            let msg = format!(
+                                    "Formatting failed for {} chunk: {}. Structural normalization will still be applied.",
+                                    lang.to_uppercase(),
+                                    e
+                                );
+                            let client_inner = client.clone();
+                            tokio::spawn(async move {
+                                let _ = client_inner.show_message(MessageType::WARNING, msg).await;
+                            });
+                        }
+                    }
+                }
             }
-        };
-
-        // Append formatted chunk (structural + code)
-        clean_knot_text.push_str(&chunk.format(formatted_code.as_deref(), None));
-
-        last_pos = chunk.end_byte;
+        }
     }
 
-    if last_pos < text.len() {
-        clean_knot_text.push_str(&text[last_pos..]);
-    }
+    // Now perform structural normalization using the pre-formatted results (pure synchronous logic)
+    let clean_knot_text = doc.format(|index, _code, _lang| formatted_chunks.get(&index).cloned());
 
     // --- PHASE B: Global Typst Formatting (Tinymist) ---
     // Generate the structured mask for Tinymist
@@ -73,21 +93,48 @@ pub async fn handle_formatting(
     let formatted_typst = {
         let mut tinymist_guard = state.tinymist.write().await;
         if let Some(proxy) = tinymist_guard.as_mut() {
-            // First, update Tinymist with the current mask
-            if let Err(e) = proxy
-                .send_notification(
-                    lsp::DID_OPEN,
-                    serde_json::json!({
-                        "textDocument": {
-                            "uri": virtual_uri,
-                            "languageId": "typst",
-                            "version": version + 1000, // Use a high version to avoid conflicts
-                            "text": typst_mask
-                        }
-                    }),
-                )
-                .await
-            {
+            // Get and increment virtual version
+            let (v_version, already_opened) = {
+                let mut docs = state.documents.write().await;
+                if let Some(doc) = docs.get_mut(uri) {
+                    doc.virtual_version += 1;
+                    (doc.virtual_version, doc.virtual_version > 1)
+                } else {
+                    (1, false)
+                }
+            };
+
+            // Sync with Tinymist using proper method
+            let sync_result = if !already_opened {
+                proxy
+                    .send_notification(
+                        lsp::DID_OPEN,
+                        serde_json::json!({
+                            "textDocument": {
+                                "uri": virtual_uri,
+                                "languageId": "typst",
+                                "version": v_version,
+                                "text": typst_mask
+                            }
+                        }),
+                    )
+                    .await
+            } else {
+                proxy
+                    .send_notification(
+                        lsp::DID_CHANGE,
+                        serde_json::json!({
+                            "textDocument": {
+                                "uri": virtual_uri,
+                                "version": v_version
+                            },
+                            "contentChanges": [{ "text": typst_mask }]
+                        }),
+                    )
+                    .await
+            };
+
+            if let Err(e) = sync_result {
                 log::warn!("formatting: failed to sync virtual document with Tinymist: {e}");
             }
 
@@ -320,7 +367,9 @@ fn reconstruct_knot_document(formatted_typst: &str, clean_knot: &str) -> String 
         let mut prev_end = 0usize;
         for elem in &elements {
             if elem.start < prev_end || elem.end < elem.start {
-                log::warn!("Formatting mismatch: overlapping element positions. Falling back to clean Knot.");
+                log::warn!(
+                    "Formatting mismatch: overlapping element positions. Falling back to clean Knot."
+                );
                 return clean_knot.to_string();
             }
             prev_end = elem.end;
@@ -398,9 +447,8 @@ pub async fn handle_format_chunk(
     if let Some(chunk) = target_chunk {
         // 3. Format the chunk
         let formatted_code = {
-            let fmt = state.formatter.read().await;
-            if let Some(f) = fmt.as_ref() {
-                let f = f.clone();
+            let fmt = state.formatter.read().await.clone();
+            if let Some(f) = fmt {
                 let code = chunk.code.clone();
                 let lang = chunk.language.clone();
                 tokio::task::spawn_blocking(move || f.format_code(&code, &lang))
@@ -467,8 +515,10 @@ mod tests {
                     version: 1,
                     mapper,
                     opened_in_tinymist: false,
+                    virtual_version: 0,
                     knot_diagnostics: Vec::new(),
                     tinymist_diagnostics: Vec::new(),
+                    formatting_error_notified: false,
                 },
             );
         }
@@ -649,10 +699,15 @@ mod tests {
         // code is unchanged but structural normalization still applies.
         let text = "```{r   my-chunk   }\nx<-1\n```\n";
         let (state, uri) = create_test_state("file:///test.knot", text, false).await;
-        // state.formatter is None
+        let (service, _) = tower_lsp::LspService::new(|client| crate::KnotLanguageServer {
+            client,
+            state: state.clone(),
+            root_uri: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        });
+        let client = service.inner().client.clone();
 
         let params = create_formatting_params(&uri);
-        let result = handle_formatting(&state, params).await.unwrap();
+        let result = handle_formatting(&state, &client, params).await.unwrap();
 
         // Structural normalization (chunk header) must still happen
         assert!(result.is_some());
@@ -674,10 +729,15 @@ mod tests {
         // Phase A (code formatting) still runs and produces a result.
         let text = "```{r   my-chunk   }\nprint(42)\n```\n";
         let (state, uri) = create_test_state("file:///test.knot", text, false).await;
-        // state.tinymist is None — Phase B is a no-op
+        let (service, _) = tower_lsp::LspService::new(|client| crate::KnotLanguageServer {
+            client,
+            state: state.clone(),
+            root_uri: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        });
+        let client = service.inner().client.clone();
 
         let params = create_formatting_params(&uri);
-        let result = handle_formatting(&state, params).await.unwrap();
+        let result = handle_formatting(&state, &client, params).await.unwrap();
 
         // Should still normalize structure (Phase A)
         assert!(result.is_some());
@@ -693,9 +753,15 @@ mod tests {
     async fn test_formatting_document_not_found() {
         let state = ServerState::new();
         let uri = Url::parse("file:///nonexistent.knot").unwrap();
+        let (service, _) = tower_lsp::LspService::new(|client| crate::KnotLanguageServer {
+            client,
+            state: state.clone(),
+            root_uri: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        });
+        let client = service.inner().client.clone();
 
         let params = create_formatting_params(&uri);
-        let result = handle_formatting(&state, params).await.unwrap();
+        let result = handle_formatting(&state, &client, params).await.unwrap();
 
         assert!(result.is_none());
     }
@@ -705,9 +771,15 @@ mod tests {
         let text = "This is not valid knot syntax ```{unclosed";
 
         let (state, uri) = create_test_state("file:///test.knot", text, false).await;
+        let (service, _) = tower_lsp::LspService::new(|client| crate::KnotLanguageServer {
+            client,
+            state: state.clone(),
+            root_uri: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        });
+        let client = service.inner().client.clone();
 
         let params = create_formatting_params(&uri);
-        let result = handle_formatting(&state, params).await.unwrap();
+        let result = handle_formatting(&state, &client, params).await.unwrap();
 
         assert!(result.is_none());
     }
@@ -726,8 +798,15 @@ print(42)
 ```"#;
 
         let (state, uri) = create_test_state("file:///test.knot", text, false).await;
+        let (service, _) = tower_lsp::LspService::new(|client| crate::KnotLanguageServer {
+            client,
+            state: state.clone(),
+            root_uri: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        });
+        let client = service.inner().client.clone();
+
         let params = create_formatting_params(&uri);
-        let result = handle_formatting(&state, params).await.unwrap();
+        let result = handle_formatting(&state, &client, params).await.unwrap();
 
         assert!(result.is_some());
         let edits = result.unwrap();

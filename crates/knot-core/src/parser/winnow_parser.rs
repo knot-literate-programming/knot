@@ -428,7 +428,7 @@ mod tests {
 
     #[test]
     fn test_indented_chunk_with_options_code_offsets() {
-        let content = "  ```{r}\n  #| echo: false\n  x <- 1\n  ```\n";
+        let content = "  ```{r}\n  #| show: output\n  x <- 1\n  ```\n";
         let doc = parse_document(content);
         assert_eq!(doc.chunks.len(), 1);
         let chunk = &doc.chunks[0];

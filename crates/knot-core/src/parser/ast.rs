@@ -528,4 +528,66 @@ impl Document {
         let doc = super::winnow_parser::parse_document(&source);
         Ok(doc)
     }
+
+    /// Format the document by normalizing all its chunks and inlines.
+    ///
+    /// # Arguments
+    /// * `code_formatter` - Optional closure to format code within chunks.
+    ///   Takes (index, code, language) and returns formatted code.
+    pub fn format<F>(&self, mut code_formatter: F) -> String
+    where
+        F: FnMut(usize, &str, &str) -> Option<String>,
+    {
+        let mut formatted_text = String::with_capacity(self.source.len());
+        let mut last_pos = 0;
+
+        // 1. Build a sorted list of all nodes
+        #[derive(Debug)]
+        enum Node<'a> {
+            Chunk(usize, &'a Chunk),
+            Inline(&'a InlineExpr),
+        }
+
+        let mut nodes = Vec::new();
+        for (i, chunk) in self.chunks.iter().enumerate() {
+            nodes.push((chunk.start_byte, Node::Chunk(i, chunk)));
+        }
+        for inline in &self.inline_exprs {
+            nodes.push((inline.start, Node::Inline(inline)));
+        }
+        nodes.sort_by_key(|(start, _)| *start);
+
+        // 2. Iterate and reconstruct
+        for (start, node) in nodes {
+            // Append text before node
+            if start > last_pos {
+                formatted_text.push_str(&self.source[last_pos..start]);
+            }
+
+            match node {
+                Node::Chunk(i, chunk) => {
+                    let formatted_code = code_formatter(i, &chunk.code, &chunk.language);
+                    formatted_text.push_str(&chunk.format(formatted_code.as_deref(), None));
+                    last_pos = chunk.end_byte;
+                }
+                Node::Inline(inline) => {
+                    // Normalize inline: ` {lang} code ` -> ` {lang} code `
+                    // (keeping it simple for now, can be improved)
+                    formatted_text.push_str(&format!(
+                        "`{{{}}} {}`",
+                        inline.language,
+                        inline.code.trim()
+                    ));
+                    last_pos = inline.end;
+                }
+            }
+        }
+
+        // 3. Append remaining text
+        if last_pos < self.source.len() {
+            formatted_text.push_str(&self.source[last_pos..]);
+        }
+
+        formatted_text
+    }
 }

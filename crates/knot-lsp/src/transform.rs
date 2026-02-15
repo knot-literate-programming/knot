@@ -129,7 +129,7 @@ mod tests {
 
     #[test]
     fn test_transform_indented_chunk_preserves_lines_and_fences() {
-        let input = "- item\n  ```{r}\n  #| echo: false\n  x <- 1\n  ```\nafter";
+        let input = "- item\n  ```{r}\n  #| show: output\n  x <- 1\n  ```\nafter";
         let output_typ = transform_to_typst(input);
 
         // Line count must be identical
