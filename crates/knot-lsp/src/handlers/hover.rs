@@ -1,4 +1,5 @@
 use super::get_token_at_pos;
+use crate::lsp_methods::text_document as lsp;
 use crate::state::ServerState;
 use knot_core::parser::parse_document;
 use tower_lsp::jsonrpc::Result;
@@ -83,7 +84,7 @@ pub async fn handle_hover(state: &ServerState, params: HoverParams) -> Result<Op
             let virtual_uri = crate::transform::to_virtual_uri(uri);
             let params =
                 serde_json::json!({ "textDocument": { "uri": virtual_uri }, "position": typ_pos });
-            if let Ok(response) = proxy.send_request("textDocument/hover", params).await {
+            if let Ok(response) = proxy.send_request(lsp::HOVER, params).await {
                 if let Some(result) = response.get("result") {
                     if let Ok(mut hover) = serde_json::from_value::<Hover>(result.clone()) {
                         if let Some(range) = &mut hover.range {

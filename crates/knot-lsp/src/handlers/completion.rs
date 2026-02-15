@@ -1,4 +1,5 @@
 use super::get_token_at_pos;
+use crate::lsp_methods::text_document as lsp;
 use crate::state::ServerState;
 use knot_core::parser::parse_document;
 use tower_lsp::jsonrpc::Result;
@@ -104,10 +105,7 @@ pub async fn handle_completion(
                 *pos_obj = serde_json::to_value(typ_pos).unwrap_or_default();
             }
 
-            if let Ok(resp) = proxy
-                .send_request("textDocument/completion", typ_params)
-                .await
-            {
+            if let Ok(resp) = proxy.send_request(lsp::COMPLETION, typ_params).await {
                 if let Some(res) = resp.get("result") {
                     if let Ok(mut comp) = serde_json::from_value::<CompletionResponse>(res.clone())
                     {

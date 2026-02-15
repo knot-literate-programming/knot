@@ -1,3 +1,4 @@
+use crate::lsp_methods::text_document as lsp;
 use crate::state::ServerState;
 use knot_core::Document;
 use tower_lsp::jsonrpc::Result;
@@ -75,7 +76,7 @@ pub async fn handle_formatting(
             // First, update Tinymist with the current mask
             if let Err(e) = proxy
                 .send_notification(
-                    "textDocument/didOpen",
+                    lsp::DID_OPEN,
                     serde_json::json!({
                         "textDocument": {
                             "uri": virtual_uri,
@@ -93,7 +94,7 @@ pub async fn handle_formatting(
             // Request formatting
             let resp = proxy
                 .send_request(
-                    "textDocument/formatting",
+                    lsp::FORMATTING,
                     serde_json::json!({
                         "textDocument": { "uri": virtual_uri },
                         "options": params.options

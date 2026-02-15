@@ -11,6 +11,7 @@ use tower_lsp::{Client, LanguageServer, LspService, Server};
 
 mod diagnostics;
 mod handlers;
+mod lsp_methods;
 mod path_resolver;
 mod position_mapper;
 mod proxy;
@@ -22,6 +23,7 @@ use diagnostics::get_diagnostics;
 use handlers::completion::handle_completion;
 use handlers::formatting::{handle_format_chunk, handle_formatting};
 use handlers::hover::handle_hover;
+use lsp_methods::text_document as lsp;
 use position_mapper::PositionMapper;
 use proxy::TinymistProxy;
 use state::ServerState;
@@ -133,7 +135,7 @@ impl LanguageServer for KnotLanguageServer {
         self.update_document(&uri, &text).await;
         self.publish_combined_diagnostics(&uri).await;
         self.sync_with_cache(&uri).await;
-        self.forward_to_tinymist("textDocument/didOpen", &uri).await;
+        self.forward_to_tinymist(lsp::DID_OPEN, &uri).await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
@@ -142,8 +144,7 @@ impl LanguageServer for KnotLanguageServer {
             let text = change.text.clone();
             self.update_document(&uri, &text).await;
             self.publish_combined_diagnostics(&uri).await;
-            self.forward_to_tinymist("textDocument/didChange", &uri)
-                .await;
+            self.forward_to_tinymist(lsp::DID_CHANGE, &uri).await;
         }
     }
 
@@ -155,7 +156,7 @@ impl LanguageServer for KnotLanguageServer {
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             this.sync_with_cache(&uri_for_cache).await;
         });
-        self.forward_to_tinymist("textDocument/didSave", &uri).await;
+        self.forward_to_tinymist(lsp::DID_SAVE, &uri).await;
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
@@ -315,11 +316,7 @@ impl KnotLanguageServer {
             serde_json::json!({ "textDocument": { "uri": virtual_uri, "version": version }, "contentChanges": [{ "text": transform_to_typst(&content) }] })
         };
 
-        let actual_method = if !is_opened {
-            "textDocument/didOpen"
-        } else {
-            method
-        };
+        let actual_method = if !is_opened { lsp::DID_OPEN } else { method };
 
         // 2. Send to Tinymist (no state locks held)
         let send_result = {
@@ -345,7 +342,7 @@ impl KnotLanguageServer {
             if let Some(proxy) = tinymist_guard.as_mut() {
                 let _ = proxy
                     .send_request(
-                        "textDocument/documentSymbol",
+                        lsp::DOCUMENT_SYMBOL,
                         serde_json::json!({ "textDocument": { "uri": virtual_uri } }),
                     )
                     .await;
@@ -425,7 +422,7 @@ impl KnotLanguageServer {
 
     async fn handle_tinymist_notification(&self, msg: serde_json::Value) {
         if let Some(method) = msg.get("method").and_then(|m| m.as_str()) {
-            if method == "textDocument/publishDiagnostics" {
+            if method == lsp::PUBLISH_DIAGNOSTICS {
                 if let Some(params) = msg.get("params") {
                     if let (Some(uri_str), Some(diagnostics_val)) = (
                         params.get("uri").and_then(|u| u.as_str()),

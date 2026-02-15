@@ -289,6 +289,7 @@ impl TinymistProxy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lsp_methods::text_document as lsp;
 
     #[tokio::test]
     #[ignore] // Only run if tinymist is installed
@@ -319,7 +320,7 @@ mod tests {
         // Send a didOpen notification
         let result = proxy
             .send_notification(
-                "textDocument/didOpen",
+                lsp::DID_OPEN,
                 serde_json::json!({
                     "textDocument": {
                         "uri": "file:///test.typ",
