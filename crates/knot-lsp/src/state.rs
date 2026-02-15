@@ -1,7 +1,7 @@
-use crate::formatter::CodeFormatter;
 use crate::position_mapper::PositionMapper;
 use crate::proxy::TinymistProxy;
 use knot_core::executors::ExecutorManager;
+use knot_core::CodeFormatter;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;

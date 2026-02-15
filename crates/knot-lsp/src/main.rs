@@ -10,7 +10,6 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
 mod diagnostics;
-mod formatter;
 mod handlers;
 mod path_resolver;
 mod position_mapper;
@@ -104,7 +103,7 @@ impl LanguageServer for KnotLanguageServer {
         let air_path = self.state.air_path_override.read().await.clone();
         let ruff_path = self.state.ruff_path_override.read().await.clone();
         *self.state.formatter.write().await =
-            Some(formatter::CodeFormatter::new(air_path, ruff_path));
+            Some(knot_core::CodeFormatter::new(air_path, ruff_path));
         // Spawn tinymist initialization in background to avoid blocking the LSP message loop
         let this = self.clone_for_task();
         let root_uri = self.root_uri.read().await.clone();

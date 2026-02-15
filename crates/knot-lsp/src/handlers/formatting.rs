@@ -34,11 +34,18 @@ pub async fn handle_formatting(
             clean_knot_text.push_str(&text[last_pos..chunk.start_byte]);
         }
 
-        // Format code with external tools (Air for R, Ruff for Python)
+        // Format code with external tools (Air for R, Ruff for Python).
+        // CodeFormatter is sync; wrap in spawn_blocking to avoid blocking the runtime.
         let formatted_code = {
             let fmt = state.formatter.read().await;
             if let Some(f) = fmt.as_ref() {
-                f.format_code(&chunk.code, &chunk.language).await.ok()
+                let f = f.clone();
+                let code = chunk.code.clone();
+                let lang = chunk.language.clone();
+                tokio::task::spawn_blocking(move || f.format_code(&code, &lang))
+                    .await
+                    .ok()
+                    .and_then(|r| r.ok())
             } else {
                 None
             }
@@ -357,7 +364,13 @@ pub async fn handle_format_chunk(
         let formatted_code = {
             let fmt = state.formatter.read().await;
             if let Some(f) = fmt.as_ref() {
-                f.format_code(&chunk.code, &chunk.language).await.ok()
+                let f = f.clone();
+                let code = chunk.code.clone();
+                let lang = chunk.language.clone();
+                tokio::task::spawn_blocking(move || f.format_code(&code, &lang))
+                    .await
+                    .ok()
+                    .and_then(|r| r.ok())
             } else {
                 None
             }
@@ -397,9 +410,9 @@ pub async fn handle_format_chunk(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::formatter::CodeFormatter;
     use crate::position_mapper::PositionMapper;
     use crate::state::ServerState;
+    use knot_core::CodeFormatter;
 
     async fn create_test_state(uri: &str, text: &str, with_formatter: bool) -> (ServerState, Url) {
         let state = ServerState::new();
