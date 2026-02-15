@@ -261,11 +261,12 @@ Un peu de texte pour vérifier si tout se passe bien !
 1 + 1
 ```
 
-       ```{r}
+```{r}
 #| eval: true
+#| show: code
 
-{x <- 1
+{
+  x <- 1
 }
 1:3 + 1:2
-
-  ```
+```

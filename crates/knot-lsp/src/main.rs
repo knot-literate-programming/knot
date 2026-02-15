@@ -81,6 +81,7 @@ impl LanguageServer for KnotLanguageServer {
                         ".".to_string(),
                         "$".to_string(),
                         ":".to_string(),
+                        "|".to_string(),
                     ]),
                     ..Default::default()
                 }),

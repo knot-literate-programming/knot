@@ -35,9 +35,54 @@ pub async fn handle_completion(
         }
 
         let lines: Vec<&str> = text.lines().collect();
-        let trimmed = lines.get(line).map(|l| l.trim_start()).unwrap_or("");
+        let line_text = lines.get(line).unwrap_or(&"");
+        
+        // Check if the current position is on an option line (#|)
+        let prefix_part = if (pos.character as usize) <= line_text.encode_utf16().count() {
+            let mut utf16_count = 0;
+            let mut byte_idx = 0;
+            for c in line_text.chars() {
+                if utf16_count >= pos.character as usize { break; }
+                utf16_count += c.len_utf16();
+                byte_idx += c.len_utf8();
+            }
+            &line_text[..byte_idx]
+        } else {
+            line_text
+        };
 
-        if trimmed.starts_with("#|") {
+        if prefix_part.trim_start().starts_with("#|") {
+            // Check if we are after a colon to suggest values
+            if let Some(colon_pos) = prefix_part.find(':') {
+                let option_name = prefix_part["#|".len()..colon_pos].trim();
+                let values = match option_name {
+                    "show" => vec!["both", "code", "output", "none"],
+                    "layout" => vec!["horizontal", "vertical"],
+                    "fig-format" => vec!["svg", "png"],
+                    "warnings-visibility" => vec!["below", "inline", "none"],
+                    "eval" | "cache" => vec!["true", "false"],
+                    _ => vec![],
+                };
+
+                if !values.is_empty() {
+                    // Detect if we need to insert a space (if the user typed ":" but not " ")
+                    let needs_space = !prefix_part.ends_with(": ") && prefix_part.ends_with(':');
+                    
+                    let items = values
+                        .into_iter()
+                        .map(|v| CompletionItem {
+                            label: v.to_string(),
+                            kind: Some(CompletionItemKind::ENUM_MEMBER),
+                            // Insert a space if needed
+                            insert_text: Some(if needs_space { format!(" {}", v) } else { v.to_string() }),
+                            ..Default::default()
+                        })
+                        .collect();
+                    return Ok(Some(CompletionResponse::Array(items)));
+                }
+            }
+
+            // Otherwise suggest option names
             let metadata = knot_core::parser::ChunkOptions::option_metadata();
             let items = metadata
                 .into_iter()
@@ -49,6 +94,13 @@ pub async fn handle_completion(
                         insert_text: Some(format!("{}: ", serde_name)),
                         documentation: Some(Documentation::String(m.doc.to_string())),
                         detail: Some(format!("Default: {}", m.default_value)),
+                        // Trigger completion again immediately after inserting the name and ":"
+                        // to show the possible values.
+                        command: Some(Command {
+                            title: "triggerSuggest".to_string(),
+                            command: "editor.action.triggerSuggest".to_string(),
+                            arguments: None,
+                        }),
                         ..Default::default()
                     }
                 })
