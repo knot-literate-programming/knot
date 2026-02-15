@@ -28,12 +28,12 @@ pub struct DocumentState {
 pub struct ServerState {
     /// Per-document state
     pub documents: Arc<RwLock<HashMap<Url, DocumentState>>>,
-    
+
     /// Global services and shared resources
     pub tinymist: Arc<RwLock<Option<TinymistProxy>>>,
     pub executors: Arc<RwLock<HashMap<Url, ExecutorManager>>>,
     pub formatter: Arc<RwLock<Option<AirFormatter>>>,
-    
+
     /// Global configuration and caches
     pub air_path_override: Arc<RwLock<Option<PathBuf>>>,
     pub tinymist_path_override: Arc<RwLock<Option<PathBuf>>>,

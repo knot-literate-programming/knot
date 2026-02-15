@@ -56,8 +56,13 @@ pub fn dedent(text: &str) -> (String, String) {
         }
     }
 
-    (result.join("
-"), indent_str)
+    (
+        result.join(
+            "
+",
+        ),
+        indent_str,
+    )
 }
 
 /// Adds the given indentation prefix to each line of the text.
@@ -76,12 +81,12 @@ pub fn indent(text: &str, prefix: &str) -> String {
         }
         result.push_str(line);
     }
-    
+
     // Preserve trailing newline if present
     if text.ends_with('\n') {
         result.push('\n');
     }
-    
+
     result
 }
 
@@ -96,9 +101,12 @@ mod tests {
   line 3";
         let (output, indent) = dedent(input);
         assert_eq!(indent, "  ");
-        assert_eq!(output, "line 1
+        assert_eq!(
+            output,
+            "line 1
   line 2
-line 3");
+line 3"
+        );
     }
 
     #[test]
@@ -115,7 +123,10 @@ line 3");
         let input = "line 1
   line 2";
         let output = indent(input, "  ");
-        assert_eq!(output, "  line 1
-    line 2");
+        assert_eq!(
+            output,
+            "  line 1
+    line 2"
+        );
     }
 }

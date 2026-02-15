@@ -246,7 +246,7 @@ impl KnotLanguageServer {
         let typ_text = transform_to_typst(text);
         let mapper = PositionMapper::new(text, &typ_text);
         let knot_diagnostics = get_diagnostics(uri, text);
-        
+
         let mut docs = self.state.documents.write().await;
         if let Some(doc) = docs.get_mut(uri) {
             doc.text = text.to_string();
@@ -254,14 +254,17 @@ impl KnotLanguageServer {
             doc.knot_diagnostics = knot_diagnostics;
             doc.version += 1;
         } else {
-            docs.insert(uri.clone(), crate::state::DocumentState {
-                text: text.to_string(),
-                version: 1,
-                mapper,
-                opened_in_tinymist: false,
-                knot_diagnostics,
-                tinymist_diagnostics: Vec::new(),
-            });
+            docs.insert(
+                uri.clone(),
+                crate::state::DocumentState {
+                    text: text.to_string(),
+                    version: 1,
+                    mapper,
+                    opened_in_tinymist: false,
+                    knot_diagnostics,
+                    tinymist_diagnostics: Vec::new(),
+                },
+            );
         }
     }
 
@@ -283,11 +286,8 @@ impl KnotLanguageServer {
         // 1. Prepare data under a short-lived lock
         let sync_data = {
             let docs = self.state.documents.read().await;
-            docs.get(uri).map(|doc| (
-                doc.text.clone(),
-                doc.version,
-                doc.opened_in_tinymist,
-            ))
+            docs.get(uri)
+                .map(|doc| (doc.text.clone(), doc.version, doc.opened_in_tinymist))
         };
 
         let (content, version, is_opened) = match sync_data {

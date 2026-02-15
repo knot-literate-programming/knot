@@ -262,7 +262,7 @@ Un peu de texte pour vérifier si tout se passe bien !
 ```
 
 ```{r}
-#| eval: false
+#| eval: true
 
 {
   x <- 1

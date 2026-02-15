@@ -37,10 +37,10 @@ pub async fn handle_formatting(
         // Format code with external tools
         let formatted_code =
             knot_core::compiler::formatters::format_code(&chunk.code, &chunk.language).ok();
-        
+
         // Append formatted chunk (structural + code)
         clean_knot_text.push_str(&chunk.format(formatted_code.as_deref()));
-        
+
         last_pos = chunk.end_byte;
     }
 
@@ -57,25 +57,37 @@ pub async fn handle_formatting(
         let mut tinymist_guard = state.tinymist.write().await;
         if let Some(proxy) = tinymist_guard.as_mut() {
             // First, update Tinymist with the current mask
-            let _ = proxy.send_notification("textDocument/didOpen", serde_json::json!({
-                "textDocument": {
-                    "uri": virtual_uri,
-                    "languageId": "typst",
-                    "version": version + 1000, // Use a high version to avoid conflicts
-                    "text": typst_mask
-                }
-            })).await;
+            let _ = proxy
+                .send_notification(
+                    "textDocument/didOpen",
+                    serde_json::json!({
+                        "textDocument": {
+                            "uri": virtual_uri,
+                            "languageId": "typst",
+                            "version": version + 1000, // Use a high version to avoid conflicts
+                            "text": typst_mask
+                        }
+                    }),
+                )
+                .await;
 
             // Request formatting
-            let resp = proxy.send_request("textDocument/formatting", serde_json::json!({
-                "textDocument": { "uri": virtual_uri },
-                "options": params.options
-            })).await;
+            let resp = proxy
+                .send_request(
+                    "textDocument/formatting",
+                    serde_json::json!({
+                        "textDocument": { "uri": virtual_uri },
+                        "options": params.options
+                    }),
+                )
+                .await;
 
             match resp {
                 Ok(res) => {
                     if let Some(edits_val) = res.get("result") {
-                        if let Ok(edits) = serde_json::from_value::<Vec<TextEdit>>(edits_val.clone()) {
+                        if let Ok(edits) =
+                            serde_json::from_value::<Vec<TextEdit>>(edits_val.clone())
+                        {
                             // Apply edits to the mask to get the final Typst structure
                             apply_edits(&typst_mask, edits)
                         } else {
@@ -93,7 +105,7 @@ pub async fn handle_formatting(
     };
 
     // --- PHASE C: Final Document Reconstruction ---
-    // We need to extract the clean Knot chunks from the masked document 
+    // We need to extract the clean Knot chunks from the masked document
     // and re-insert them into the formatted Typst structure.
     let final_text = reconstruct_knot_document(&formatted_typst, &clean_knot_text);
 
@@ -103,7 +115,10 @@ pub async fn handle_formatting(
         // Return a single full-document replacement for simplicity and robustness
         Ok(Some(vec![TextEdit {
             range: Range {
-                start: Position { line: 0, character: 0 },
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
                 end: Position {
                     line: text.lines().count() as u32,
                     character: text.lines().last().unwrap_or("").len() as u32,
@@ -143,17 +158,33 @@ fn apply_edits(text: &str, mut edits: Vec<TextEdit>) -> String {
 
         if start_line == end_line {
             let line = &mut lines[start_line];
-            let start_idx = line.char_indices().nth(start_char).map(|(i, _)| i).unwrap_or(line.len());
-            let end_idx = line.char_indices().nth(end_char).map(|(i, _)| i).unwrap_or(line.len());
+            let start_idx = line
+                .char_indices()
+                .nth(start_char)
+                .map(|(i, _)| i)
+                .unwrap_or(line.len());
+            let end_idx = line
+                .char_indices()
+                .nth(end_char)
+                .map(|(i, _)| i)
+                .unwrap_or(line.len());
             line.replace_range(start_idx..end_idx, &edit.new_text);
         } else {
-            let start_idx = lines[start_line].char_indices().nth(start_char).map(|(i, _)| i).unwrap_or(lines[start_line].len());
-            let end_idx = lines[end_line].char_indices().nth(end_char).map(|(i, _)| i).unwrap_or(lines[end_line].len());
-            
+            let start_idx = lines[start_line]
+                .char_indices()
+                .nth(start_char)
+                .map(|(i, _)| i)
+                .unwrap_or(lines[start_line].len());
+            let end_idx = lines[end_line]
+                .char_indices()
+                .nth(end_char)
+                .map(|(i, _)| i)
+                .unwrap_or(lines[end_line].len());
+
             let mut new_content = lines[start_line][..start_idx].to_string();
             new_content.push_str(&edit.new_text);
             new_content.push_str(&lines[end_line][end_idx..]);
-            
+
             let new_lines: Vec<String> = new_content.lines().map(|s| s.to_string()).collect();
             lines.splice(start_line..=end_line, new_lines);
         }
@@ -179,8 +210,9 @@ fn reconstruct_knot_document(formatted_typst: &str, clean_knot: &str) -> String 
     };
 
     // 2. Element count check
-    if original_doc.chunks.len() != formatted_doc.chunks.len() || 
-       original_doc.inline_exprs.len() != formatted_doc.inline_exprs.len() {
+    if original_doc.chunks.len() != formatted_doc.chunks.len()
+        || original_doc.inline_exprs.len() != formatted_doc.inline_exprs.len()
+    {
         log::warn!("Formatting mismatch: element count changed. Falling back to clean Knot.");
         return clean_knot.to_string();
     }
@@ -205,7 +237,10 @@ fn reconstruct_knot_document(formatted_typst: &str, clean_knot: &str) -> String 
 
         if is_chunk {
             // A. Detect indentation provided by Typst (Tinymist)
-            let line_start = formatted_typst[..start].rfind('\n').map(|p| p + 1).unwrap_or(0);
+            let line_start = formatted_typst[..start]
+                .rfind('\n')
+                .map(|p| p + 1)
+                .unwrap_or(0);
             let indentation = &formatted_typst[line_start..start];
             let indent_str = if indentation.chars().all(|c| c.is_whitespace()) {
                 indentation
@@ -216,12 +251,15 @@ fn reconstruct_knot_document(formatted_typst: &str, clean_knot: &str) -> String 
             // B. Prepare the chunk with the NEW indentation from Typst
             let mut clean_chunk = original_doc.chunks[index].clone();
             clean_chunk.base_indentation = indent_str.to_string();
-            
+
             // C. Format and append (format() now handles the indentation)
             final_text.push_str(&clean_chunk.format(None));
         } else {
             let clean_inline = &original_doc.inline_exprs[index];
-            final_text.push_str(&format!("`{{{}}} {}`", clean_inline.language, clean_inline.code));
+            final_text.push_str(&format!(
+                "`{{{}}} {}`",
+                clean_inline.language, clean_inline.code
+            ));
         }
         last_pos = end;
     }
@@ -315,14 +353,17 @@ mod tests {
         let mapper = PositionMapper::new(text, text);
         {
             let mut docs = state.documents.write().await;
-            docs.insert(url.clone(), crate::state::DocumentState {
-                text: text.to_string(),
-                version: 1,
-                mapper,
-                opened_in_tinymist: false,
-                knot_diagnostics: Vec::new(),
-                tinymist_diagnostics: Vec::new(),
-            });
+            docs.insert(
+                url.clone(),
+                crate::state::DocumentState {
+                    text: text.to_string(),
+                    version: 1,
+                    mapper,
+                    opened_in_tinymist: false,
+                    knot_diagnostics: Vec::new(),
+                    tinymist_diagnostics: Vec::new(),
+                },
+            );
         }
 
         (state, url)

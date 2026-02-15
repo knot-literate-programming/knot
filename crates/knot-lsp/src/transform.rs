@@ -52,30 +52,31 @@ pub fn transform_to_typst(knot_content: &str) -> String {
         output.push_str(&knot_content[last_pos..start]);
 
         if is_chunk {
-            let chunk = &doc.chunks[index];
-            
-            // 1. Header: Keep original opening (e.g. ```{r}\n)
-            let header_raw = &knot_content[start..chunk.code_start_byte];
-            output.push_str(header_raw);
-            
-            // 2. Body: Replace with spaces, preserve \n
-            for c in chunk.code.chars() {
-                if c == '\n' {
-                    output.push('\n');
-                } else {
-                    for _ in 0..c.len_utf16() {
-                        output.push(' ');
-                    }
-                }
+            let chunk_raw = &knot_content[start..end];
+
+            // 1. Keep opening fence line as-is (e.g. "  ```{r}\n")
+            let header_end = chunk_raw
+                .find('\n')
+                .map(|p| p + 1)
+                .unwrap_or(chunk_raw.len());
+            output.push_str(&chunk_raw[..header_end]);
+
+            // 2. Replace body (options + code) with blank lines, preserving line count.
+            //    Tinymist doesn't format inside raw blocks so content is irrelevant;
+            //    only the line count matters for correct positions in surrounding text.
+            let n_body = chunk_raw.lines().count().saturating_sub(2);
+            for _ in 0..n_body {
+                output.push('\n');
             }
-            
-            // 3. Footer: Keep original closing (e.g. ```)
-            let footer_raw = &knot_content[chunk.code_end_byte..end];
-            output.push_str(footer_raw);
+
+            // 3. Keep closing fence line as-is (e.g. "  ```")
+            // chunk_raw never ends with \n (end_byte stops before it)
+            let footer_start = chunk_raw.rfind('\n').map(|p| p + 1).unwrap_or(0);
+            output.push_str(&chunk_raw[footer_start..]);
         } else {
             // Inlines: Keep opening (e.g. `{r} `) and closing backtick
             let inline = &doc.inline_exprs[index];
-            
+
             // Opening part (e.g. `{r} `)
             let header_raw = &knot_content[inline.start..inline.code_start_byte];
             output.push_str(header_raw);
@@ -110,7 +111,7 @@ mod tests {
     fn test_transform_simple_inline() {
         let input = "Text `{r} 1+1` end";
         let output = transform_to_typst(input);
-        
+
         // Should contain masked spaces but same total width
         assert!(output.contains("`{r}    `"));
         assert_eq!(input.encode_utf16().count(), output.encode_utf16().count());
@@ -121,8 +122,25 @@ mod tests {
         let input = "Start\n```{r}\nx <- 1\n```\nEnd";
         let output_typ = transform_to_typst(input);
 
-        // Should have exactly the same number of lines
         assert_eq!(input.lines().count(), output_typ.lines().count());
+        // Fences must be preserved, code body replaced with a blank line
+        assert!(output_typ.contains("```{r}\n\n```"));
+    }
+
+    #[test]
+    fn test_transform_indented_chunk_preserves_lines_and_fences() {
+        let input = "- item\n  ```{r}\n  #| echo: false\n  x <- 1\n  ```\nafter";
+        let output_typ = transform_to_typst(input);
+
+        // Line count must be identical
+        assert_eq!(input.lines().count(), output_typ.lines().count());
+        // Indented fences must be preserved exactly
+        assert!(output_typ.contains("  ```{r}\n"));
+        assert!(output_typ.contains("\n  ```\n"));
+        // The body (options + code = 2 lines) must be replaced by 2 blank lines
+        let chunk_start = output_typ.find("  ```{r}\n").unwrap();
+        let after_header = &output_typ[chunk_start + "  ```{r}\n".len()..];
+        assert!(after_header.starts_with("\n\n  ```"));
     }
 
     #[test]
