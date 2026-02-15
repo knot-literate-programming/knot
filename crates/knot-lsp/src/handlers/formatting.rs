@@ -21,7 +21,10 @@ pub async fn handle_formatting(
     // 2. Parse document
     let doc = match Document::parse(text.clone()) {
         Ok(doc) => doc,
-        Err(_) => return Ok(None),
+        Err(e) => {
+            log::warn!("formatting: failed to parse document {uri}: {e}");
+            return Ok(None);
+        }
     };
 
     // --- PHASE A: Internal Chunk Formatting (Air/Ruff) ---
@@ -70,7 +73,7 @@ pub async fn handle_formatting(
         let mut tinymist_guard = state.tinymist.write().await;
         if let Some(proxy) = tinymist_guard.as_mut() {
             // First, update Tinymist with the current mask
-            let _ = proxy
+            if let Err(e) = proxy
                 .send_notification(
                     "textDocument/didOpen",
                     serde_json::json!({
@@ -82,7 +85,10 @@ pub async fn handle_formatting(
                         }
                     }),
                 )
-                .await;
+                .await
+            {
+                log::warn!("formatting: failed to sync virtual document with Tinymist: {e}");
+            }
 
             // Request formatting
             let resp = proxy
@@ -98,21 +104,25 @@ pub async fn handle_formatting(
             match resp {
                 Ok(res) => {
                     if let Some(edits_val) = res.get("result") {
-                        if let Ok(edits) =
-                            serde_json::from_value::<Vec<TextEdit>>(edits_val.clone())
-                        {
-                            // Apply edits to the mask to get the final Typst structure
-                            apply_edits(&typst_mask, edits)
-                        } else {
-                            typst_mask
+                        match serde_json::from_value::<Vec<TextEdit>>(edits_val.clone()) {
+                            Ok(edits) => apply_edits(&typst_mask, edits),
+                            Err(e) => {
+                                log::warn!("formatting: failed to deserialize Tinymist edits: {e}");
+                                typst_mask
+                            }
                         }
                     } else {
+                        log::debug!("formatting: Tinymist returned no edits");
                         typst_mask
                     }
                 }
-                Err(_) => typst_mask,
+                Err(e) => {
+                    log::warn!("formatting: Tinymist formatting request failed: {e}");
+                    typst_mask
+                }
             }
         } else {
+            log::debug!("formatting: Tinymist unavailable, skipping Typst formatting");
             typst_mask
         }
     };
