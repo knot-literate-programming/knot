@@ -19,6 +19,7 @@
 //! ```
 
 pub mod ast;
+pub mod indent;
 mod options;
 mod winnow_parser;
 

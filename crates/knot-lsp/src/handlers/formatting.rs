@@ -114,9 +114,9 @@ pub async fn handle_formatting(
     }
 }
 
-/// Simple utility to apply LSP TextEdits to a string
+/// Robustly apply LSP TextEdits to a string
 fn apply_edits(text: &str, mut edits: Vec<TextEdit>) -> String {
-    // Sort edits in reverse order to keep offsets valid
+    // Sort edits in reverse order by position to keep offsets valid
     edits.sort_by(|a, b| {
         if a.range.start.line != b.range.start.line {
             b.range.start.line.cmp(&a.range.start.line)
@@ -125,20 +125,112 @@ fn apply_edits(text: &str, mut edits: Vec<TextEdit>) -> String {
         }
     });
 
-    for edit in edits {
-        // Implementation of apply_edits for the mask will be finalized tomorrow
-        // For now we just iterate to keep the skeleton valid
-        let _ = edit;
+    let mut lines: Vec<String> = text.lines().map(|s| s.to_string()).collect();
+    // Add an empty line if the text ends with a newline
+    if text.ends_with('\n') {
+        lines.push(String::new());
     }
-    
-    // For now, return original mask to avoid corruption during development
-    text.to_string()
+
+    for edit in edits {
+        let start_line = edit.range.start.line as usize;
+        let start_char = edit.range.start.character as usize;
+        let end_line = edit.range.end.line as usize;
+        let end_char = edit.range.end.character as usize;
+
+        if start_line >= lines.len() || end_line >= lines.len() {
+            continue;
+        }
+
+        if start_line == end_line {
+            let line = &mut lines[start_line];
+            let start_idx = line.char_indices().nth(start_char).map(|(i, _)| i).unwrap_or(line.len());
+            let end_idx = line.char_indices().nth(end_char).map(|(i, _)| i).unwrap_or(line.len());
+            line.replace_range(start_idx..end_idx, &edit.new_text);
+        } else {
+            let start_idx = lines[start_line].char_indices().nth(start_char).map(|(i, _)| i).unwrap_or(lines[start_line].len());
+            let end_idx = lines[end_line].char_indices().nth(end_char).map(|(i, _)| i).unwrap_or(lines[end_line].len());
+            
+            let mut new_content = lines[start_line][..start_idx].to_string();
+            new_content.push_str(&edit.new_text);
+            new_content.push_str(&lines[end_line][end_idx..]);
+            
+            let new_lines: Vec<String> = new_content.lines().map(|s| s.to_string()).collect();
+            lines.splice(start_line..=end_line, new_lines);
+        }
+    }
+
+    let mut result = lines.join("\n");
+    if text.ends_with('\n') && !result.ends_with('\n') {
+        result.push('\n');
+    }
+    result
 }
 
-/// Reconstructs the Knot document by finding our markers in the formatted Typst.
-fn reconstruct_knot_document(_formatted_typst: &str, clean_knot: &str) -> String {
-    // Reconstruction logic using markers will be implemented tomorrow
-    clean_knot.to_string()
+/// Reconstructs the Knot document by finding Knot elements in the formatted Typst.
+fn reconstruct_knot_document(formatted_typst: &str, clean_knot: &str) -> String {
+    // 1. Parse both documents
+    let original_doc = match knot_core::Document::parse(clean_knot.to_string()) {
+        Ok(d) => d,
+        Err(_) => return clean_knot.to_string(),
+    };
+    let formatted_doc = match knot_core::Document::parse(formatted_typst.to_string()) {
+        Ok(d) => d,
+        Err(_) => return clean_knot.to_string(),
+    };
+
+    // 2. Element count check
+    if original_doc.chunks.len() != formatted_doc.chunks.len() || 
+       original_doc.inline_exprs.len() != formatted_doc.inline_exprs.len() {
+        log::warn!("Formatting mismatch: element count changed. Falling back to clean Knot.");
+        return clean_knot.to_string();
+    }
+
+    let mut final_text = String::with_capacity(formatted_typst.len());
+    let mut last_pos = 0;
+
+    // 3. Build elements list
+    let mut elements: Vec<(usize, usize, bool, usize)> = Vec::new();
+    for (i, chunk) in formatted_doc.chunks.iter().enumerate() {
+        elements.push((chunk.start_byte, chunk.end_byte, true, i));
+    }
+    for (i, inline) in formatted_doc.inline_exprs.iter().enumerate() {
+        elements.push((inline.start, inline.end, false, i));
+    }
+    elements.sort_by_key(|e| e.0);
+
+    // 4. Substitution
+    for (start, end, is_chunk, index) in elements {
+        // Append Typst text before the element
+        final_text.push_str(&formatted_typst[last_pos..start]);
+
+        if is_chunk {
+            // A. Detect indentation provided by Typst (Tinymist)
+            let line_start = formatted_typst[..start].rfind('\n').map(|p| p + 1).unwrap_or(0);
+            let indentation = &formatted_typst[line_start..start];
+            let indent_str = if indentation.chars().all(|c| c.is_whitespace()) {
+                indentation
+            } else {
+                ""
+            };
+
+            // B. Prepare the chunk with the NEW indentation from Typst
+            let mut clean_chunk = original_doc.chunks[index].clone();
+            clean_chunk.base_indentation = indent_str.to_string();
+            
+            // C. Format and append (format() now handles the indentation)
+            final_text.push_str(&clean_chunk.format(None));
+        } else {
+            let clean_inline = &original_doc.inline_exprs[index];
+            final_text.push_str(&format!("`{{{}}} {}`", clean_inline.language, clean_inline.code));
+        }
+        last_pos = end;
+    }
+
+    if last_pos < formatted_typst.len() {
+        final_text.push_str(&formatted_typst[last_pos..]);
+    }
+
+    final_text
 }
 
 /// Format a single chunk at the given position

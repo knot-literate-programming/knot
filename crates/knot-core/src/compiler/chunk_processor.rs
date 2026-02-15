@@ -194,6 +194,7 @@ mod tests {
             language: language.to_string(),
             code: code.to_string(),
             name,
+            base_indentation: String::new(),
             options: ChunkOptions {
                 eval: Some(eval),
                 show: Some(crate::parser::Show::Both),
@@ -531,6 +532,7 @@ mod tests {
             language: "r".to_string(),
             code: "x <- 1".to_string(),
             name: None,
+            base_indentation: String::new(),
             options: ChunkOptions {
                 eval: None,      // Will use language default
                 show: None,      // Will use language default
@@ -632,6 +634,7 @@ mod tests {
             language: "python".to_string(),
             code: "x = 1".to_string(),
             name: None,
+            base_indentation: String::new(),
             options: ChunkOptions {
                 eval: None, // Will use global default
                 show: None, // Will use global default

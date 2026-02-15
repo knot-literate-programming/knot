@@ -384,6 +384,7 @@ pub struct Chunk {
     pub language: String,
     pub name: Option<String>,
     pub code: String,
+    pub base_indentation: String,
     pub options: ChunkOptions,
     pub codly_options: HashMap<String, String>,
     pub errors: Vec<ChunkError>,
@@ -439,7 +440,12 @@ impl Chunk {
         // 5. Footer
         out.push_str("```");
 
-        out
+        // 6. Apply base indentation to the whole formatted block
+        if !self.base_indentation.is_empty() {
+            super::indent::indent(&out, &self.base_indentation)
+        } else {
+            out
+        }
     }
 }
 

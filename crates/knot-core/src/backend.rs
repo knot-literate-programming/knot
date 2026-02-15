@@ -321,6 +321,7 @@ mod tests {
             language: language.to_string(),
             code: code.to_string(),
             name,
+            base_indentation: String::new(),
             options: ChunkOptions {
                 eval: Some(true),
                 show: Some(match (echo, output) {

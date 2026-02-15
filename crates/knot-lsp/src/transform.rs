@@ -22,9 +22,11 @@ pub fn to_virtual_uri(uri: &Url) -> Url {
 
     virtual_uri
 }
+
 /// Transform a .knot document to a .typ placeholder document (Typst only)
 ///
-/// Replaces code chunks and inline expressions with spaces/newlines.
+/// Implement the Mirror Mask strategy: keep opening/closing markers and mask only the code with spaces.
+/// This preserves exact width and line count without any external markers.
 pub fn transform_to_typst(knot_content: &str) -> String {
     let doc = match Document::parse(knot_content.to_string()) {
         Ok(d) => d,
@@ -52,54 +54,43 @@ pub fn transform_to_typst(knot_content: &str) -> String {
         if is_chunk {
             let chunk = &doc.chunks[index];
             
-            // 1. Header line: keep it exactly, append marker before the newline
+            // 1. Header: Keep original opening (e.g. ```{r}\n)
             let header_raw = &knot_content[start..chunk.code_start_byte];
-            if let Some(pos) = header_raw.find('\n') {
-                output.push_str(&header_raw[..pos]);
-                output.push_str(&format!(" // #KNOT-S:{}", index));
-                output.push_str(&header_raw[pos..]);
-            } else {
-                output.push_str(header_raw);
-                output.push_str(&format!(" // #KNOT-S:{}", index));
-            }
+            output.push_str(header_raw);
             
-            // 2. Body: just empty lines to keep line count
+            // 2. Body: Replace with spaces, preserve \n
             for c in chunk.code.chars() {
                 if c == '\n' {
                     output.push('\n');
+                } else {
+                    for _ in 0..c.len_utf16() {
+                        output.push(' ');
+                    }
                 }
             }
             
-            // 3. Footer line: keep it exactly, append marker before the newline
+            // 3. Footer: Keep original closing (e.g. ```)
             let footer_raw = &knot_content[chunk.code_end_byte..end];
-            if let Some(pos) = footer_raw.find('\n') {
-                output.push_str(&footer_raw[..pos]);
-                output.push_str(&format!(" // #KNOT-E:{}", index));
-                output.push_str(&footer_raw[pos..]);
-            } else {
-                output.push_str(footer_raw);
-                output.push_str(&format!(" // #KNOT-E:{}", index));
-            }
+            output.push_str(footer_raw);
         } else {
-            // Inlines: Use protected spaces. Calculate exact UTF-16 width to match VS Code columns.
-            let original_inline = &knot_content[start..end];
-            let mut total_width = 0;
-            for c in original_inline.chars() {
-                total_width += c.len_utf16();
+            // Inlines: Keep opening (e.g. `{r} `) and closing backtick
+            let inline = &doc.inline_exprs[index];
+            
+            // Opening part (e.g. `{r} `)
+            let header_raw = &knot_content[inline.start..inline.code_start_byte];
+            output.push_str(header_raw);
+
+            // Mask the code part with spaces
+            let code_raw = &knot_content[inline.code_start_byte..inline.code_end_byte];
+            for c in code_raw.chars() {
+                for _ in 0..c.len_utf16() {
+                    output.push(' ');
+                }
             }
 
-            if total_width >= 2 {
-                output.push('`');
-                for _ in 0..(total_width - 2) {
-                    output.push(' ');
-                }
-                output.push('`');
-            } else {
-                // Fallback for extremely short inlines (should not happen with `{r} `)
-                for _ in 0..total_width {
-                    output.push(' ');
-                }
-            }
+            // Closing part (e.g. `)
+            let footer_raw = &knot_content[inline.code_end_byte..inline.end];
+            output.push_str(footer_raw);
         }
         last_pos = end;
     }
@@ -120,9 +111,9 @@ mod tests {
         let input = "Text `{r} 1+1` end";
         let output = transform_to_typst(input);
         
-        // Should contain protected spaces (backticks)
-        assert!(output.contains("`       `"));
-        assert_eq!(input.len(), output.len());
+        // Should contain masked spaces but same total width
+        assert!(output.contains("`{r}    `"));
+        assert_eq!(input.encode_utf16().count(), output.encode_utf16().count());
     }
 
     #[test]
@@ -131,12 +122,7 @@ mod tests {
         let output_typ = transform_to_typst(input);
 
         // Should have exactly the same number of lines
-        // Original has 5 lines (if counting trailing \n as part of lines)
         assert_eq!(input.lines().count(), output_typ.lines().count());
-        
-        // Should contain our markers
-        assert!(output_typ.contains("// #KNOT-S:0"));
-        assert!(output_typ.contains("// #KNOT-E:0"));
     }
 
     #[test]
@@ -144,8 +130,7 @@ mod tests {
         let input = "A `{r} 'é'` B";
         let output_typ = transform_to_typst(input);
 
-        // For inlines, we use backticks to protect spaces.
-        // `A `{r} 'é'` B` -> `A `       ` B` (length should be identical)
+        // Length should be identical in UTF-16
         assert_eq!(
             input.encode_utf16().count(),
             output_typ.encode_utf16().count()

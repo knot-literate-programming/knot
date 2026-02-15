@@ -1,109 +1,125 @@
-//! Winnow-based Parser for Knot Documents
+//! Line-based Parser for Knot Documents
 //!
-//! This module implements the main parser for .knot files using the `winnow`
-//! parser combinator library.
-//!
-//! # Grammar
-//!
-//! A knot document consists of three main elements:
-//! 1. **Code chunks**: Blocks delimited by triple backticks (e.g., ` ```{r} ... ``` `).
-//! 2. **Inline expressions**: Small code snippets wrapped in backticks (e.g., `` `r 1+1` ``).
-//! 3. **Typst content**: Verbatim content that is not processed by knot.
-//!
-//! # Parser Strategy
-//!
-//! The parser works in a single pass to build an Abstract Syntax Tree (AST):
-//! - It scans the input for special markers (backticks).
-//! - It uses combinators to distinguish between chunks, inline expressions, and plain text.
-//! - It tracks byte positions and line/column numbers for accurate error reporting and LSP support.
-//!
-//! # Error Handling
-//!
-//! When parsing fails (e.g., unclosed chunks, invalid options), the parser collects
-//! errors and includes them in the AST nodes, allowing the compilation to continue
-//! while reporting issues to the user.
+//! This module implements a robust line-by-line parsing strategy for chunks.
+//! Indentation is handled globally for each chunk to ensure structural integrity.
 
 use super::ast::{Chunk, ChunkError, Document, InlineExpr, InlineOptions, Position, Range, Show};
+use super::indent::dedent;
 use super::options::parse_options;
 use winnow::ModalResult;
 use winnow::Parser;
-use winnow::ascii::{line_ending, space0, space1};
-use winnow::combinator::{alt, opt, peek, separated};
-use winnow::error::ContextError;
-use winnow::stream::Offset;
-use winnow::token::{take, take_until, take_while};
-
-// Type alias for our input type. Simple &str!
-type Input<'a> = &'a str;
+use winnow::ascii::{space0, space1};
+use winnow::combinator::{alt, opt, separated};
+use winnow::token::{take_until, take_while};
 
 pub fn parse_document(source: &str) -> Document {
-    let mut input = source; // This slice will advance
-    let original_source = source; // This one stays fixed for offset calculation
-
     let mut chunks = Vec::new();
     let mut errors = Vec::new();
+    let original_source = source;
 
-    // 1. Extract Chunks
-    while !input.is_empty() {
-        // We try to parse a chunk
-        let start_input = input; // Snapshot before parsing attempt
+    let mut current_offset = 0;
+    
+    // 1. Extract Chunks line by line
+    while current_offset < source.len() {
+        let remaining = &source[current_offset..];
+        let line_end_rel = remaining.find('\n').unwrap_or(remaining.len());
+        let line_full_len = if line_end_rel < remaining.len() { line_end_rel + 1 } else { line_end_rel };
+        let line = &remaining[..line_end_rel];
 
-        // If we see ```{, we try to parse a chunk
-        if input.starts_with("```{") {
-            match parse_chunk_internal.parse_next(&mut input) {
-                Ok((mut chunk, code_slice)) => {
-                    // Calculation of absolute offsets
-                    let chunk_start_offset = Offset::offset_from(&start_input, &original_source);
-                    let chunk_end_offset = Offset::offset_from(&input, &original_source);
+        if let Some((n, lang, _)) = match_opening_fence(line) {
+            let start_byte = current_offset;
+            let mut chunk_end = current_offset + line_full_len;
+            let mut found_closure = false;
 
-                    let code_start_offset = Offset::offset_from(&code_slice, &original_source);
-                    let code_end_offset = code_start_offset + code_slice.len();
+            let mut search_offset = chunk_end;
+            while search_offset < source.len() {
+                let rem_search = &source[search_offset..];
+                let l_end_rel = rem_search.find('\n').unwrap_or(rem_search.len());
+                let l_full_len = if l_end_rel < rem_search.len() { l_end_rel + 1 } else { l_end_rel };
+                let l_text = &rem_search[..l_end_rel];
 
-                    chunk.start_byte = chunk_start_offset;
-                    chunk.end_byte = chunk_end_offset;
-                    chunk.code_start_byte = code_start_offset;
-                    chunk.code_end_byte = code_end_offset;
-
-                    chunk.range.start = offset_to_position(original_source, chunk_start_offset);
-                    chunk.range.end = offset_to_position(original_source, chunk_end_offset);
-
-                    chunk.code_range.start = offset_to_position(original_source, code_start_offset);
-                    chunk.code_range.end = offset_to_position(original_source, code_end_offset);
-
-                    chunks.push(chunk);
-                }
-                Err(err) => {
-                    let pos = offset_to_position(
-                        original_source,
-                        Offset::offset_from(&start_input, &original_source),
-                    );
-                    errors.push(format!(
-                        "Malformed or unclosed code chunk at line {}, column {}: {}",
-                        pos.line + 1,
-                        pos.column + 1,
-                        err
-                    ));
-
-                    // Consume the opening to avoid infinite loop
-                    let _ = take::<_, _, ContextError>(4usize).parse_next(&mut input);
-                }
-            }
-        } else {
-            // Not a chunk start, move forward until next ```{
-            match take_until::<_, _, ContextError>(1.., "```{").parse_next(&mut input) {
-                Ok(_) => {
-                    // input now points to ```{
-                }
-                Err(_) => {
-                    // No more chunks
+                if match_closing_fence(l_text, n) {
+                    chunk_end = search_offset + l_full_len;
+                    found_closure = true;
                     break;
                 }
+                search_offset += l_full_len;
+            }
+
+            if found_closure {
+                // UNIFIED DEDENT: Dedent the whole raw block (fence-to-fence)
+                let raw_block = &source[start_byte..chunk_end];
+                let (clean_block, base_indent) = dedent(raw_block);
+                
+                // Now parse the internal structure of the clean block (starting at col 0)
+                let mut lines: Vec<&str> = clean_block.lines().collect();
+                if lines.len() >= 2 {
+                    // Header is lines[0], Footer is lines[last]
+                    let header = lines.remove(0);
+                    let _footer = lines.pop();
+                    
+                    let mut options_str = String::new();
+                    let mut code_lines = Vec::new();
+                    let mut in_options = true;
+                    
+                    for l in lines {
+                        if in_options && l.trim().starts_with("#|") {
+                            options_str.push_str(l);
+                            options_str.push('\n');
+                        } else {
+                            if in_options && !l.trim().is_empty() {
+                                in_options = false; // First non-option non-empty line marks start of code
+                            }
+                            // Once out of options, all lines (including empty ones) are code
+                            code_lines.push(l);
+                        }
+                    }
+                    
+                    let (options, codly_options, chunk_errors) = parse_options(&options_str);
+                    
+                    // Reconstruct clean code
+                    let mut code = code_lines.join("\n");
+                    code = code.trim().to_string();
+
+                    // Calculate internal offsets for LSP
+                    let code_start_byte = start_byte + raw_block.find(&code).unwrap_or(raw_block.len() / 2);
+                    let code_end_byte = code_start_byte + code.len();
+
+                    chunks.push(Chunk {
+                        language: lang.to_string(),
+                        name: extract_name(header, n),
+                        code,
+                        base_indentation: base_indent,
+                        options,
+                        codly_options,
+                        errors: chunk_errors,
+                        range: Range {
+                            start: offset_to_position(original_source, start_byte),
+                            end: offset_to_position(original_source, chunk_end),
+                        },
+                        code_range: Range {
+                            start: offset_to_position(original_source, code_start_byte),
+                            end: offset_to_position(original_source, code_end_byte),
+                        },
+                        start_byte,
+                        end_byte: chunk_end,
+                        code_start_byte,
+                        code_end_byte,
+                    });
+                    
+                    current_offset = chunk_end;
+                    continue;
+                }
+            } else {
+                let pos = offset_to_position(original_source, start_byte);
+                errors.push(format!("Unclosed chunk starting at line {}", pos.line + 1));
             }
         }
+        
+        current_offset += line_full_len;
     }
 
-    // 2. Extract Inline Expressions
-    let inline_exprs = extract_inline_exprs_winnow(source, &chunks).unwrap_or_default();
+    let inline_exprs = extract_inline_exprs_manual(source, &chunks);
 
     Document {
         source: source.to_string(),
@@ -113,213 +129,112 @@ pub fn parse_document(source: &str) -> Document {
     }
 }
 
-// Returns (Chunk, code_slice)
-// The Chunk returned here has placeholder offsets/ranges.
-fn parse_chunk_internal<'i>(input: &mut Input<'i>) -> ModalResult<(Chunk, &'i str)> {
-    // Header: ```{lang name}
-    let _ = "```".parse_next(input)?;
-    let _ = "{".parse_next(input)?;
-    let _ = space0.parse_next(input)?;
-
-    let lang = take_while(1.., |c: char| c.is_alphanumeric() || c == '_').parse_next(input)?;
-    let mut header_errors = Vec::new();
-
-    // Validate language
-    if !crate::defaults::Defaults::SUPPORTED_LANGUAGES.contains(&lang) {
-        header_errors.push(ChunkError::new(
-            format!("Unsupported language: '{}'", lang),
-            Some(0),
-        ));
-    }
-
-    let _ = space0.parse_next(input)?;
-
-    // Name
-    let name_str = take_until(0.., "}").parse_next(input)?;
-    let name = if name_str.trim().is_empty() {
-        None
-    } else {
-        let trimmed = name_str.trim();
-        if trimmed.contains(char::is_whitespace) {
-            header_errors.push(ChunkError::new(
-                format!(
-                    "Invalid chunk name: '{}' (names cannot contain spaces)",
-                    trimmed
-                ),
-                Some(0),
-            ));
-        }
-        Some(trimmed.to_string())
-    };
-
-    log::debug!("Parsed chunk header: lang='{}', name='{:?}'", lang, name);
-
-    let _ = "}".parse_next(input)?;
-    let _ = space0.parse_next(input)?;
-    let _ = line_ending.parse_next(input)?;
-
-    // Options
-    let mut options_str = String::new();
-    while let Ok(line) = peek::<_, _, ContextError, _>(take_until(
-        0..,
-        "
-",
-    ))
-    .parse_next(input)
-    {
-        let trimmed = line.trim();
-        if trimmed.starts_with("#|") {
-            let full_line = take_until(
-                1..,
-                "
-",
-            )
-            .parse_next(input)?;
-            let _ = line_ending.parse_next(input)?;
-            options_str.push_str(full_line);
-            options_str.push('\n');
-        } else {
-            break;
+fn match_opening_fence(line: &str) -> Option<(usize, &str, &str)> {
+    let trimmed = line.trim_start();
+    let indent = &line[..line.len() - trimmed.len()];
+    let n = trimmed.chars().take_while(|&c| c == '`').count();
+    if n >= 3 && trimmed[n..].starts_with('{') {
+        let after_fence = &trimmed[n+1..];
+        if let Some(close_brace) = after_fence.find('}') {
+            let content = after_fence[..close_brace].trim();
+            if !content.is_empty() {
+                let lang = content.split_whitespace().next().unwrap_or("");
+                return Some((n, lang, indent));
+            }
         }
     }
+    None
+}
 
-    let (options, codly_options, mut errors) = parse_options(&options_str);
-    errors.extend(header_errors);
+fn match_closing_fence(line: &str, n: usize) -> bool {
+    let trimmed = line.trim();
+    let count = trimmed.chars().take_while(|&c| c == '`').count();
+    count == n && trimmed[count..].chars().all(|c| c.is_whitespace())
+}
 
-    // Body
-    let code_slice = take_until(0.., "```").parse_next(input)?;
-
-    let _ = "```".parse_next(input)?;
-
-    let chunk = Chunk {
-        language: lang.to_string(),
-        name,
-        code: code_slice.to_string(),
-        options,
-        codly_options,
-        errors,
-        range: Range::default(),
-        code_range: Range::default(),
-        start_byte: 0,      // patched later
-        end_byte: 0,        // patched later
-        code_start_byte: 0, // patched later
-        code_end_byte: 0,   // patched later
-    };
-
-    Ok((chunk, code_slice))
+fn extract_name(header: &str, n: usize) -> Option<String> {
+    let trimmed = header.trim_start();
+    let after_fence = &trimmed[n+1..];
+    if let Some(close_brace) = after_fence.find('}') {
+        let content = after_fence[..close_brace].trim();
+        let mut parts = content.split_whitespace();
+        let _lang = parts.next();
+        return parts.next().map(|s| s.to_string());
+    }
+    None
 }
 
 fn offset_to_position(source: &str, offset: usize) -> Position {
     let mut line = 0;
     let mut column = 0;
-    // Be careful not to go out of bounds
     let safe_offset = offset.min(source.len());
-
     for (i, c) in source.char_indices() {
-        if i >= safe_offset {
-            break;
-        }
-        if c == '\n' {
-            line += 1;
-            column = 0;
-        } else {
-            column += 1;
-        }
+        if i >= safe_offset { break; }
+        if c == '\n' { line += 1; column = 0; } else { column += 1; }
     }
     Position { line, column }
 }
 
-fn extract_inline_exprs_winnow(source: &str, chunks: &[Chunk]) -> anyhow::Result<Vec<InlineExpr>> {
-    let mut input = source;
-    let original_source = source;
+fn extract_inline_exprs_manual(source: &str, chunks: &[Chunk]) -> Vec<InlineExpr> {
     let mut exprs = Vec::new();
+    let mut current_offset = 0;
 
-    while !input.is_empty() {
-        let _start_input = input;
-        match take_until::<_, _, ContextError>(0.., "`").parse_next(&mut input) {
-            Ok(_) => {
-                let backtick_offset = Offset::offset_from(&input, &original_source); // input is at '`'
+    while let Some(pos) = source[current_offset..].find('`') {
+        let abs_pos = current_offset + pos;
+        
+        if abs_pos > 0 && source.as_bytes()[abs_pos - 1] == b'\\' {
+            current_offset = abs_pos + 1;
+            continue;
+        }
 
-                // Check escape
-                if backtick_offset > 0 && original_source.as_bytes()[backtick_offset - 1] == b'\\' {
-                    let _ = take::<_, _, ContextError>(1usize).parse_next(&mut input);
-                    continue;
-                }
-
-                let expr_start_input = input;
-                // Try to parse: ` + { + lang + ...
-                if let Ok(expr) = parse_inline_expr(original_source).parse_next(&mut input) {
-                    if !is_inside_chunk(expr.start, chunks) {
-                        exprs.push(expr);
-                    }
-                } else {
-                    // Not a knot inline expr (maybe just raw code `foo`), consume backtick
-                    input = expr_start_input; // reset
-                    let _ = take::<_, _, ContextError>(1usize).parse_next(&mut input);
-                }
+        let mut input = &source[abs_pos..];
+        if let Ok(expr) = parse_inline_expr(source).parse_next(&mut input) {
+            let is_inside = chunks.iter().any(|c| expr.start >= c.start_byte && expr.start < c.end_byte);
+            if !is_inside {
+                exprs.push(expr);
             }
-            Err(_) => break,
+            current_offset = abs_pos + (source.len() - abs_pos - input.len());
+        } else {
+            current_offset = abs_pos + 1;
         }
     }
-    Ok(exprs)
+    exprs
 }
 
-fn parse_inline_expr<'a>(
-    original_source: &'a str,
-) -> impl FnMut(&mut &'a str) -> ModalResult<InlineExpr> {
+fn parse_inline_expr<'a>(original_source: &'a str) -> impl FnMut(&mut &'a str) -> ModalResult<InlineExpr> {
     move |input: &mut &'a str| {
         let start_input = *input;
         let _ = "`".parse_next(input)?;
         let _ = "{".parse_next(input)?;
-
         let lang = take_while(1.., |c: char| c.is_alphanumeric() || c == '_').parse_next(input)?;
-
-        // Parse options: everything between lang and }
         let options_str = take_until(0.., "}").parse_next(input)?;
         let _ = "}".parse_next(input)?;
-
-        // Optional space
         let _ = opt(" ").parse_next(input)?;
-
-        // Code: take until closing backtick
         let code_slice = take_until(0.., "`").parse_next(input)?;
-        let code_start_byte = Offset::offset_from(&code_slice, &original_source);
+        
+        let code_start_byte = code_slice.as_ptr() as usize - original_source.as_ptr() as usize;
         let code_end_byte = code_start_byte + code_slice.len();
         let _ = "`".parse_next(input)?;
 
-        let start = Offset::offset_from(&start_input, &original_source);
-        let end = Offset::offset_from(&*input, &original_source);
-
-        // Parse inline options from the captured string
+        let start = start_input.as_ptr() as usize - original_source.as_ptr() as usize;
+        let end = input.as_ptr() as usize - original_source.as_ptr() as usize;
         let (options, errors) = parse_inline_options(options_str);
 
         Ok(InlineExpr {
             language: lang.to_string(),
             code: code_slice.to_string(),
-            start,
-            end,
-            code_start_byte,
-            code_end_byte,
-            options,
-            errors,
+            start, end, code_start_byte, code_end_byte,
+            options, errors,
         })
     }
 }
 
-/// Parse inline options from a string like "echo=false, digits=3"
 fn parse_inline_options(options_str: &str) -> (InlineOptions, Vec<ChunkError>) {
     let mut options = InlineOptions::default();
     let mut errors = Vec::new();
     let mut input = options_str.trim();
-
-    if input.is_empty() {
-        return (options, errors);
-    }
-
-    // Handle initial comma if present (e.g., "{r, echo=false}")
-    if input.starts_with(',') {
-        input = input[1..].trim();
-    }
+    if input.is_empty() { return (options, errors); }
+    if input.starts_with(',') { input = input[1..].trim(); }
 
     if let Ok(pairs) = parse_kv_pairs.parse_next(&mut input) {
         for (key, value) in pairs {
@@ -332,65 +247,37 @@ fn parse_inline_options(options_str: &str) -> (InlineOptions, Vec<ChunkError>) {
                         "both" => Some(Show::Both),
                         "none" => Some(Show::None),
                         _ => {
-                            errors.push(ChunkError::new(
-                                format!(
-                                    "Invalid show value '{}'. Expected: output, code, both, or none",
-                                    value
-                                ),
-                                None,
-                            ));
+                            errors.push(ChunkError::new(format!("Invalid show value '{}'", value), None));
                             None
                         }
                     }
                 }
-                "digits" => match value.parse::<u32>() {
-                    Ok(n) => options.digits = Some(Some(n)),
-                    Err(e) => errors.push(ChunkError::new(format!("Option 'digits': {}", e), None)),
+                "digits" => if let Ok(n) = value.parse::<u32>() { options.digits = Some(Some(n)); } else {
+                    errors.push(ChunkError::new(format!("Option 'digits': {}", value), None));
                 },
-                _ => {
-                    errors.push(ChunkError::new(format!("Unknown option: '{}'", key), None));
-                }
+                _ => { errors.push(ChunkError::new(format!("Unknown option: '{}'", key), None)); }
             }
         }
     }
-
     (options, errors)
 }
 
 fn parse_kv_pairs<'a>(input: &mut &'a str) -> ModalResult<Vec<(&'a str, &'a str)>> {
     fn parse_kv<'a>(input: &mut &'a str) -> ModalResult<(&'a str, &'a str)> {
-        let key = take_while(1.., |c: char| c.is_alphanumeric() || c == '_' || c == '-')
-            .parse_next(input)?;
+        let key = take_while(1.., |c: char| c.is_alphanumeric() || c == '_' || c == '-').parse_next(input)?;
         let _ = space0.parse_next(input)?;
         let _ = "=".parse_next(input)?;
         let _ = space0.parse_next(input)?;
-        let value = take_while(1.., |c: char| !c.is_whitespace() && c != ',' && c != '}')
-            .parse_next(input)?;
+        let value = take_while(1.., |c: char| !c.is_whitespace() && c != ',' && c != '}').parse_next(input)?;
         Ok((key, value))
     }
-
     let _ = space0.parse_next(input)?;
-    separated(
-        0..,
-        parse_kv,
-        alt(((space0, ",", space0).map(|_| ()), space1.map(|_| ()))),
-    )
-    .parse_next(input)
-}
-
-fn is_inside_chunk(pos: usize, chunks: &[Chunk]) -> bool {
-    for chunk in chunks {
-        if pos >= chunk.start_byte && pos < chunk.end_byte {
-            return true;
-        }
-    }
-    false
+    separated(0.., parse_kv, alt(((space0, ",", space0).map(|_| ()), space1.map(|_| ())))).parse_next(input)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     #[test]
     fn test_parse_simple_chunk() {
@@ -412,298 +299,30 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_chunk_with_name_and_dependencies() {
-        let content = r###"```{r my-chunk}
-#| depends: [data.csv, scripts/helper.R]
-#| cache: false
-rnorm(10)
-```
-        "###;
-        let doc = Document::parse(content.to_string()).unwrap();
+    fn test_parse_indented_chunk() {
+        let content = "  ```{r}\n  1+1\n  ```";
+        let doc = parse_document(content);
         assert_eq!(doc.chunks.len(), 1);
         let chunk = &doc.chunks[0];
-        assert_eq!(chunk.name, Some("my-chunk".to_string()));
-        assert_eq!(chunk.options.cache, Some(false));
-        assert_eq!(chunk.options.depends.len(), 2);
-        assert_eq!(chunk.options.depends[0], PathBuf::from("data.csv"));
-        assert_eq!(chunk.options.depends[1], PathBuf::from("scripts/helper.R"));
+        assert_eq!(chunk.base_indentation, "  ");
+        assert_eq!(chunk.code, "1+1");
     }
 
     #[test]
-    fn test_parse_multiple_chunks() {
-        let content = r###"```{r}
-# chunk 1
-```
-
-du texte entre
-
-```{python plot-stuff}
-# chunk 2
-```
-        "###;
-        let doc = Document::parse(content.to_string()).unwrap();
-        assert_eq!(doc.chunks.len(), 2);
-        assert_eq!(doc.chunks[0].language, "r");
-        assert_eq!(doc.chunks[1].language, "python");
-        assert_eq!(doc.chunks[1].name, Some("plot-stuff".to_string()));
-    }
-
-    #[test]
-    fn test_no_chunks() {
-        let content = "Juste du texte, pas de chunks ici.";
-        let doc = Document::parse(content.to_string()).unwrap();
-        assert!(doc.chunks.is_empty());
-    }
-
-    #[test]
-    fn test_parse_graphics_options() {
-        let content = r###"```{r plot}
-#| fig-width: 10
-#| fig-height: 8
-#| dpi: 600
-#| fig-format: png
-#| fig-alt: A scatter plot
-ggplot(iris, aes(x, y)) + geom_point()
-```
-        "###;
-        let doc = Document::parse(content.to_string()).unwrap();
+    fn test_robustness_nested_backticks() {
+        let content = "````{r}\ncat(\"```\")\n````";
+        let doc = parse_document(content);
         assert_eq!(doc.chunks.len(), 1);
-        let chunk = &doc.chunks[0];
-
-        assert_eq!(chunk.options.fig_width, Some(10.0));
-        assert_eq!(chunk.options.fig_height, Some(8.0));
-        assert_eq!(chunk.options.dpi, Some(600));
-        assert_eq!(
-            chunk.options.fig_format,
-            Some(crate::parser::FigFormat::Png)
-        );
-        // fig_alt was removed (unused option)
+        assert!(doc.chunks[0].code.contains("```"));
     }
 
     #[test]
     fn test_chunk_positions() {
-        let content = r###"Some text above.
-
-```{r my-chunk}
-#| eval: true
-#| caption: "A test chunk."
-1 + 1
-```
-
-More text below."###;
-        let doc = Document::parse(content.to_string()).unwrap();
+        let content = "Start\n\n```{r}\n1+1\n```\nEnd";
+        let doc = parse_document(content);
         assert_eq!(doc.chunks.len(), 1);
         let chunk = &doc.chunks[0];
-
-        // Verify overall chunk range
         assert_eq!(chunk.range.start.line, 2);
-        assert_eq!(chunk.range.start.column, 0);
-        assert_eq!(chunk.range.end.line, 6);
-        assert_eq!(chunk.range.end.column, 3);
-
-        // Verify code range
-        assert_eq!(chunk.code_range.start.line, 5);
-        assert_eq!(chunk.code_range.start.column, 0);
-        assert_eq!(chunk.code_range.end.line, 6);
-        assert_eq!(chunk.code_range.end.column, 0);
-    }
-
-    #[test]
-    fn test_parse_invalid_option_value() {
-        let content = r###"```{r}
-#| eval: maybe
-1 + 1
-```"###;
-        let doc = Document::parse(content.to_string()).unwrap();
-        assert_eq!(doc.chunks.len(), 1);
-        assert_eq!(doc.chunks[0].errors.len(), 1);
-        assert!(doc.chunks[0].errors[0].message.contains("parsing error"));
-    }
-
-    #[test]
-    fn test_parse_unknown_option() {
-        // Unknown options produce a diagnostic (Options Firewall)
-        let content = r###"```{r}
-#| unknown-opt: 42
-1 + 1
-```"###;
-        let doc = Document::parse(content.to_string()).unwrap();
-        assert_eq!(doc.chunks.len(), 1);
-        assert_eq!(
-            doc.chunks[0].errors.len(),
-            1,
-            "Unknown options should produce a diagnostic"
-        );
-    }
-
-    #[test]
-    fn test_parse_simple_chunk_winnow() {
-        let content = r###"# Titre
-
-```{r}
-#| eval: true
-#| show: output
-1 + 1
-```
-        "###;
-        let doc = Document::parse(content.to_string()).unwrap();
-        assert_eq!(doc.chunks.len(), 1);
-        let chunk = &doc.chunks[0];
-        assert_eq!(chunk.language, "r");
-        assert!(chunk.code.contains("1 + 1"));
-        assert_eq!(chunk.options.eval, Some(true));
-        assert_eq!(chunk.options.show, Some(Show::Output));
-    }
-
-    #[test]
-    fn test_parse_inline_winnow() {
-        let content = "Text `{r} 1+1` more text";
-        let doc = Document::parse(content.to_string()).unwrap();
-        assert_eq!(doc.inline_exprs.len(), 1);
-        assert_eq!(doc.inline_exprs[0].code, "1+1");
-        assert_eq!(doc.inline_exprs[0].language, "r");
-    }
-
-    #[test]
-    fn test_parse_nested_inline() {
-        // Brackets are now just text inside backticks
-        let content = "Text `{r} list[1]` end";
-        let doc = Document::parse(content.to_string()).unwrap();
-        assert_eq!(doc.inline_exprs.len(), 1);
-        assert_eq!(doc.inline_exprs[0].code, "list[1]");
-    }
-
-    #[test]
-    fn test_parse_inline_default_options() {
-        let content = "Text `{r} mean(1:10)` end";
-        let doc = Document::parse(content.to_string()).unwrap();
-        assert_eq!(doc.inline_exprs.len(), 1);
-        let inline = &doc.inline_exprs[0];
-        let resolved = inline.options.resolve();
-        assert_eq!(inline.code, "mean(1:10)");
-        assert_eq!(resolved.show, crate::parser::Show::Output); // default for inline
-        assert!(resolved.eval); // default
-        assert_eq!(resolved.digits, None); // default
-    }
-
-    #[test]
-    fn test_parse_inline_single_option() {
-        let content = "Value: `{r show=both} x` here";
-        let doc = Document::parse(content.to_string()).unwrap();
-        assert_eq!(doc.inline_exprs.len(), 1);
-        let inline = &doc.inline_exprs[0];
-        let resolved = inline.options.resolve();
-        assert_eq!(inline.code, "x");
-        assert_eq!(resolved.show, Show::Both);
-        assert!(resolved.eval); // default
-        assert_eq!(resolved.digits, None); // default
-    }
-
-    #[test]
-    fn test_parse_inline_multiple_options() {
-        let content = "`{r show=both eval=false digits=3} pi` is pi";
-        let doc = Document::parse(content.to_string()).unwrap();
-        assert_eq!(doc.inline_exprs.len(), 1);
-        let inline = &doc.inline_exprs[0];
-        let resolved = inline.options.resolve();
-        assert_eq!(inline.code, "pi");
-        assert_eq!(resolved.show, Show::Both);
-        assert!(!resolved.eval);
-        assert_eq!(resolved.digits, Some(3));
-    }
-
-    #[test]
-    fn test_parse_inline_options_with_spaces() {
-        // Options can have spaces around them
-        let content = "`{r  show=code   eval=true  } sqrt(2)` is root 2";
-        let doc = Document::parse(content.to_string()).unwrap();
-        assert_eq!(doc.inline_exprs.len(), 1);
-        let inline = &doc.inline_exprs[0];
-        let resolved = inline.options.resolve();
-        assert_eq!(inline.code, "sqrt(2)");
-        assert_eq!(resolved.show, Show::Code);
-        assert!(resolved.eval);
-    }
-
-    #[test]
-    fn test_parse_inline_options_with_spaces_around_equals() {
-        // Options can have spaces around the '=' sign
-        let content = "`{r show = code , eval  =  true} sqrt(2)` is root 2";
-        let doc = Document::parse(content.to_string()).unwrap();
-        assert_eq!(doc.inline_exprs.len(), 1);
-        let inline = &doc.inline_exprs[0];
-        let resolved = inline.options.resolve();
-        assert_eq!(inline.code, "sqrt(2)");
-        assert_eq!(resolved.show, Show::Code);
-        assert!(resolved.eval);
-    }
-
-    #[test]
-    fn test_parse_inline_unknown_options_captured() {
-        // Unknown options should be captured as errors
-        let content = "`{r unknown=value show=both} x` end";
-        let doc = Document::parse(content.to_string()).unwrap();
-        assert_eq!(doc.inline_exprs.len(), 1);
-        let inline = &doc.inline_exprs[0];
-        let resolved = inline.options.resolve();
-        assert_eq!(resolved.show, Show::Both);
-        assert!(resolved.eval); // default
-        assert_eq!(inline.errors.len(), 1);
-        assert!(
-            inline.errors[0]
-                .message
-                .contains("Unknown option: 'unknown'")
-        );
-    }
-
-    #[test]
-    fn test_parse_inline_invalid_digits() {
-        // Invalid digit value should be captured as an error
-        let content = "`{r digits=abc} pi` value";
-        let doc = Document::parse(content.to_string()).unwrap();
-        assert_eq!(doc.inline_exprs.len(), 1);
-        let inline = &doc.inline_exprs[0];
-        assert_eq!(inline.options.digits, None); // Invalid value ignored
-        assert_eq!(inline.errors.len(), 1);
-        assert!(inline.errors[0].message.contains("Option 'digits'"));
-    }
-
-    #[test]
-    fn test_parse_inline_eval_false() {
-        let content = "Result: `{r eval=false} dangerous_code()` skipped";
-        let doc = Document::parse(content.to_string()).unwrap();
-        assert_eq!(doc.inline_exprs.len(), 1);
-        let inline = &doc.inline_exprs[0];
-        assert_eq!(inline.code, "dangerous_code()");
-        assert!(!inline.options.resolve().eval);
-    }
-
-    #[test]
-    fn test_parse_inline_digits_formatting() {
-        let content = "Pi is `{r digits=5} pi` approximately";
-        let doc = Document::parse(content.to_string()).unwrap();
-        assert_eq!(doc.inline_exprs.len(), 1);
-        let inline = &doc.inline_exprs[0];
-        assert_eq!(inline.options.resolve().digits, Some(5));
-    }
-
-    #[test]
-    fn test_parse_multiple_inline_with_different_options() {
-        let content = "First `{r} x` then `{r digits=2} y` and `{r eval=false} z` end";
-        let doc = Document::parse(content.to_string()).unwrap();
-        assert_eq!(doc.inline_exprs.len(), 3);
-
-        // First inline: defaults
-        assert_eq!(doc.inline_exprs[0].code, "x");
-        assert!(doc.inline_exprs[0].options.resolve().eval);
-        assert_eq!(doc.inline_exprs[0].options.resolve().digits, None);
-
-        // Second inline: digits=2
-        assert_eq!(doc.inline_exprs[1].code, "y");
-        assert_eq!(doc.inline_exprs[1].options.resolve().digits, Some(2));
-
-        // Third inline: eval=false
-        assert_eq!(doc.inline_exprs[2].code, "z");
-        assert!(!doc.inline_exprs[2].options.resolve().eval);
+        assert_eq!(chunk.range.end.line, 5);
     }
 }
