@@ -119,13 +119,48 @@ pub async fn handle_formatting(
                     line: 0,
                     character: 0,
                 },
-                end: Position {
-                    line: text.lines().count() as u32,
-                    character: text.lines().last().unwrap_or("").len() as u32,
-                },
+                end: document_end_position(&text),
             },
             new_text: final_text,
         }]))
+    }
+}
+
+/// Converts a UTF-16 column offset to a byte offset within a line.
+/// LSP positions use UTF-16 code units; Rust strings are UTF-8.
+/// For BMP characters (U+0000–U+FFFF) the two are identical, but characters
+/// outside the BMP (emoji, some CJK…) occupy 2 UTF-16 code units and 4 UTF-8
+/// bytes, so we must iterate code-point by code-point.
+fn utf16_to_byte_offset(line: &str, utf16_col: usize) -> usize {
+    let mut utf16_count = 0;
+    for (byte_idx, ch) in line.char_indices() {
+        if utf16_count >= utf16_col {
+            return byte_idx;
+        }
+        utf16_count += ch.len_utf16();
+    }
+    line.len()
+}
+
+/// Returns the LSP end-of-document position (UTF-16 column, 0-based line).
+///
+/// `text.lines().count()` is 1-based and collapses the virtual empty line
+/// produced by a trailing `\n`, so it cannot be used directly as an LSP line
+/// number.  Instead we iterate characters once to track line/column correctly.
+fn document_end_position(text: &str) -> Position {
+    let mut line = 0u32;
+    let mut col_utf16 = 0u32;
+    for ch in text.chars() {
+        if ch == '\n' {
+            line += 1;
+            col_utf16 = 0;
+        } else {
+            col_utf16 += ch.len_utf16() as u32;
+        }
+    }
+    Position {
+        line,
+        character: col_utf16,
     }
 }
 
@@ -158,28 +193,12 @@ fn apply_edits(text: &str, mut edits: Vec<TextEdit>) -> String {
 
         if start_line == end_line {
             let line = &mut lines[start_line];
-            let start_idx = line
-                .char_indices()
-                .nth(start_char)
-                .map(|(i, _)| i)
-                .unwrap_or(line.len());
-            let end_idx = line
-                .char_indices()
-                .nth(end_char)
-                .map(|(i, _)| i)
-                .unwrap_or(line.len());
+            let start_idx = utf16_to_byte_offset(line, start_char);
+            let end_idx = utf16_to_byte_offset(line, end_char);
             line.replace_range(start_idx..end_idx, &edit.new_text);
         } else {
-            let start_idx = lines[start_line]
-                .char_indices()
-                .nth(start_char)
-                .map(|(i, _)| i)
-                .unwrap_or(lines[start_line].len());
-            let end_idx = lines[end_line]
-                .char_indices()
-                .nth(end_char)
-                .map(|(i, _)| i)
-                .unwrap_or(lines[end_line].len());
+            let start_idx = utf16_to_byte_offset(&lines[start_line], start_char);
+            let end_idx = utf16_to_byte_offset(&lines[end_line], end_char);
 
             let mut new_content = lines[start_line][..start_idx].to_string();
             new_content.push_str(&edit.new_text);
@@ -379,6 +398,73 @@ mod tests {
             },
             work_done_progress_params: WorkDoneProgressParams::default(),
         }
+    }
+
+    // --- Unit tests for helpers ---
+
+    #[test]
+    fn test_document_end_position_no_trailing_newline() {
+        // "a\nb" → line 1, character 1
+        let pos = document_end_position("a\nb");
+        assert_eq!(pos.line, 1);
+        assert_eq!(pos.character, 1);
+    }
+
+    #[test]
+    fn test_document_end_position_with_trailing_newline() {
+        // "a\nb\n" → line 2, character 0  (virtual empty line after final \n)
+        let pos = document_end_position("a\nb\n");
+        assert_eq!(pos.line, 2);
+        assert_eq!(pos.character, 0);
+    }
+
+    #[test]
+    fn test_document_end_position_emoji() {
+        // 🦀 is U+1F980, outside BMP → 2 UTF-16 units
+        let pos = document_end_position("🦀");
+        assert_eq!(pos.line, 0);
+        assert_eq!(pos.character, 2);
+    }
+
+    #[test]
+    fn test_utf16_to_byte_offset_ascii() {
+        let line = "hello";
+        assert_eq!(utf16_to_byte_offset(line, 0), 0);
+        assert_eq!(utf16_to_byte_offset(line, 3), 3);
+        assert_eq!(utf16_to_byte_offset(line, 5), 5); // past-end clamps to len
+    }
+
+    #[test]
+    fn test_utf16_to_byte_offset_emoji() {
+        // "a🦀b": 'a'=1 UTF-16 unit, '🦀'=2 UTF-16 units, 'b'=1 UTF-16 unit
+        // UTF-16 offsets: a→0, 🦀→1, b→3
+        // Byte offsets:   a→0, 🦀→1, b→5 (4 UTF-8 bytes for 🦀)
+        let line = "a🦀b";
+        assert_eq!(utf16_to_byte_offset(line, 0), 0); // 'a'
+        assert_eq!(utf16_to_byte_offset(line, 1), 1); // '🦀'
+        assert_eq!(utf16_to_byte_offset(line, 3), 5); // 'b' (after 4-byte emoji)
+        assert_eq!(utf16_to_byte_offset(line, 4), 6); // past-end
+    }
+
+    #[test]
+    fn test_apply_edits_utf16_emoji() {
+        // Replace the emoji in "a🦀b" with "X"
+        // LSP sees "a🦀b" as: a=col 0, 🦀=col 1..3, b=col 3
+        let text = "a🦀b";
+        let edits = vec![TextEdit {
+            range: Range {
+                start: Position {
+                    line: 0,
+                    character: 1,
+                },
+                end: Position {
+                    line: 0,
+                    character: 3,
+                },
+            },
+            new_text: "X".to_string(),
+        }];
+        assert_eq!(apply_edits(text, edits), "aXb");
     }
 
     #[tokio::test]
