@@ -236,6 +236,21 @@ fn reconstruct_knot_document(formatted_typst: &str, clean_knot: &str) -> String 
         return clean_knot.to_string();
     }
 
+    // 2b. Language correspondence (pairwise).
+    // The mirror mask preserves fence tags verbatim, so a mismatch means
+    // Tinymist altered a raw-block header in an unexpected way.  The index-based
+    // substitution below would silently assign the wrong code to the wrong chunk
+    // without this guard.
+    if !original_doc
+        .chunks
+        .iter()
+        .zip(formatted_doc.chunks.iter())
+        .all(|(o, f)| o.language == f.language)
+    {
+        log::warn!("Formatting mismatch: chunk language changed. Falling back to clean Knot.");
+        return clean_knot.to_string();
+    }
+
     let mut final_text = String::with_capacity(formatted_typst.len());
     let mut last_pos = 0;
 
@@ -248,6 +263,23 @@ fn reconstruct_knot_document(formatted_typst: &str, clean_knot: &str) -> String 
         elements.push((inline.start, inline.end, false, i));
     }
     elements.sort_by_key(|e| e.0);
+
+    // 2c. Overlap guard.
+    // After sorting by start, each element must begin at or after the previous
+    // one ends.  The well-formed parser should never produce overlapping ranges,
+    // but if Tinymist returns unexpected content the substitution loop would
+    // attempt a backwards string slice and panic.  Catch it here and fall back
+    // gracefully instead.
+    {
+        let mut prev_end = 0usize;
+        for &(start, end, _, _) in &elements {
+            if start < prev_end || end < start {
+                log::warn!("Formatting mismatch: overlapping element positions. Falling back to clean Knot.");
+                return clean_knot.to_string();
+            }
+            prev_end = end;
+        }
+    }
 
     // 4. Substitution
     for (start, end, is_chunk, index) in elements {
@@ -398,6 +430,26 @@ mod tests {
             },
             work_done_progress_params: WorkDoneProgressParams::default(),
         }
+    }
+
+    // --- Unit tests for reconstruct_knot_document fallbacks ---
+
+    #[test]
+    fn test_reconstruct_fallback_count_mismatch() {
+        // formatted_typst has two chunks, clean_knot only one → count mismatch
+        let clean_knot = "```{r}\nx <- 1\n```\n";
+        let formatted_typst = "```{r}\n\n```\n\n```{r}\n\n```\n";
+        let result = reconstruct_knot_document(formatted_typst, clean_knot);
+        assert_eq!(result, clean_knot);
+    }
+
+    #[test]
+    fn test_reconstruct_fallback_language_mismatch() {
+        // Simulates Tinymist altering the fence language tag
+        let clean_knot = "```{r}\nx <- 1\n```\n";
+        let formatted_typst = "```{python}\n\n```\n";
+        let result = reconstruct_knot_document(formatted_typst, clean_knot);
+        assert_eq!(result, clean_knot);
     }
 
     // --- Unit tests for helpers ---
