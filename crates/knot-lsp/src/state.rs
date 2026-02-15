@@ -25,6 +25,12 @@ pub struct DocumentState {
 }
 
 /// Centralized state for the Knot Language Server
+///
+/// All fields are `Arc<RwLock<…>>` so cloning shares the same underlying
+/// data — it does NOT deep-copy the state.  This is intentional: clones are
+/// used to hand the state to background tasks (`clone_for_task`) while keeping
+/// everything in sync.
+#[derive(Clone)]
 pub struct ServerState {
     /// Per-document state
     pub documents: Arc<RwLock<HashMap<Url, DocumentState>>>,

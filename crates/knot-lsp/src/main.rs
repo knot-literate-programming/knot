@@ -235,16 +235,7 @@ impl KnotLanguageServer {
     fn clone_for_task(&self) -> Arc<Self> {
         Arc::new(KnotLanguageServer {
             client: self.client.clone(),
-            state: ServerState {
-                documents: self.state.documents.clone(),
-                tinymist: self.state.tinymist.clone(),
-                executors: self.state.executors.clone(),
-                formatter: self.state.formatter.clone(),
-                air_path_override: self.state.air_path_override.clone(),
-                ruff_path_override: self.state.ruff_path_override.clone(),
-                tinymist_path_override: self.state.tinymist_path_override.clone(),
-                loaded_snapshot_hash: self.state.loaded_snapshot_hash.clone(),
-            },
+            state: self.state.clone(),
             root_uri: self.root_uri.clone(),
         })
     }
