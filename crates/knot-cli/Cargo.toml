@@ -1,6 +1,6 @@
 [package]
 name = "knot-cli"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2024"
 repository = "https://github.com/knot-literate-programming/knot"
 
@@ -18,7 +18,7 @@ log = "0.4.29"
 pathdiff = "0.2"
 include_dir = "0.7"
 notify = "6.1"
-toml = "0.8"
+toml = "0.8.19"
 
 [dev-dependencies]
 tempfile = "3.24"
