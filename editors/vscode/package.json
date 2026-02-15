@@ -152,7 +152,12 @@
         "knot.formatter.air.path": {
           "type": "string",
           "default": "air",
-          "description": "Path to Air formatter executable"
+          "description": "Path to Air formatter executable (used for R chunks)"
+        },
+        "knot.formatter.ruff.path": {
+          "type": "string",
+          "default": "ruff",
+          "description": "Path to Ruff formatter executable (used for Python chunks)"
         },
         "knot.formatter.formatOnType": {
           "type": "boolean",

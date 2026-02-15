@@ -2,6 +2,7 @@ use knot_core::cache::Cache;
 use knot_core::config::Config;
 use knot_core::get_cache_dir;
 use serde::Deserialize;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tower_lsp::jsonrpc::Result;
@@ -50,6 +51,26 @@ impl LanguageServer for KnotLanguageServer {
             }
         }
 
+        // Read binary paths sent by the client (VS Code extension).
+        if let Some(opts) = params.initialization_options {
+            if let Some(air) = opts.get("airPath").and_then(|v| v.as_str()) {
+                if !air.is_empty() && air != "air" {
+                    *self.state.air_path_override.write().await = Some(PathBuf::from(air));
+                }
+            }
+            if let Some(ruff) = opts.get("ruffPath").and_then(|v| v.as_str()) {
+                if !ruff.is_empty() && ruff != "ruff" {
+                    *self.state.ruff_path_override.write().await = Some(PathBuf::from(ruff));
+                }
+            }
+            if let Some(tinymist) = opts.get("tinymistPath").and_then(|v| v.as_str()) {
+                if !tinymist.is_empty() {
+                    *self.state.tinymist_path_override.write().await =
+                        Some(PathBuf::from(tinymist));
+                }
+            }
+        }
+
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
@@ -81,9 +102,9 @@ impl LanguageServer for KnotLanguageServer {
             .log_message(MessageType::INFO, "Knot LSP server initialized")
             .await;
         let air_path = self.state.air_path_override.read().await.clone();
-        if let Ok(f) = formatter::AirFormatter::new(air_path) {
-            *self.state.formatter.write().await = Some(f);
-        }
+        let ruff_path = self.state.ruff_path_override.read().await.clone();
+        *self.state.formatter.write().await =
+            Some(formatter::CodeFormatter::new(air_path, ruff_path));
         // Spawn tinymist initialization in background to avoid blocking the LSP message loop
         let this = self.clone_for_task();
         let root_uri = self.root_uri.read().await.clone();
@@ -220,6 +241,7 @@ impl KnotLanguageServer {
                 executors: self.state.executors.clone(),
                 formatter: self.state.formatter.clone(),
                 air_path_override: self.state.air_path_override.clone(),
+                ruff_path_override: self.state.ruff_path_override.clone(),
                 tinymist_path_override: self.state.tinymist_path_override.clone(),
                 loaded_snapshot_hash: self.state.loaded_snapshot_hash.clone(),
             },

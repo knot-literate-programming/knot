@@ -1,4 +1,4 @@
-use crate::formatter::AirFormatter;
+use crate::formatter::CodeFormatter;
 use crate::position_mapper::PositionMapper;
 use crate::proxy::TinymistProxy;
 use knot_core::executors::ExecutorManager;
@@ -32,10 +32,11 @@ pub struct ServerState {
     /// Global services and shared resources
     pub tinymist: Arc<RwLock<Option<TinymistProxy>>>,
     pub executors: Arc<RwLock<HashMap<Url, ExecutorManager>>>,
-    pub formatter: Arc<RwLock<Option<AirFormatter>>>,
+    pub formatter: Arc<RwLock<Option<CodeFormatter>>>,
 
     /// Global configuration and caches
     pub air_path_override: Arc<RwLock<Option<PathBuf>>>,
+    pub ruff_path_override: Arc<RwLock<Option<PathBuf>>>,
     pub tinymist_path_override: Arc<RwLock<Option<PathBuf>>>,
     pub loaded_snapshot_hash: Arc<RwLock<HashMap<String, String>>>,
 }
@@ -48,6 +49,7 @@ impl ServerState {
             executors: Arc::new(RwLock::new(HashMap::new())),
             formatter: Arc::new(RwLock::new(None)),
             air_path_override: Arc::new(RwLock::new(None)),
+            ruff_path_override: Arc::new(RwLock::new(None)),
             tinymist_path_override: Arc::new(RwLock::new(None)),
             loaded_snapshot_hash: Arc::new(RwLock::new(HashMap::new())),
         }

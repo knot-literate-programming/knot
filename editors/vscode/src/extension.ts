@@ -61,7 +61,7 @@ export async function activate(context: ExtensionContext) {
         transport: TransportKind.stdio,
     };
 
-    // Air path resolution (kept for future manual use)
+    // Air path resolution: honour setting, then common install locations
     let airPath = config.get<string>('formatter.air.path', 'air');
     if (airPath === 'air') {
         const homeAir = path.join(os.homedir(), 'bin', 'air');
@@ -82,6 +82,15 @@ export async function activate(context: ExtensionContext) {
                     }
                 }
             }
+        }
+    }
+
+    // Ruff path resolution: honour setting, then ~/bin/ruff
+    let ruffPath = config.get<string>('formatter.ruff.path', 'ruff');
+    if (ruffPath === 'ruff') {
+        const homeRuff = path.join(os.homedir(), 'bin', 'ruff');
+        if (fs.existsSync(homeRuff)) {
+            ruffPath = homeRuff;
         }
     }
 
@@ -111,6 +120,7 @@ export async function activate(context: ExtensionContext) {
         },
         initializationOptions: {
             airPath: airPath,
+            ruffPath: ruffPath,
             tinymistPath: tinymistPath
         },
         outputChannel: outputChannel,

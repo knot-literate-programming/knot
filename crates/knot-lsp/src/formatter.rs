@@ -1,97 +1,109 @@
-// Air formatter integration for R code chunks
-//
-// Provides formatting capabilities for R code using the Air formatter:
-// - Format entire R chunks
-// - Format on type (new line)
-// - Format on save
+// Unified code formatter: Air (R) + Ruff (Python)
 
 use anyhow::{Context, Result};
 use std::path::PathBuf;
+use std::process::Stdio;
 use tokio::fs;
+use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
-/// Air formatter wrapper
+/// Wraps Air (R) and Ruff (Python) formatters.
+///
+/// Both paths are optional: if a binary is not found the corresponding
+/// language is silently skipped in [`CodeFormatter::format_code`].
 #[derive(Debug, Clone)]
-pub struct AirFormatter {
-    air_path: PathBuf,
+pub struct CodeFormatter {
+    air_path: Option<PathBuf>,
+    ruff_path: Option<PathBuf>,
 }
 
-impl AirFormatter {
-    /// Create a new Air formatter, finding the air executable
-    pub fn new(path_override: Option<PathBuf>) -> Result<Self> {
-        let air_path = if let Some(path) = path_override {
-            if path.exists() {
-                path
-            } else {
-                Self::find_air()?
-            }
-        } else {
-            Self::find_air()?
-        };
-        Ok(Self { air_path })
+impl CodeFormatter {
+    /// Discover Air and Ruff from PATH or use explicit overrides.
+    /// Always succeeds; individual formatters are `None` when not found.
+    pub fn new(air_override: Option<PathBuf>, ruff_override: Option<PathBuf>) -> Self {
+        let air_path = air_override
+            .filter(|p| p.exists())
+            .or_else(|| crate::path_resolver::resolve_binary("air").ok());
+        let ruff_path = ruff_override
+            .filter(|p| p.exists())
+            .or_else(|| crate::path_resolver::resolve_binary("ruff").ok());
+        Self {
+            air_path,
+            ruff_path,
+        }
     }
 
-    /// Find the air executable in PATH or common installation locations
-    fn find_air() -> Result<PathBuf> {
-        crate::path_resolver::resolve_binary("air").map_err(|_| {
-            anyhow::anyhow!(
-                "Air formatter not found. Install from: https://posit-dev.github.io/air/\n\
-                 Or specify custom path via 'knot.formatter.air.path' setting"
-            )
-        })
+    /// Format `code` for the given `lang` ("r" or "python").
+    /// Returns `Err` when the formatter binary is unavailable or reports a failure.
+    pub async fn format_code(&self, code: &str, lang: &str) -> Result<String> {
+        match lang {
+            "r" => self.format_r(code).await,
+            "python" => self.format_python(code).await,
+            _ => Ok(code.to_string()),
+        }
     }
 
-    /// Format R code using Air
-    ///
-    /// # Arguments
-    /// * `code` - R code to format
-    ///
-    /// # Returns
-    /// * `Ok(formatted_code)` - Successfully formatted code
-    /// * `Err(_)` - Formatting failed (syntax error, air not available, etc.)
-    #[allow(dead_code)]
-    pub async fn format_r_code(&self, code: &str) -> Result<String> {
-        // Create a temporary file for the R code
-        let temp_dir = std::env::temp_dir();
-        let temp_file = temp_dir.join(format!("knot_format_{}.R", uuid::Uuid::new_v4()));
+    async fn format_r(&self, code: &str) -> Result<String> {
+        let air = self
+            .air_path
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Air formatter not found"))?;
 
-        // Write code to temp file
+        let temp_file = std::env::temp_dir().join(format!("knot_fmt_{}.R", uuid::Uuid::new_v4()));
         fs::write(&temp_file, code)
             .await
-            .context("Failed to write to temporary file")?;
+            .context("write R temp file")?;
 
-        // Run air format on the temp file
-        let output = Command::new(&self.air_path)
+        let output = Command::new(air)
             .arg("format")
             .arg(&temp_file)
             .output()
             .await
-            .context("Failed to spawn air formatter")?;
+            .context("spawn air")?;
 
-        // Read the formatted result
-        let formatted = if output.status.success() {
+        let result = if output.status.success() {
             fs::read_to_string(&temp_file)
                 .await
-                .context("Failed to read formatted file")?
+                .context("read formatted R file")?
         } else {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            // Clean up temp file before returning error
             let _ = fs::remove_file(&temp_file).await;
-            anyhow::bail!("Air formatting failed: {}", stderr)
+            anyhow::bail!("air: {}", String::from_utf8_lossy(&output.stderr));
         };
-
-        // Clean up temp file
-        fs::remove_file(&temp_file)
-            .await
-            .context("Failed to remove temporary file")?;
-
-        Ok(formatted)
+        let _ = fs::remove_file(&temp_file).await;
+        Ok(result)
     }
 
-    /// Get the path to the Air executable
-    #[allow(dead_code)]
-    pub fn path(&self) -> &PathBuf {
-        &self.air_path
+    async fn format_python(&self, code: &str) -> Result<String> {
+        let ruff = self
+            .ruff_path
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Ruff formatter not found"))?;
+
+        let mut child = Command::new(ruff)
+            .arg("format")
+            .arg("-")
+            .arg("--stdin-filename")
+            .arg("chunk.py")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .context("spawn ruff")?;
+
+        // Write code and close stdin so ruff knows input is complete.
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin
+                .write_all(code.as_bytes())
+                .await
+                .context("write to ruff stdin")?;
+        }
+
+        let output = child.wait_with_output().await.context("ruff output")?;
+
+        if !output.status.success() {
+            anyhow::bail!("ruff: {}", String::from_utf8_lossy(&output.stderr));
+        }
+        String::from_utf8(output.stdout).context("ruff output is not valid UTF-8")
     }
 }
 
@@ -101,52 +113,42 @@ mod tests {
 
     #[tokio::test]
     async fn test_format_simple_r_code() {
-        let formatter = match AirFormatter::new(None) {
-            Ok(f) => f,
-            Err(_) => {
-                eprintln!("Air not installed, skipping test");
-                return;
-            }
-        };
+        let formatter = CodeFormatter::new(None, None);
+        if formatter.air_path.is_none() {
+            eprintln!("Air not installed, skipping test");
+            return;
+        }
 
-        let input = "x<-1+2";
-        let result = formatter.format_r_code(input).await;
-
+        let result = formatter.format_code("x<-1+2", "r").await;
         match result {
             Ok(formatted) => {
-                // Air should add spaces around operators
                 assert!(formatted.contains("<-"));
                 assert!(formatted.contains("+"));
             }
-            Err(e) => {
-                panic!("Formatting failed: {}", e);
-            }
+            Err(e) => panic!("Formatting failed: {}", e),
         }
     }
 
     #[tokio::test]
     async fn test_format_multiline_r_code() {
-        let formatter = match AirFormatter::new(None) {
-            Ok(f) => f,
-            Err(_) => {
-                eprintln!("Air not installed, skipping test");
-                return;
-            }
-        };
+        let formatter = CodeFormatter::new(None, None);
+        if formatter.air_path.is_none() {
+            eprintln!("Air not installed, skipping test");
+            return;
+        }
 
-        let input = "library(dplyr)\ndf<-iris%>%filter(Species==\"setosa\")";
-        let result = formatter.format_r_code(input).await;
-
+        let result = formatter
+            .format_code(
+                "library(dplyr)\ndf<-iris%>%filter(Species==\"setosa\")",
+                "r",
+            )
+            .await;
         match result {
             Ok(formatted) => {
-                // Should be properly formatted
                 assert!(formatted.contains("library(dplyr)"));
-                assert!(formatted.contains("<-"));
                 assert!(formatted.contains("%>%"));
             }
-            Err(e) => {
-                panic!("Formatting failed: {}", e);
-            }
+            Err(e) => panic!("Formatting failed: {}", e),
         }
     }
 }

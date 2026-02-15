@@ -34,9 +34,15 @@ pub async fn handle_formatting(
             clean_knot_text.push_str(&text[last_pos..chunk.start_byte]);
         }
 
-        // Format code with external tools
-        let formatted_code =
-            knot_core::compiler::formatters::format_code(&chunk.code, &chunk.language).ok();
+        // Format code with external tools (Air for R, Ruff for Python)
+        let formatted_code = {
+            let fmt = state.formatter.read().await;
+            if let Some(f) = fmt.as_ref() {
+                f.format_code(&chunk.code, &chunk.language).await.ok()
+            } else {
+                None
+            }
+        };
 
         // Append formatted chunk (structural + code)
         clean_knot_text.push_str(&chunk.format(formatted_code.as_deref(), None));
@@ -348,8 +354,14 @@ pub async fn handle_format_chunk(
 
     if let Some(chunk) = target_chunk {
         // 3. Format the chunk
-        let formatted_code =
-            knot_core::compiler::formatters::format_code(&chunk.code, &chunk.language).ok();
+        let formatted_code = {
+            let fmt = state.formatter.read().await;
+            if let Some(f) = fmt.as_ref() {
+                f.format_code(&chunk.code, &chunk.language).await.ok()
+            } else {
+                None
+            }
+        };
         let formatted = chunk.format(formatted_code.as_deref(), None);
 
         let original_chunk = &text[chunk.start_byte..chunk.end_byte];
@@ -385,16 +397,14 @@ pub async fn handle_format_chunk(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::formatter::AirFormatter;
+    use crate::formatter::CodeFormatter;
     use crate::position_mapper::PositionMapper;
     use crate::state::ServerState;
 
     async fn create_test_state(uri: &str, text: &str, with_formatter: bool) -> (ServerState, Url) {
         let state = ServerState::new();
         if with_formatter {
-            if let Ok(f) = AirFormatter::new(None) {
-                *state.formatter.write().await = Some(f);
-            }
+            *state.formatter.write().await = Some(CodeFormatter::new(None, None));
         }
         let url = Url::parse(uri).unwrap();
 
