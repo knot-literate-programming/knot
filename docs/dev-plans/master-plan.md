@@ -20,15 +20,16 @@ This document tracks the high-level goals and roadmap for the Knot project. Deta
 - ✅ Customizable warnings (styles & visibility)
 - ✅ Zero-escape robust execution model (temp files)
 
-**LSP:** ~90% complete
+**LSP:** ~95% complete
 - ✅ Hover (chunks, R, Python, Typst — stable & responsive)
 - ✅ Completion (chunk options, R, Python, Typst)
 - ✅ Diagnostics (parsing errors, structure validation)
 - ✅ **Execution Diagnostics**: Runtime errors and warnings surfaced in the editor from cache.
 - ✅ Document symbols (including all show variants)
 - ✅ **Architectural Hardening**: Consolidated state, deadlock-free locking, and secure virtual URI scheme.
-- ✅ **Hybrid formatting**: Integrated Air (R), Ruff (Python) and Tinymist (Typst).
+- ✅ **Hybrid formatting**: Full 3-phase pipeline (Air → Tinymist → reconstruction) with graceful fallbacks. See [formatters.md](formatters.md).
 - ⏳ Go to Definition & References
+- ⏳ Error surfacing for formatter/Tinymist failures (`window/showMessage`)
 
 **CLI:** ~98% complete
 - ✅ Compile, watch, init
@@ -51,7 +52,8 @@ Make Knot feel like a native editor for both Typst and the embedded languages.
 - [ ] **Unknown Option Warnings**: Validate YAML options against `OptionMetadata` to catch typos.
 
 ### 2. Standard Tooling Integration
-- [ ] **Hybrid Formatting**: Integrate Air (R), Ruff (Python) and Tinymist (Typst) into a single command.
+- [x] **Hybrid Formatting**: Full 3-phase pipeline implemented in LSP (Air + Ruff + Tinymist). See [formatters.md](formatters.md).
+- [ ] **Formatter error surfacing**: Forward Tinymist `window/showMessage` to client; generate notifications for Air/Ruff failures (at most once per session).
 - [ ] **Julia Support**: Extend the robust execution model to the Julia language.
 
 ### 3. Documentation & Examples
@@ -80,8 +82,9 @@ Make Knot accessible and showcase its capabilities.
 ### Knot LSP
 - [x] **Position Mapping**: Robust UTF-16 aware coordinate translation.
 - [x] **Runtime Diagnostics**: Errors and warnings from build/watch surfaced in VS Code.
+- [x] **Hybrid Formatting**: Full 3-phase pipeline (Air + Ruff + Tinymist) with mirror mask and reconstruction guards.
 - [ ] **Go to Definition**: Navigate to symbols across languages.
-- [ ] **Hybrid Formatting**: Air (R) + Ruff (Python) + Tinymist (Typst).
+- [ ] **Formatter error surfacing**: Notify user on Air/Ruff/Tinymist failures via `window/showMessage`.
 - [ ] **Variable Explorer**: Interactive introspection of live sessions.
 
 ### Knot CLI
