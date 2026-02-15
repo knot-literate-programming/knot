@@ -229,6 +229,20 @@ fn apply_edits(text: &str, mut edits: Vec<TextEdit>) -> String {
     result
 }
 
+/// A positioned element in the formatted Typst document.
+struct Element {
+    start: usize,
+    end: usize,
+    kind: ElementKind,
+}
+
+enum ElementKind {
+    /// A code chunk; the `usize` is the index into the original document's chunk list.
+    Chunk(usize),
+    /// An inline expression; the `usize` is the index into the original document's inline list.
+    Inline(usize),
+}
+
 /// Reconstructs the Knot document by finding Knot elements in the formatted Typst.
 fn reconstruct_knot_document(formatted_typst: &str, clean_knot: &str) -> String {
     // 1. Parse both documents
@@ -268,14 +282,22 @@ fn reconstruct_knot_document(formatted_typst: &str, clean_knot: &str) -> String 
     let mut last_pos = 0;
 
     // 3. Build elements list
-    let mut elements: Vec<(usize, usize, bool, usize)> = Vec::new();
+    let mut elements: Vec<Element> = Vec::new();
     for (i, chunk) in formatted_doc.chunks.iter().enumerate() {
-        elements.push((chunk.start_byte, chunk.end_byte, true, i));
+        elements.push(Element {
+            start: chunk.start_byte,
+            end: chunk.end_byte,
+            kind: ElementKind::Chunk(i),
+        });
     }
     for (i, inline) in formatted_doc.inline_exprs.iter().enumerate() {
-        elements.push((inline.start, inline.end, false, i));
+        elements.push(Element {
+            start: inline.start,
+            end: inline.end,
+            kind: ElementKind::Inline(i),
+        });
     }
-    elements.sort_by_key(|e| e.0);
+    elements.sort_by_key(|e| e.start);
 
     // 2c. Overlap guard.
     // After sorting by start, each element must begin at or after the previous
@@ -285,44 +307,47 @@ fn reconstruct_knot_document(formatted_typst: &str, clean_knot: &str) -> String 
     // gracefully instead.
     {
         let mut prev_end = 0usize;
-        for &(start, end, _, _) in &elements {
-            if start < prev_end || end < start {
+        for elem in &elements {
+            if elem.start < prev_end || elem.end < elem.start {
                 log::warn!("Formatting mismatch: overlapping element positions. Falling back to clean Knot.");
                 return clean_knot.to_string();
             }
-            prev_end = end;
+            prev_end = elem.end;
         }
     }
 
     // 4. Substitution
-    for (start, end, is_chunk, index) in elements {
+    for elem in elements {
         // Append Typst text before the element
-        final_text.push_str(&formatted_typst[last_pos..start]);
+        final_text.push_str(&formatted_typst[last_pos..elem.start]);
 
-        if is_chunk {
-            // A. Detect indentation provided by Typst (Tinymist)
-            let line_start = formatted_typst[..start]
-                .rfind('\n')
-                .map(|p| p + 1)
-                .unwrap_or(0);
-            let indentation = &formatted_typst[line_start..start];
-            let indent_str = if indentation.chars().all(|c| c.is_whitespace()) {
-                indentation
-            } else {
-                ""
-            };
+        match elem.kind {
+            ElementKind::Chunk(i) => {
+                // A. Detect indentation provided by Typst (Tinymist)
+                let line_start = formatted_typst[..elem.start]
+                    .rfind('\n')
+                    .map(|p| p + 1)
+                    .unwrap_or(0);
+                let indentation = &formatted_typst[line_start..elem.start];
+                let indent_str = if indentation.chars().all(|c| c.is_whitespace()) {
+                    indentation
+                } else {
+                    ""
+                };
 
-            // B. Format with the indentation detected by Typst, without
-            // cloning or mutating the AST node.
-            final_text.push_str(&original_doc.chunks[index].format(None, Some(indent_str)));
-        } else {
-            let clean_inline = &original_doc.inline_exprs[index];
-            final_text.push_str(&format!(
-                "`{{{}}} {}`",
-                clean_inline.language, clean_inline.code
-            ));
+                // B. Format with the indentation detected by Typst, without
+                // cloning or mutating the AST node.
+                final_text.push_str(&original_doc.chunks[i].format(None, Some(indent_str)));
+            }
+            ElementKind::Inline(i) => {
+                let clean_inline = &original_doc.inline_exprs[i];
+                final_text.push_str(&format!(
+                    "`{{{}}} {}`",
+                    clean_inline.language, clean_inline.code
+                ));
+            }
         }
-        last_pos = end;
+        last_pos = elem.end;
     }
 
     if last_pos < formatted_typst.len() {
