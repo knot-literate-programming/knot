@@ -488,6 +488,72 @@ mod tests {
         }
     }
 
+    // --- Unit tests for reconstruct_knot_document happy path ---
+
+    #[test]
+    fn test_reconstruct_happy_path() {
+        // clean_knot: Phase-A output with real code
+        let clean_knot = "Some text.\n\n```{r}\nx <- 42\nprint(x)\n```\n\nMore text.\n";
+        // formatted_typst: the mask after Tinymist (code body replaced by blank lines,
+        // but surrounding Typst structure may have been reformatted)
+        let formatted_typst = "Some text.\n\n```{r}\n\n\n```\n\nMore text.\n";
+
+        let result = reconstruct_knot_document(formatted_typst, clean_knot);
+
+        assert!(result.contains("x <- 42"), "original code must be restored");
+        assert!(
+            result.contains("print(x)"),
+            "all code lines must be restored"
+        );
+        assert!(result.contains("```{r}"), "fence header must be preserved");
+        assert!(
+            result.contains("Some text."),
+            "surrounding Typst content must be kept"
+        );
+        assert!(
+            result.contains("More text."),
+            "surrounding Typst content must be kept"
+        );
+        // The empty mask body must NOT appear in the final result
+        assert!(!result.contains("```{r}\n\n\n```"));
+    }
+
+    #[test]
+    fn test_reconstruct_happy_path_preserves_typst_structure() {
+        // Verifies that Typst-level structural changes (e.g., extra blank line added
+        // by Tinymist between chunks) are preserved while code is restored.
+        let clean_knot = "```{r}\nx <- 1\n```\n```{python}\ny = 2\n```\n";
+        // Tinymist added a blank line between the two chunks
+        let formatted_typst = "```{r}\n\n```\n\n```{python}\n\n```\n";
+
+        let result = reconstruct_knot_document(formatted_typst, clean_knot);
+
+        assert!(result.contains("x <- 1"), "R code must be restored");
+        assert!(result.contains("y = 2"), "Python code must be restored");
+        // The blank line added by Tinymist between chunks must be kept
+        let between = result.find("```{r}").and_then(|start| {
+            result[start..]
+                .find("```{python}")
+                .map(|end| &result[start..start + end])
+        });
+        assert!(
+            between.map(|s| s.contains("\n\n")).unwrap_or(false),
+            "Tinymist-added blank line between chunks must be preserved"
+        );
+    }
+
+    #[test]
+    fn test_reconstruct_happy_path_with_inline() {
+        // Inline expression: mask replaces code with spaces, reconstruction restores it.
+        // "`{r} 1+1`" → mask "`{r}    `" → reconstructed "`{r} 1+1`"
+        let clean_knot = "Value is `{r} 1+1` here.\n";
+        let formatted_typst = "Value is `{r}    ` here.\n";
+
+        let result = reconstruct_knot_document(formatted_typst, clean_knot);
+
+        assert_eq!(result, "Value is `{r} 1+1` here.\n");
+    }
+
     // --- Unit tests for reconstruct_knot_document fallbacks ---
 
     #[test]
@@ -573,6 +639,54 @@ mod tests {
             new_text: "X".to_string(),
         }];
         assert_eq!(apply_edits(text, edits), "aXb");
+    }
+
+    // --- Integration tests for Phase A/B fallbacks ---
+
+    #[tokio::test]
+    async fn test_formatting_without_formatter() {
+        // When no formatter is configured, Phase A is skipped gracefully:
+        // code is unchanged but structural normalization still applies.
+        let text = "```{r   my-chunk   }\nx<-1\n```\n";
+        let (state, uri) = create_test_state("file:///test.knot", text, false).await;
+        // state.formatter is None
+
+        let params = create_formatting_params(&uri);
+        let result = handle_formatting(&state, params).await.unwrap();
+
+        // Structural normalization (chunk header) must still happen
+        assert!(result.is_some());
+        let new_text = &result.unwrap()[0].new_text;
+        assert!(
+            new_text.contains("```{r my-chunk}"),
+            "header must be normalized"
+        );
+        // But code is untouched (no Air/Ruff ran)
+        assert!(
+            new_text.contains("x<-1"),
+            "code must be unchanged without formatter"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_formatting_without_tinymist() {
+        // When Tinymist is unavailable, Phase B is skipped gracefully:
+        // Phase A (code formatting) still runs and produces a result.
+        let text = "```{r   my-chunk   }\nprint(42)\n```\n";
+        let (state, uri) = create_test_state("file:///test.knot", text, false).await;
+        // state.tinymist is None — Phase B is a no-op
+
+        let params = create_formatting_params(&uri);
+        let result = handle_formatting(&state, params).await.unwrap();
+
+        // Should still normalize structure (Phase A)
+        assert!(result.is_some());
+        let new_text = &result.unwrap()[0].new_text;
+        assert!(
+            new_text.contains("```{r my-chunk}"),
+            "header must be normalized"
+        );
+        assert!(new_text.contains("print(42)"), "code must be preserved");
     }
 
     #[tokio::test]
