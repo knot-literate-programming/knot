@@ -364,84 +364,60 @@ impl KnotLanguageServer {
         };
         let file_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("main");
         let cache_dir = get_cache_dir(&project_root, file_stem);
-        if let Ok(cache) = Cache::new(cache_dir.clone()) {
-            if let Some(last_chunk) = cache
-                .metadata
-                .chunks
-                .iter()
-                .filter(|c| c.language == "r" && cache.has_snapshot(&c.hash, "RData"))
-                .max_by_key(|c| c.index)
-            {
-                let reload_key = format!("{}::r", uri);
-                if self
-                    .state
-                    .loaded_snapshot_hash
-                    .read()
-                    .await
-                    .get(&reload_key)
-                    != Some(&last_chunk.hash)
-                {
-                    if let Some(manager) = self.state.executors.write().await.get_mut(uri) {
-                        if let Ok(executor) = manager.get_executor("r") {
-                            if executor
-                                .load_session(&cache.get_snapshot_path(&last_chunk.hash, "RData"))
-                                .is_ok()
-                            {
-                                self.state
-                                    .loaded_snapshot_hash
-                                    .write()
-                                    .await
-                                    .insert(reload_key, last_chunk.hash.clone());
-                                self.client
-                                    .log_message(
-                                        MessageType::INFO,
-                                        format!("Synced R session (chunk {})", last_chunk.index),
-                                    )
-                                    .await;
-                            }
-                        }
-                    }
-                }
-            }
-            if let Some(last_chunk) = cache
-                .metadata
-                .chunks
-                .iter()
-                .filter(|c| c.language == "python" && cache.has_snapshot(&c.hash, "pkl"))
-                .max_by_key(|c| c.index)
-            {
-                let reload_key = format!("{}::python", uri);
-                if self
-                    .state
-                    .loaded_snapshot_hash
-                    .read()
-                    .await
-                    .get(&reload_key)
-                    != Some(&last_chunk.hash)
-                {
-                    if let Some(manager) = self.state.executors.write().await.get_mut(uri) {
-                        if let Ok(executor) = manager.get_executor("python") {
-                            if executor
-                                .load_session(&cache.get_snapshot_path(&last_chunk.hash, "pkl"))
-                                .is_ok()
-                            {
-                                self.state
-                                    .loaded_snapshot_hash
-                                    .write()
-                                    .await
-                                    .insert(reload_key, last_chunk.hash.clone());
-                                self.client
-                                    .log_message(
-                                        MessageType::INFO,
-                                        format!(
-                                            "Synced Python session (chunk {})",
-                                            last_chunk.index
-                                        ),
-                                    )
-                                    .await;
-                            }
-                        }
-                    }
+        if let Ok(cache) = Cache::new(cache_dir) {
+            self.try_load_snapshot(uri, &cache, "r", "RData").await;
+            self.try_load_snapshot(uri, &cache, "python", "pkl").await;
+        }
+    }
+
+    /// Reload the most recent executor session snapshot for one language if it
+    /// differs from the one already loaded (avoids redundant I/O on every save).
+    async fn try_load_snapshot(&self, uri: &Url, cache: &Cache, language: &str, extension: &str) {
+        let last_chunk = match cache
+            .metadata
+            .chunks
+            .iter()
+            .filter(|c| c.language == language && cache.has_snapshot(&c.hash, extension))
+            .max_by_key(|c| c.index)
+        {
+            Some(c) => c,
+            None => return,
+        };
+
+        let reload_key = format!("{}::{}", uri, language);
+
+        if self
+            .state
+            .loaded_snapshot_hash
+            .read()
+            .await
+            .get(&reload_key)
+            == Some(&last_chunk.hash)
+        {
+            return; // Already up to date
+        }
+
+        let snapshot_path = cache.get_snapshot_path(&last_chunk.hash, extension);
+        let chunk_index = last_chunk.index;
+
+        if let Some(manager) = self.state.executors.write().await.get_mut(uri) {
+            if let Ok(executor) = manager.get_executor(language) {
+                if executor.load_session(&snapshot_path).is_ok() {
+                    self.state
+                        .loaded_snapshot_hash
+                        .write()
+                        .await
+                        .insert(reload_key, last_chunk.hash.clone());
+                    self.client
+                        .log_message(
+                            MessageType::INFO,
+                            format!(
+                                "Synced {} session (chunk {})",
+                                language.to_uppercase(),
+                                chunk_index
+                            ),
+                        )
+                        .await;
                 }
             }
         }
