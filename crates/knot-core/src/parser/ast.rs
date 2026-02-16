@@ -242,6 +242,11 @@ macro_rules! define_options {
                             _ => toml::to_string(value).unwrap_or_default().trim().to_string(),
                         };
                         self.codly_options.insert(codly_key, value_str);
+                    } else {
+                        log::warn!(
+                            "Unknown option in knot.toml: '{}' — ignored. Check for typos.",
+                            key
+                        );
                     }
                 }
             }
