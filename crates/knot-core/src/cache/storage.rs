@@ -94,20 +94,53 @@ pub fn get_cached_result(
         }
     }
 
-    // Reconstruct result based on file types
-    // For now, we handle single file results (Text, Plot, or DataFrame)
-    // The combined cases (TextAndPlot, DataFrameAndPlot) will need more logic
-    let result_path = cache_dir.join(&entry.files[0]);
-    let ext = result_path.extension().and_then(|e| e.to_str());
-
-    let result = match ext {
-        Some("txt") => {
-            let text = fs::read_to_string(&result_path)?;
-            ExecutionResult::Text(text)
+    // Classify a cached file path by its extension
+    fn file_type(path: &Path) -> &'static str {
+        match path.extension().and_then(|e| e.to_str()) {
+            Some("txt") => "text",
+            Some("svg") | Some("png") => "plot",
+            Some("csv") => "dataframe",
+            _ => "unknown",
         }
-        Some("svg") | Some("png") => ExecutionResult::Plot(result_path),
-        Some("csv") => ExecutionResult::DataFrame(result_path),
-        _ => return Err(anyhow!("Unknown cache file type: {:?}", result_path)),
+    }
+
+    // Reconstruct the correct ExecutionResult variant based on number and types of files.
+    // save_result always writes files in a stable order:
+    //   Text/Plot/DataFrame   → [file]
+    //   TextAndPlot           → [txt, plot]
+    //   DataFrameAndPlot      → [csv, plot]
+    let result = match entry.files.as_slice() {
+        [single] => {
+            let path = cache_dir.join(single);
+            match file_type(&path) {
+                "text" => ExecutionResult::Text(fs::read_to_string(&path)?),
+                "plot" => ExecutionResult::Plot(path),
+                "dataframe" => ExecutionResult::DataFrame(path),
+                _ => return Err(anyhow!("Unknown cache file type: {:?}", path)),
+            }
+        }
+        [first, second] => {
+            let path0 = cache_dir.join(first);
+            let path1 = cache_dir.join(second);
+            match (file_type(&path0), file_type(&path1)) {
+                ("text", "plot") => ExecutionResult::TextAndPlot {
+                    text: fs::read_to_string(&path0)?,
+                    plot: path1,
+                },
+                ("dataframe", "plot") => ExecutionResult::DataFrameAndPlot {
+                    dataframe: path0,
+                    plot: path1,
+                },
+                _ => {
+                    return Err(anyhow!(
+                        "Unexpected 2-file cache combination: {:?} + {:?}",
+                        path0,
+                        path1
+                    ));
+                }
+            }
+        }
+        files => return Err(anyhow!("Unexpected number of cache files: {}", files.len())),
     };
 
     Ok(ExecutionOutput {

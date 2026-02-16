@@ -102,6 +102,8 @@ pub fn metadata_to_execution_result(
     let mut text_content = String::new();
     let mut plot_path: Option<PathBuf> = None;
     let mut dataframe_path: Option<PathBuf> = None;
+    let mut plot_count = 0usize;
+    let mut dataframe_count = 0usize;
 
     for item in metadata.results {
         match item {
@@ -112,12 +114,29 @@ pub fn metadata_to_execution_result(
                 text_content.push_str(content.as_str());
             }
             OutputMetadata::Plot { path, .. } => {
+                plot_count += 1;
                 plot_path = Some(path);
             }
             OutputMetadata::DataFrame { path } => {
+                dataframe_count += 1;
                 dataframe_path = Some(path);
             }
         }
+    }
+
+    if plot_count > 1 {
+        log::warn!(
+            "Chunk produced {} plots; only the last one is captured. \
+             Knot currently supports one plot per chunk.",
+            plot_count
+        );
+    }
+    if dataframe_count > 1 {
+        log::warn!(
+            "Chunk produced {} dataframes; only the last one is captured. \
+             Knot currently supports one dataframe per chunk.",
+            dataframe_count
+        );
     }
 
     if text_content.is_empty() && !stdout_text.trim().is_empty() {
