@@ -111,7 +111,7 @@ pub fn metadata_to_execution_result(
                 if !text_content.is_empty() {
                     text_content.push('\n');
                 }
-                text_content.push_str(content.as_str());
+                text_content.push_str(&content.to_string());
             }
             OutputMetadata::Plot { path, .. } => {
                 plot_count += 1;
