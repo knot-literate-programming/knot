@@ -67,10 +67,10 @@ pub async fn handle_formatting(
                         {
                             doc_state.formatting_error_notified = true;
                             let msg = format!(
-                                    "Formatting failed for {} chunk: {}. Structural normalization will still be applied.",
-                                    lang.to_uppercase(),
-                                    e
-                                );
+                                "Formatting failed for {} chunk: {}. Structural normalization will still be applied.",
+                                lang.to_uppercase(),
+                                e
+                            );
                             let client_inner = client.clone();
                             tokio::spawn(async move {
                                 let _ = client_inner.show_message(MessageType::WARNING, msg).await;

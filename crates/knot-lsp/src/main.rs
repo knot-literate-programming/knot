@@ -55,12 +55,14 @@ impl LanguageServer for KnotLanguageServer {
         // Read binary paths sent by the client (VS Code extension).
         if let Some(opts) = params.initialization_options {
             if let Some(air) = opts.get("airPath").and_then(|v| v.as_str())
-                && !air.is_empty() && air != "air"
+                && !air.is_empty()
+                && air != "air"
             {
                 *self.state.air_path_override.write().await = Some(PathBuf::from(air));
             }
             if let Some(ruff) = opts.get("ruffPath").and_then(|v| v.as_str())
-                && !ruff.is_empty() && ruff != "ruff"
+                && !ruff.is_empty()
+                && ruff != "ruff"
             {
                 *self.state.ruff_path_override.write().await = Some(PathBuf::from(ruff));
             }
@@ -431,7 +433,8 @@ impl KnotLanguageServer {
             && let (Ok(virtual_uri), Ok(mut diagnostics)) = (
                 Url::parse(uri_str),
                 serde_json::from_value::<Vec<Diagnostic>>(diagnostics_val.clone()),
-            ) {
+            )
+        {
             let uri = self.resolve_virtual_uri(&virtual_uri);
             let mut docs = self.state.documents.write().await;
             if let Some(doc) = docs.get_mut(&uri) {

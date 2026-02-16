@@ -36,13 +36,15 @@ pub async fn handle_completion(
 
         let lines: Vec<&str> = text.lines().collect();
         let line_text = lines.get(line).unwrap_or(&"");
-        
+
         // Check if the current position is on an option line (#|)
         let prefix_part = if (pos.character as usize) <= line_text.encode_utf16().count() {
             let mut utf16_count = 0;
             let mut byte_idx = 0;
             for c in line_text.chars() {
-                if utf16_count >= pos.character as usize { break; }
+                if utf16_count >= pos.character as usize {
+                    break;
+                }
                 utf16_count += c.len_utf16();
                 byte_idx += c.len_utf8();
             }
@@ -67,14 +69,18 @@ pub async fn handle_completion(
                 if !values.is_empty() {
                     // Detect if we need to insert a space (if the user typed ":" but not " ")
                     let needs_space = !prefix_part.ends_with(": ") && prefix_part.ends_with(':');
-                    
+
                     let items = values
                         .into_iter()
                         .map(|v| CompletionItem {
                             label: v.to_string(),
                             kind: Some(CompletionItemKind::ENUM_MEMBER),
                             // Insert a space if needed
-                            insert_text: Some(if needs_space { format!(" {}", v) } else { v.to_string() }),
+                            insert_text: Some(if needs_space {
+                                format!(" {}", v)
+                            } else {
+                                v.to_string()
+                            }),
                             ..Default::default()
                         })
                         .collect();
