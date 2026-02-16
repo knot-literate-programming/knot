@@ -42,21 +42,34 @@
 //!     Ok(())
 //! }
 
+use crate::defaults::Defaults;
 use crate::executors::{KnotExecutor, LanguageExecutor, python::PythonExecutor, r::RExecutor};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::time::Duration;
 
 pub struct ExecutorManager {
     executors: HashMap<String, Box<dyn KnotExecutor>>,
     cache_dir: PathBuf,
+    timeout: Duration,
 }
 
 impl ExecutorManager {
+    /// Create an executor manager with the default execution timeout.
     pub fn new(cache_dir: PathBuf) -> Self {
+        Self::with_timeout(
+            cache_dir,
+            Duration::from_secs(Defaults::DEFAULT_EXECUTION_TIMEOUT_SECS),
+        )
+    }
+
+    /// Create an executor manager with a custom execution timeout.
+    pub fn with_timeout(cache_dir: PathBuf, timeout: Duration) -> Self {
         Self {
             executors: HashMap::new(),
             cache_dir,
+            timeout,
         }
     }
 
@@ -65,12 +78,12 @@ impl ExecutorManager {
         if !self.executors.contains_key(lang) {
             let executor: Box<dyn KnotExecutor> = match lang {
                 "r" => {
-                    let mut exec = RExecutor::new(self.cache_dir.clone())?;
+                    let mut exec = RExecutor::new(self.cache_dir.clone(), self.timeout)?;
                     exec.initialize()?;
                     Box::new(exec)
                 }
                 "python" => {
-                    let mut exec = PythonExecutor::new(self.cache_dir.clone())?;
+                    let mut exec = PythonExecutor::new(self.cache_dir.clone(), self.timeout)?;
                     exec.initialize()?;
                     Box::new(exec)
                 }

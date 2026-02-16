@@ -6,10 +6,12 @@
 // - Managing stdin/stdout/stderr streams
 // - Terminating the process
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
+use std::sync::mpsc;
 use std::thread;
+use std::time::{Duration, Instant};
 
 use super::BOUNDARY;
 
@@ -18,17 +20,19 @@ pub struct RProcess {
     pub(super) stdin: Option<ChildStdin>,
     pub(super) stdout: Option<BufReader<ChildStdout>>,
     pub(super) stderr: Option<BufReader<ChildStderr>>,
+    timeout: Duration,
     _helper_file: Option<tempfile::NamedTempFile>,
 }
 
 impl RProcess {
-    /// Create an uninitialized R process (to be initialized later)
-    pub fn uninitialized() -> Self {
+    /// Create an uninitialized R process with the given execution timeout.
+    pub fn uninitialized(timeout: Duration) -> Self {
         Self {
             child: None,
             stdin: None,
             stdout: None,
             stderr: None,
+            timeout,
             _helper_file: None,
         }
     }
@@ -78,64 +82,61 @@ impl RProcess {
         Ok(())
     }
 
-    /// Read from stdout and stderr until boundary markers are reached
+    /// Read from stdout and stderr until boundary markers are reached.
+    ///
+    /// Spawns two threads to read concurrently and waits for both with a timeout.
+    /// If either stream does not produce a boundary within `self.timeout`, the
+    /// child process is killed and an error is returned.
     pub fn read_until_boundary(&mut self) -> Result<(String, String)> {
         let stdout = self
             .stdout
-            .as_mut()
+            .take()
             .context("R process stdout is not available")?;
         let stderr = self
             .stderr
-            .as_mut()
+            .take()
             .context("R process stderr is not available")?;
 
-        let (stdout_output, stderr_output) = thread::scope(|s| {
-            let stdout_handle = s.spawn(move || {
-                let mut output = String::new();
-                let mut line_buffer = String::new();
-                loop {
-                    line_buffer.clear();
-                    let bytes_read = stdout.read_line(&mut line_buffer).unwrap_or(0);
-                    if bytes_read == 0 {
-                        break;
-                    }
+        let (tx_out, rx_out) = mpsc::channel::<(String, BufReader<ChildStdout>)>();
+        let (tx_err, rx_err) = mpsc::channel::<(String, BufReader<ChildStderr>)>();
 
-                    if line_buffer.contains(BOUNDARY) {
-                        // Extract everything before the boundary
-                        let parts: Vec<&str> = line_buffer.split(BOUNDARY).collect();
-                        output.push_str(parts[0]);
-                        break;
-                    }
-                    output.push_str(&line_buffer);
-                }
-                output
-            });
-
-            let stderr_handle = s.spawn(move || {
-                let mut output = String::new();
-                let mut line_buffer = String::new();
-                loop {
-                    line_buffer.clear();
-                    let bytes_read = stderr.read_line(&mut line_buffer).unwrap_or(0);
-                    if bytes_read == 0 {
-                        break;
-                    }
-
-                    if line_buffer.contains(BOUNDARY) {
-                        // Extract everything before the boundary
-                        let parts: Vec<&str> = line_buffer.split(BOUNDARY).collect();
-                        output.push_str(parts[0]);
-                        break;
-                    }
-                    output.push_str(&line_buffer);
-                }
-                output
-            });
-
-            (stdout_handle.join().unwrap(), stderr_handle.join().unwrap())
+        thread::spawn(move || {
+            let _ = tx_out.send(read_stream(stdout, BOUNDARY));
+        });
+        thread::spawn(move || {
+            let _ = tx_err.send(read_stream(stderr, BOUNDARY));
         });
 
-        Ok((stdout_output, stderr_output))
+        let deadline = Instant::now() + self.timeout;
+
+        match rx_out.recv_timeout(self.timeout) {
+            Ok((stdout_output, reader_out)) => {
+                let remaining = deadline
+                    .saturating_duration_since(Instant::now())
+                    .max(Duration::from_millis(500));
+                match rx_err.recv_timeout(remaining) {
+                    Ok((stderr_output, reader_err)) => {
+                        self.stdout = Some(reader_out);
+                        self.stderr = Some(reader_err);
+                        Ok((stdout_output, stderr_output))
+                    }
+                    Err(_) => {
+                        self.terminate();
+                        Err(anyhow!(
+                            "R execution timed out after {} seconds",
+                            self.timeout.as_secs()
+                        ))
+                    }
+                }
+            }
+            Err(_) => {
+                self.terminate();
+                Err(anyhow!(
+                    "R execution timed out after {} seconds",
+                    self.timeout.as_secs()
+                ))
+            }
+        }
     }
 
     /// Terminate the R process
@@ -144,4 +145,25 @@ impl RProcess {
             let _ = child.kill();
         }
     }
+}
+
+/// Read lines from `reader` until a line containing `boundary` is found.
+/// Returns the accumulated output (before the boundary) and the reader.
+fn read_stream<R: BufRead + Send + 'static>(mut reader: R, boundary: &'static str) -> (String, R) {
+    let mut output = String::new();
+    let mut line_buffer = String::new();
+    loop {
+        line_buffer.clear();
+        let bytes_read = reader.read_line(&mut line_buffer).unwrap_or(0);
+        if bytes_read == 0 {
+            break;
+        }
+        if line_buffer.contains(boundary) {
+            let parts: Vec<&str> = line_buffer.split(boundary).collect();
+            output.push_str(parts[0]);
+            break;
+        }
+        output.push_str(&line_buffer);
+    }
+    (output, reader)
 }

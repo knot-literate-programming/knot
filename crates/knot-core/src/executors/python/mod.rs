@@ -17,6 +17,7 @@ use super::{
 use crate::parser::ChunkOptions;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 pub use process::PythonProcess;
 
@@ -26,10 +27,15 @@ pub struct PythonExecutor {
 }
 
 impl PythonExecutor {
-    pub fn new(cache_dir: PathBuf) -> Result<Self> {
+    /// Create a new Python executor with an execution timeout.
+    ///
+    /// # Arguments
+    /// * `cache_dir` - Directory for caching Python outputs
+    /// * `timeout`   - Maximum allowed duration for a single chunk execution
+    pub fn new(cache_dir: PathBuf, timeout: Duration) -> Result<Self> {
         std::fs::create_dir_all(&cache_dir)?;
         Ok(Self {
-            process: PythonProcess::uninitialized(),
+            process: PythonProcess::uninitialized(timeout),
             cache_dir,
         })
     }
@@ -231,7 +237,8 @@ mod tests {
     fn setup_executor() -> (TempDir, PythonExecutor) {
         let temp_dir = TempDir::new().unwrap();
         let cache_dir = temp_dir.path().to_path_buf();
-        let mut executor = PythonExecutor::new(cache_dir).unwrap();
+        let mut executor =
+            PythonExecutor::new(cache_dir, std::time::Duration::from_secs(30)).unwrap();
         executor.initialize().unwrap();
         (temp_dir, executor)
     }
@@ -333,7 +340,9 @@ mod tests {
         executor.save_session(&snapshot_path).unwrap();
 
         // New executor
-        let mut executor2 = PythonExecutor::new(tmp.path().to_path_buf()).unwrap();
+        let mut executor2 =
+            PythonExecutor::new(tmp.path().to_path_buf(), std::time::Duration::from_secs(30))
+                .unwrap();
         executor2.initialize().unwrap();
         executor2.load_session(&snapshot_path).unwrap();
 

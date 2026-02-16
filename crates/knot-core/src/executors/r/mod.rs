@@ -16,6 +16,7 @@ use super::{
 };
 use anyhow::Result;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 pub use process::RProcess;
 
@@ -27,17 +28,15 @@ pub struct RExecutor {
 }
 
 impl RExecutor {
-    /// Create a new R executor
+    /// Create a new R executor with an execution timeout.
     ///
     /// # Arguments
     /// * `cache_dir` - Directory for caching R outputs
-    ///
-    /// The R helper script is embedded in the binary and loaded automatically
-    /// during initialization.
-    pub fn new(cache_dir: PathBuf) -> Result<Self> {
+    /// * `timeout`   - Maximum allowed duration for a single chunk execution
+    pub fn new(cache_dir: PathBuf, timeout: Duration) -> Result<Self> {
         std::fs::create_dir_all(&cache_dir)?;
         Ok(Self {
-            process: RProcess::uninitialized(),
+            process: RProcess::uninitialized(timeout),
             cache_dir,
         })
     }
@@ -213,7 +212,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let cache_dir = temp_dir.path().to_path_buf();
 
-        let mut executor = RExecutor::new(cache_dir).unwrap();
+        let mut executor = RExecutor::new(cache_dir, std::time::Duration::from_secs(30)).unwrap();
         executor.initialize().unwrap();
 
         (temp_dir, executor)

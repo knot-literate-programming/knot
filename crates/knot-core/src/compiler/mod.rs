@@ -4,6 +4,7 @@ use crate::executors::ExecutorManager;
 use crate::parser::ast::{Chunk, Document, InlineExpr};
 use std::collections::HashMap;
 use std::path::Path;
+use std::time::Duration;
 
 pub mod chunk_processor;
 pub mod formatters;
@@ -60,7 +61,10 @@ impl Compiler {
 
         info!("📦 Cache directory: {}", cache_dir.display());
 
-        let executor_manager = ExecutorManager::new(cache_dir.clone());
+        let executor_manager = ExecutorManager::with_timeout(
+            cache_dir.clone(),
+            Duration::from_secs(config.execution.timeout_secs),
+        );
 
         Ok(Self {
             executor_manager,

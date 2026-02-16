@@ -15,6 +15,8 @@ pub struct Config {
     pub document: DocumentConfig,
     #[serde(default)]
     pub helpers: HelpersConfig,
+    #[serde(default)]
+    pub execution: ExecutionConfig,
     #[serde(default, rename = "chunk-defaults")]
     pub chunk_defaults: ChunkDefaults,
     /// Codly configuration options (passed to #codly() during initialization)
@@ -45,6 +47,27 @@ pub struct DocumentConfig {
 #[derive(Debug, Default, Deserialize)]
 pub struct HelpersConfig {
     pub typst: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct ExecutionConfig {
+    /// Maximum execution time (seconds) for a single R/Python chunk.
+    /// If a chunk exceeds this limit, the process is killed and an error is returned.
+    #[serde(default = "default_timeout_secs")]
+    pub timeout_secs: u64,
+}
+
+fn default_timeout_secs() -> u64 {
+    crate::defaults::Defaults::DEFAULT_EXECUTION_TIMEOUT_SECS
+}
+
+impl Default for ExecutionConfig {
+    fn default() -> Self {
+        Self {
+            timeout_secs: crate::defaults::Defaults::DEFAULT_EXECUTION_TIMEOUT_SECS,
+        }
+    }
 }
 
 impl Config {

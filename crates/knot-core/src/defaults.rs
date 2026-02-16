@@ -23,6 +23,14 @@ impl Defaults {
 
     /// List of supported languages for code chunks
     pub const SUPPORTED_LANGUAGES: &[&str] = &["r", "python"];
+
+    // ============================================================================
+    // Execution Constants
+    // ============================================================================
+
+    /// Default timeout (in seconds) for R/Python chunk execution.
+    /// Overridable via `[execution] timeout-secs` in knot.toml.
+    pub const DEFAULT_EXECUTION_TIMEOUT_SECS: u64 = 30;
 }
 
 #[cfg(test)]
