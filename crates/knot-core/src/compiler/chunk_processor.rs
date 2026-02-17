@@ -9,7 +9,7 @@
 //! 6. Format the output using the Typst backend.
 
 use crate::backend::{Backend, TypstBackend};
-use crate::cache::{Cache, hash_dependencies};
+use crate::cache::{Cache, hash_dependencies, hashing};
 use crate::config::Config;
 use crate::executors::{ExecutionOutput, ExecutionResult, ExecutorManager, GraphicsOptions};
 use crate::parser::Chunk;
@@ -64,7 +64,7 @@ pub fn process_chunk(
     let constants_hash =
         get_constants_hash(executor_manager, &chunk.language, &chunk_options.constant)?;
 
-    let chunk_hash = cache.get_chunk_hash(
+    let chunk_hash = hashing::get_chunk_hash(
         &chunk.code,
         &chunk_options,
         previous_hash,
