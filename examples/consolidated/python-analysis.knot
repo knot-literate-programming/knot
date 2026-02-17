@@ -263,7 +263,7 @@ Un peu de texte pour vérifier si tout se passe bien !
 
 ```{r}
 #| eval: true
-#| show: code
+#| show: both
 
 {
   x <- 1

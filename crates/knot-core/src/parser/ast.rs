@@ -464,14 +464,14 @@ macro_rules! define_inline_options {
     (
         $(
             $(#[doc = $doc:expr])*
-            $name:ident : $type:ty = $default:expr
+            [$kind:ident] $name:ident : $type:ty , $default:expr
         ),* $(,)?
     ) => {
         #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
         pub struct InlineOptions {
             $(
                 $(#[doc = $doc])*
-                pub $name: expand_type!(val, $type),
+                pub $name: expand_type!($kind, $type),
             )*
         }
 
@@ -479,7 +479,7 @@ macro_rules! define_inline_options {
         pub struct ResolvedInlineOptions {
             $(
                 $(#[doc = $doc])*
-                pub $name: expand_resolved_type!(val, $type),
+                pub $name: expand_resolved_type!($kind, $type),
             )*
         }
 
@@ -495,7 +495,7 @@ macro_rules! define_inline_options {
             pub fn resolve(&self) -> ResolvedInlineOptions {
                 ResolvedInlineOptions {
                     $(
-                        $name: expand_resolve!(self.$name, val, $type, $default),
+                        $name: expand_resolve!(self.$name, $kind, $type, $default),
                     )*
                 }
             }
@@ -504,9 +504,12 @@ macro_rules! define_inline_options {
 }
 
 define_inline_options! {
-    eval: bool = true,
-    show: Show = Show::Output,
-    digits: Option<u32> = None,
+    /// Whether to evaluate the inline expression
+    [val] eval: bool, true,
+    /// What to show in the output
+    [val] show: Show, Show::Output,
+    /// Number of digits for rounding (optional)
+    [opt] digits: u32, None,
 }
 
 #[derive(Debug, Clone)]

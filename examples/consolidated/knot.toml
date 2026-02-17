@@ -40,8 +40,8 @@ code-radius = '4pt'
 code-inset = '0.5em'
 
 # Warning options
-warning-background = 'rgb("#E0F2FE")' # Light blue for educational warnings
-warning-stroke = '1pt + rgb("#38BDF8")'
+warning-background = 'rgb("#ffe2b7")' # Light blue for educational warnings
+warning-stroke = '1pt + rgb("#f5b066")'
 warning-inset = '0.8em'
 warning-radius = '4pt'
 

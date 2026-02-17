@@ -233,7 +233,7 @@ mod tests {
             crate::parser::InlineOptions {
                 eval: Some(false),
                 show: Some(crate::parser::Show::Code),
-                digits: Some(Some(3)),
+                digits: Some(3),
             },
         );
         let resolved = inline.options.resolve();

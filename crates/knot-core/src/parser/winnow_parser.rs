@@ -329,7 +329,7 @@ fn parse_inline_options(options_str: &str) -> (InlineOptions, Vec<ChunkError>) {
                 }
                 "digits" => {
                     if let Ok(n) = value.parse::<u32>() {
-                        options.digits = Some(Some(n));
+                        options.digits = Some(n);
                     } else {
                         errors.push(ChunkError::new(format!("Option 'digits': {}", value), None));
                     }
