@@ -14,7 +14,6 @@ pub use hashing::hash_dependencies;
 pub use metadata::{CacheMetadata, ChunkCacheEntry, ConstantObjectInfo, InlineCacheEntry};
 
 use crate::executors::ExecutionOutput;
-use crate::parser::ChunkOptions;
 use anyhow::{Result, anyhow};
 use chrono::Utc;
 use std::fs;
@@ -197,6 +196,7 @@ impl Cache {
 mod tests {
     use super::*;
     use crate::get_cache_dir;
+    use crate::parser::ChunkOptions;
     use std::thread;
     use std::time::Duration;
     use tempfile::tempdir;
@@ -206,7 +206,7 @@ mod tests {
         let tmp_dir = tempdir().unwrap();
         let project_root = tmp_dir.path();
         let cache_dir = get_cache_dir(project_root, "test");
-        let cache = Cache::new(cache_dir).unwrap();
+        let _cache = Cache::new(cache_dir).unwrap();
         let opts = ChunkOptions::default();
 
         let hash1 = hashing::get_chunk_hash("x <- 1", &opts, "", "", "");
@@ -227,7 +227,7 @@ mod tests {
     fn test_dependency_invalidation() {
         let tmp_dir = tempdir().unwrap();
         let project_root = tmp_dir.path();
-        let cache_dir = get_cache_dir(project_root, "test");
+        let _cache_dir = get_cache_dir(project_root, "test");
         let tmp_file = tmp_dir.path().join("data.csv");
         fs::write(&tmp_file, "a,b\n1,2").unwrap();
 
@@ -267,7 +267,7 @@ mod tests {
         let tmp_dir = tempdir().unwrap();
         let project_root = tmp_dir.path();
         let cache_dir = get_cache_dir(project_root, "test");
-        let cache = Cache::new(cache_dir).unwrap();
+        let _cache = Cache::new(cache_dir).unwrap();
 
         let opts1 = ChunkOptions {
             eval: Some(true),

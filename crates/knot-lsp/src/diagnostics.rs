@@ -91,12 +91,12 @@ pub fn get_diagnostics(uri: &Url, text: &str) -> Vec<Diagnostic> {
 
         if let Ok(cache) = Cache::new(cache_dir) {
             for chunk_cache in cache.metadata.chunks {
-                // Match cache entry with parsed chunk by byte offset (start_byte)
-                // This is reliable as long as the content before the chunk hasn't changed.
+                // Match cache entry with parsed chunk by ordinal index
+                // This is stable even when the document is edited before the chunk.
                 if let Some(parsed_chunk) = doc
                     .chunks
                     .iter()
-                    .find(|c| c.start_byte == chunk_cache.index)
+                    .find(|c| c.index == chunk_cache.index)
                 {
                     // Add Warnings
                     for warning in chunk_cache.warnings {
