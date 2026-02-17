@@ -77,6 +77,7 @@ impl Compiler {
     /// Compiles a document by executing its code chunks and generating a new Typst source file.
     pub fn compile(&mut self, doc: &Document) -> Result<String> {
         let mut cache = Cache::new(self.cache_dir.clone())?;
+        let backend = crate::backend::TypstBackend::new();
 
         // Tracks the hash of the last chunk for EACH language (for chaining)
         let mut last_hash_per_lang: HashMap<String, String> = HashMap::new();
@@ -142,6 +143,7 @@ impl Compiler {
                             &previous_hash,
                             &self.config,
                             true, // is_inert
+                            &backend,
                         )?;
                         res
                     }
@@ -174,6 +176,7 @@ impl Compiler {
                     &previous_hash,
                     &self.config,
                     false, // is_inert
+                    &backend,
                 ),
                 ExecutableNode::InlineExpr(inline_expr) => inline_processor::process_inline_expr(
                     inline_expr,

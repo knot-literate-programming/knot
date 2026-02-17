@@ -24,6 +24,7 @@ pub fn process_chunk(
     previous_hash: &str,
     config: &Config,
     is_inert: bool,
+    backend: &TypstBackend,
 ) -> Result<(String, String)> {
     // Apply config defaults to chunk options and resolve to concrete values
     let mut chunk_options = chunk.options.clone();
@@ -132,7 +133,6 @@ pub fn process_chunk(
     let mut chunk_with_codly = chunk.clone();
     chunk_with_codly.codly_options = merged_codly_options;
 
-    let backend = TypstBackend::new();
     let chunk_output_final = backend.format_chunk(
         &chunk_with_codly,
         &resolved_options,
@@ -267,6 +267,7 @@ mod tests {
             "prev_hash",
             &setup_test_config(),
             false,
+            &crate::backend::TypstBackend::new(),
         )
         .unwrap();
 
@@ -288,6 +289,7 @@ mod tests {
             "prev_hash",
             &setup_test_config(),
             false,
+            &crate::backend::TypstBackend::new(),
         )
         .unwrap();
     }
@@ -305,6 +307,7 @@ mod tests {
             "prev_hash",
             &setup_test_config(),
             false,
+            &crate::backend::TypstBackend::new(),
         )
         .unwrap();
 
@@ -326,6 +329,7 @@ mod tests {
             "prev_hash",
             &setup_test_config(),
             false,
+            &crate::backend::TypstBackend::new(),
         )
         .unwrap();
 
@@ -337,6 +341,7 @@ mod tests {
             "prev_hash",
             &setup_test_config(),
             false,
+            &crate::backend::TypstBackend::new(),
         )
         .unwrap();
 
@@ -359,6 +364,7 @@ mod tests {
             "prev_hash",
             &setup_test_config(),
             false,
+            &crate::backend::TypstBackend::new(),
         )
         .unwrap();
         let (_output2, hash2) = process_chunk(
@@ -368,6 +374,7 @@ mod tests {
             "prev_hash",
             &setup_test_config(),
             false,
+            &crate::backend::TypstBackend::new(),
         )
         .unwrap();
 
@@ -388,6 +395,7 @@ mod tests {
             "prev_hash_1",
             &setup_test_config(),
             false,
+            &crate::backend::TypstBackend::new(),
         )
         .unwrap();
         let (_output2, hash2) = process_chunk(
@@ -397,6 +405,7 @@ mod tests {
             "prev_hash_2",
             &setup_test_config(),
             false,
+            &crate::backend::TypstBackend::new(),
         )
         .unwrap();
 
@@ -417,6 +426,7 @@ mod tests {
             "prev_hash",
             &setup_test_config(),
             false,
+            &crate::backend::TypstBackend::new(),
         );
 
         // Should fail with unsupported language
@@ -457,6 +467,7 @@ mod tests {
             "prev_hash",
             &setup_test_config(),
             false,
+            &crate::backend::TypstBackend::new(),
         )
         .unwrap();
 
@@ -472,6 +483,7 @@ mod tests {
             "prev_hash",
             &setup_test_config(),
             false,
+            &crate::backend::TypstBackend::new(),
         )
         .unwrap();
 
@@ -491,6 +503,7 @@ mod tests {
             "prev_hash",
             &setup_test_config(),
             false,
+            &crate::backend::TypstBackend::new(),
         )
         .unwrap();
 
@@ -511,6 +524,7 @@ mod tests {
             "prev_hash",
             &setup_test_config(),
             false,
+            &crate::backend::TypstBackend::new(),
         )
         .unwrap();
 
@@ -575,6 +589,7 @@ mod tests {
             "prev_hash",
             &config,
             false,
+            &crate::backend::TypstBackend::new(),
         )
         .unwrap();
 
@@ -614,6 +629,7 @@ mod tests {
             "prev_hash",
             &config,
             false,
+            &crate::backend::TypstBackend::new(),
         )
         .unwrap();
 
@@ -674,6 +690,7 @@ mod tests {
             "prev_hash",
             &config,
             false,
+            &crate::backend::TypstBackend::new(),
         )
         .unwrap();
 
