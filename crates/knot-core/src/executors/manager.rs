@@ -76,18 +76,24 @@ impl ExecutorManager {
     /// Get or initialize an executor for the given language
     pub fn get_executor(&mut self, lang: &str) -> Result<&mut (dyn KnotExecutor + '_)> {
         if !self.executors.contains_key(lang) {
-            let executor: Box<dyn KnotExecutor> = match lang {
-                "r" => {
+            // Parse language string to enum for exhaustive matching
+            let language = lang
+                .parse::<crate::defaults::Language>()
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+            let executor: Box<dyn KnotExecutor> = match language {
+                crate::defaults::Language::R => {
                     let mut exec = RExecutor::new(self.cache_dir.clone(), self.timeout)?;
                     exec.initialize()?;
                     Box::new(exec)
                 }
-                "python" => {
+                crate::defaults::Language::Python => {
                     let mut exec = PythonExecutor::new(self.cache_dir.clone(), self.timeout)?;
                     exec.initialize()?;
                     Box::new(exec)
                 }
-                _ => anyhow::bail!("Unsupported language: {}", lang),
+                // Compiler enforces exhaustive matching - adding a new Language
+                // variant will cause a compilation error here
             };
             self.executors.insert(lang.to_string(), executor);
         }

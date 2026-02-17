@@ -153,19 +153,27 @@ impl Config {
 
     /// Get language-specific chunk defaults for a given language
     pub fn get_language_defaults(&self, lang: &str) -> Option<&ChunkDefaults> {
-        match lang {
-            "r" => self.r_chunks.as_ref(),
-            "python" => self.python_chunks.as_ref(),
-            _ => None,
+        // Parse to Language enum for exhaustive matching
+        let language = lang.parse::<crate::defaults::Language>().ok()?;
+
+        match language {
+            crate::defaults::Language::R => self.r_chunks.as_ref(),
+            crate::defaults::Language::Python => self.python_chunks.as_ref(),
+            // Compiler enforces exhaustive matching - adding a new Language
+            // variant will cause a compilation error here
         }
     }
 
     /// Get language-specific error defaults for a given language
     pub fn get_language_error_defaults(&self, lang: &str) -> Option<&ChunkDefaults> {
-        match lang {
-            "r" => self.r_error.as_ref(),
-            "python" => self.python_error.as_ref(),
-            _ => None,
+        // Parse to Language enum for exhaustive matching
+        let language = lang.parse::<crate::defaults::Language>().ok()?;
+
+        match language {
+            crate::defaults::Language::R => self.r_error.as_ref(),
+            crate::defaults::Language::Python => self.python_error.as_ref(),
+            // Compiler enforces exhaustive matching - adding a new Language
+            // variant will cause a compilation error here
         }
     }
 }
