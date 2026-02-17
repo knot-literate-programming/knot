@@ -192,13 +192,13 @@ impl Compiler {
                         "\n#code-chunk(
     lang: \"{}\",
     is-inert: false,
-    errors: ([#local(zebra-fill: none)[\n=== Erreur d'exécution ({})\nDans le {} `{}`\n\n```\n{}\n```\n\n_L'exécution des blocs `{}` suivants a été suspendue._]],)
+    errors: ([#local(zebra-fill: none)[\n=== Execution Error ({})\nIn {} `{}`\n\n```\n{}\n```\n\n_Execution of subsequent `{}` blocks has been suspended._]],)
 )\n",
                         lang,
                         lang,
                         match node {
                             ExecutableNode::Chunk(_) => "chunk",
-                            ExecutableNode::InlineExpr(_) => "expression inline",
+                            ExecutableNode::InlineExpr(_) => "inline expression",
                         },
                         match node {
                             ExecutableNode::Chunk(c) => c.name.as_deref().unwrap_or("unnamed"),
