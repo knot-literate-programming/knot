@@ -18,6 +18,7 @@ pub fn parse_document(source: &str) -> Document {
     let original_source = source;
 
     let mut current_offset = 0;
+    let mut chunk_index = 0; // Ordinal chunk counter
 
     // 1. Extract Chunks line by line
     while current_offset < source.len() {
@@ -119,6 +120,7 @@ pub fn parse_document(source: &str) -> Document {
                         start_byte + offset_of_line(raw_block, lines_before_code + code_line_count);
 
                     chunks.push(Chunk {
+                        index: chunk_index,
                         language: lang.to_string(),
                         name: extract_name(header, n),
                         code,
@@ -140,6 +142,7 @@ pub fn parse_document(source: &str) -> Document {
                         code_end_byte,
                     });
 
+                    chunk_index += 1;
                     current_offset = chunk_end;
                     continue;
                 }

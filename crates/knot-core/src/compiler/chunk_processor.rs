@@ -57,7 +57,7 @@ pub fn process_chunk(
         .name
         .as_deref()
         .map(String::from)
-        .unwrap_or_else(|| format!("chunk-{}", chunk.start_byte));
+        .unwrap_or_else(|| format!("chunk-{}", chunk.index));
 
     let deps_hash = hash_dependencies(&chunk_options.depends)?;
     let constants_hash =
@@ -98,7 +98,7 @@ pub fn process_chunk(
             if let Some(error) = &output.error {
                 // Save execution error to cache
                 cache.save_error(
-                    chunk.start_byte,
+                    chunk.index,
                     chunk.name.clone(),
                     chunk.language.clone(),
                     chunk_hash.clone(),
@@ -108,7 +108,7 @@ pub fn process_chunk(
             } else {
                 // Save successful result to cache
                 cache.save_result(
-                    chunk.start_byte, // Use start_byte as unique ID for now
+                    chunk.index,
                     chunk.name.clone(),
                     chunk.language.clone(),
                     chunk_hash.clone(),
@@ -191,6 +191,7 @@ mod tests {
         };
 
         Chunk {
+            index: 0, // Test helper: use dummy index
             language: language.to_string(),
             code: code.to_string(),
             name,
@@ -529,6 +530,7 @@ mod tests {
         };
 
         let chunk = Chunk {
+            index: 0,
             language: "r".to_string(),
             code: "x <- 1".to_string(),
             name: None,
@@ -631,6 +633,7 @@ mod tests {
         };
 
         let chunk = Chunk {
+            index: 0,
             language: "python".to_string(),
             code: "x = 1".to_string(),
             name: None,

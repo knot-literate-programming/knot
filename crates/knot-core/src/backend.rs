@@ -317,6 +317,7 @@ mod tests {
         };
 
         Chunk {
+            index: 0, // Dummy chunk for test/inline contexts
             language: language.to_string(),
             code: code.to_string(),
             name,

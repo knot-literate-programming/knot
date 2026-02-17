@@ -386,6 +386,7 @@ define_options! {
 
 #[derive(Debug, Clone)]
 pub struct Chunk {
+    pub index: usize, // Ordinal position in document (0-based)
     pub language: String,
     pub name: Option<String>,
     pub code: String,
