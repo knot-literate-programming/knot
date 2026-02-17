@@ -226,7 +226,7 @@ pub fn compile_file(file: &Path, output_path: Option<&PathBuf>) -> Result<PathBu
     info!("📄 Compiling {:?}...", file);
     let source = fs::read_to_string(file).context(format!("Failed to read file: {:?}", file))?;
 
-    let doc = Document::parse(source).context("Failed to parse document")?;
+    let doc = Document::parse(source);
     info!("✓ Parsed {} chunk(s)", doc.chunks.len());
 
     let mut compiler = Compiler::new(file)?;
@@ -304,7 +304,7 @@ pub fn format_file(file_path: &Path, check_only: bool) -> Result<bool> {
     let original_text =
         fs::read_to_string(file_path).context(format!("Failed to read file: {:?}", file_path))?;
 
-    let doc = Document::parse(original_text.clone()).context("Failed to parse document")?;
+    let doc = Document::parse(original_text.clone());
 
     let formatter = knot_core::CodeFormatter::new(None, None);
     let formatted_text = doc.format(|_index, code, lang| {

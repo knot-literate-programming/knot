@@ -28,10 +28,7 @@ pub fn to_virtual_uri(uri: &Url) -> Url {
 /// Implement the Mirror Mask strategy: keep opening/closing markers and mask only the code with spaces.
 /// This preserves exact width and line count without any external markers.
 pub fn transform_to_typst(knot_content: &str) -> String {
-    let doc = match Document::parse(knot_content.to_string()) {
-        Ok(d) => d,
-        Err(_) => return knot_content.to_string(),
-    };
+    let doc = Document::parse(knot_content.to_string());
 
     let mut output = String::with_capacity(knot_content.len());
     let mut last_pos = 0;

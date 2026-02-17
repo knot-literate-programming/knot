@@ -377,7 +377,7 @@ mod tests {
 1 + 1
 ```
         "###;
-        let doc = Document::parse(content.to_string()).unwrap();
+        let doc = Document::parse(content.to_string());
         assert_eq!(doc.chunks.len(), 1);
         let chunk = &doc.chunks[0];
         assert_eq!(chunk.language, "r");

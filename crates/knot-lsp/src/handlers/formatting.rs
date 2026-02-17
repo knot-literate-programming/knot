@@ -20,14 +20,8 @@ pub async fn handle_formatting(
         }
     };
 
-    // 2. Parse document
-    let doc = match Document::parse(text.clone()) {
-        Ok(doc) => doc,
-        Err(e) => {
-            log::warn!("formatting: failed to parse document {uri}: {e}");
-            return Ok(None);
-        }
-    };
+    // 2. Parse document (always succeeds; errors stored in doc.errors)
+    let doc = Document::parse(text.clone());
 
     // --- PHASE A: Internal Chunk Formatting (Air/Ruff) ---
     // Perform code formatting for each chunk asynchronously before document-wide normalization.
@@ -303,15 +297,9 @@ enum ElementKind {
 
 /// Reconstructs the Knot document by finding Knot elements in the formatted Typst.
 fn reconstruct_knot_document(formatted_typst: &str, clean_knot: &str) -> String {
-    // 1. Parse both documents
-    let original_doc = match knot_core::Document::parse(clean_knot.to_string()) {
-        Ok(d) => d,
-        Err(_) => return clean_knot.to_string(),
-    };
-    let formatted_doc = match knot_core::Document::parse(formatted_typst.to_string()) {
-        Ok(d) => d,
-        Err(_) => return clean_knot.to_string(),
-    };
+    // 1. Parse both documents (always succeeds; errors stored in doc.errors)
+    let original_doc = knot_core::Document::parse(clean_knot.to_string());
+    let formatted_doc = knot_core::Document::parse(formatted_typst.to_string());
 
     // 2. Element count check
     if original_doc.chunks.len() != formatted_doc.chunks.len()
@@ -432,11 +420,8 @@ pub async fn handle_format_chunk(
         }
     };
 
-    // 2. Parse document to find the chunk under cursor
-    let doc = match Document::parse(text.clone()) {
-        Ok(doc) => doc,
-        Err(_) => return Ok(None),
-    };
+    // 2. Parse document to find the chunk under cursor (always succeeds)
+    let doc = Document::parse(text.clone());
 
     let line = pos.line as usize;
     let target_chunk = doc

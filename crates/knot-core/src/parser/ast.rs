@@ -1,4 +1,3 @@
-use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -530,9 +529,12 @@ pub struct Document {
 }
 
 impl Document {
-    pub fn parse(source: String) -> Result<Self> {
-        let doc = super::winnow_parser::parse_document(&source);
-        Ok(doc)
+    /// Parse a knot document from source code.
+    ///
+    /// This function always succeeds. Syntax errors are stored in `doc.errors`
+    /// rather than returned as a `Result::Err`.
+    pub fn parse(source: String) -> Self {
+        super::winnow_parser::parse_document(&source)
     }
 
     /// Format the document by normalizing all its chunks and inlines.
