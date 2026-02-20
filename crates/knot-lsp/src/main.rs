@@ -118,6 +118,23 @@ impl LanguageServer for KnotLanguageServer {
                 TinymistProxy::spawn(root_uri, tinymist_path).await
             {
                 *this.state.tinymist.write().await = Some(proxy);
+
+                // VS Code may have sent didOpen for documents before Tinymist was
+                // ready. Re-sync any document not yet forwarded so Tinymist has the
+                // virtual content and can answer hover / diagnostic requests.
+                let pending: Vec<Url> = this
+                    .state
+                    .documents
+                    .read()
+                    .await
+                    .iter()
+                    .filter(|(_, doc)| !doc.opened_in_tinymist)
+                    .map(|(uri, _)| uri.clone())
+                    .collect();
+                for uri in pending {
+                    this.forward_to_tinymist(lsp::DID_OPEN, &uri).await;
+                }
+
                 while let Some(msg) = notification_rx.recv().await {
                     this.handle_tinymist_notification(msg).await;
                 }
@@ -243,16 +260,17 @@ impl KnotLanguageServer {
     }
 
     fn resolve_virtual_uri(&self, uri: &Url) -> Url {
-        if uri.scheme() == "knot-virtual" {
+        // Tinymist normalizes our knot-virtual:// URIs to file:// on receipt,
+        // so publishDiagnostics comes back as file://...foo.knot.typ.
+        // We handle both cases: knot-virtual:// (if ever preserved) and
+        // file:// with the .knot.typ double extension we create in to_virtual_uri.
+        let path = uri.path().to_string();
+        if uri.scheme() == "knot-virtual" || path.ends_with(".knot.typ") {
+            let stripped = path.trim_end_matches(".typ").to_string();
             let mut original_uri = uri.clone();
-            if original_uri.set_scheme("file").is_ok() {
-                let path = original_uri.path().to_string();
-                if path.ends_with(".typ") {
-                    let new_path = path.trim_end_matches(".typ").to_string();
-                    original_uri.set_path(&new_path);
-                }
-                return original_uri;
-            }
+            let _ = original_uri.set_scheme("file");
+            original_uri.set_path(&stripped);
+            return original_uri;
         }
         uri.clone()
     }
