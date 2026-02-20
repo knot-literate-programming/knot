@@ -31,12 +31,13 @@ While initially thought to be chunk-level only, we achieved **line-level precisi
 
 ## ⚠️ Future Work
 
-### 1. Diagnostic pour les options de chunk inconnues (PRIORITÉ HAUTE)
-Actuellement, une option inconnue dans un chunk est **silencieusement ignorée** par serde.
-Exemple : `warinings-visibility: none` (faute de frappe) n'a aucun effet.
+### 1. ~~Diagnostic pour les options de chunk inconnues~~ ✅ Implemented (Feb 2026)
 
-- `get_diagnostics()` devrait utiliser `ChunkOptions::option_metadata()` pour valider les clés.
-- Toute clé non reconnue → `Diagnostic` avec `severity: Warning` sur la ligne `#|`.
+~~Actuellement, une option inconnue dans un chunk est **silencieusement ignorée** par serde.~~
+
+`get_diagnostics()` now validates chunk option keys against `ChunkOptions::option_metadata()`.
+Any unrecognised key produces a `Diagnostic` with `severity: Warning` on the offending `#|` line.
+Implemented as part of the codebase hardening sprint — see [codebase-hardening-2026-02.md](codebase-hardening-2026-02.md) (D3).
 
 ### 2. Live syntax diagnostics (no execution)
 Les exécuteurs en arrière-plan pourraient valider la syntaxe en temps réel sur `did_change` sans toucher à l'environnement, offrant un feedback immédiat avant la sauvegarde ou le build.
