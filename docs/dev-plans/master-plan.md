@@ -10,7 +10,7 @@ This document tracks the high-level goals and roadmap for the Knot project. Deta
 
 ## 📊 Current Status (Updated Feb 2026)
 
-**Maturity:** ~92% towards v1.0
+**Maturity:** ~95% towards v1.0
 
 **Core:** ~99% complete
 - ✅ Parsing, execution, caching
@@ -20,15 +20,16 @@ This document tracks the high-level goals and roadmap for the Knot project. Deta
 - ✅ Customizable warnings (styles & visibility)
 - ✅ Zero-escape robust execution model (temp files)
 - ✅ **Centralized Structural Formatting**: Unified logic for CLI and LSP in `Document::format`.
+- ✅ **Codebase Hardening** (Feb 2026): All critical bugs (C1–C3), data loss risks (D1–D3), design issues (De1–De5), and code quality issues (Q1–Q9) resolved. See [codebase-hardening-2026-02.md](codebase-hardening-2026-02.md).
 
 **LSP:** ~97% complete
 - ✅ Hover (chunks, R, Python, Typst — stable & responsive)
 - ✅ **Dynamic Completion**: Chunk options suggested based on core metadata (with docs & defaults).
 - ✅ Diagnostics (parsing errors, structure validation)
 - ✅ **Unknown Option Warnings**: Validated against `OptionMetadata` to catch typos.
-- ✅ **Execution Diagnostics**: Runtime errors and warnings surfaced in the editor from cache.
+- ✅ **Execution Diagnostics**: Runtime errors and warnings surfaced in the editor from cache; matched by stable ordinal chunk index (not byte offset).
 - ✅ Document symbols (including all show variants)
-- ✅ **Architectural Hardening**: Consolidated state, lock contention minimized, and proper virtual URI versioning.
+- ✅ **Architectural Hardening**: Consolidated state, lock contention minimized, proper virtual URI versioning, lock ordering documented.
 - ✅ **Hybrid formatting**: Full 3-phase pipeline (Air → Tinymist → reconstruction) with async pre-calculation and graceful fallbacks.
 - ⏳ Go to Definition & References
 - ⏳ Error surfacing for Tinymist failures (`window/showMessage`)
@@ -48,7 +49,7 @@ Make Knot feel like a native editor for both Typst and the embedded languages.
 - [x] **Stable Hover/Completion**: Reliability across all document sections.
 - [ ] **Go to Definition**: Navigate to function/variable definitions.
 - [ ] **References**: Find all uses of a symbol across the document.
-- [ ] **Unknown Option Warnings**: Validate YAML options against `OptionMetadata` to catch typos.
+- [x] **Unknown Option Warnings**: Validate YAML options against `OptionMetadata` to catch typos.
 
 ### 2. Standard Tooling Integration
 - [x] **Hybrid Formatting**: Full 3-phase pipeline implemented in LSP (Air + Ruff + Tinymist). See [formatters.md](formatters.md).
@@ -94,6 +95,7 @@ Make Knot accessible and showcase its capabilities.
 ---
 
 ## 🔗 Design Documents
+- [codebase-hardening-2026-02.md](codebase-hardening-2026-02.md): All C1–C3, D1–D3, De1–De5, Q1–Q9 fixes and dependency updates (Feb 2026).
 - [lsp-diagnostics.md](lsp-diagnostics.md): Logic for surfacing runtime errors in the editor.
 - [r-error-handling.md](r-error-handling.md): Unified error model implementation.
 - [python-error-handling.md](python-error-handling.md): Unified error model implementation.
