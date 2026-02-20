@@ -4,6 +4,12 @@ In this chapter, we explore temperature data using R and ggplot2.
 
 == Data Preparation
 
+
+```{python}
+x = 1
+typst(x)
+```
+
 Let's start by creating a synthetic dataset of monthly temperatures:
 
 ```{r}

@@ -45,8 +45,8 @@
 use crate::defaults::Defaults;
 use crate::executors::{KnotExecutor, LanguageExecutor, python::PythonExecutor, r::RExecutor};
 use anyhow::Result;
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -94,9 +94,8 @@ impl ExecutorManager {
                         let mut exec = PythonExecutor::new(self.cache_dir.clone(), self.timeout)?;
                         exec.initialize()?;
                         Box::new(exec)
-                    }
-                    // Compiler enforces exhaustive matching - adding a new Language
-                    // variant will cause a compilation error here
+                    } // Compiler enforces exhaustive matching - adding a new Language
+                      // variant will cause a compilation error here
                 };
                 entry.insert(executor)
             }

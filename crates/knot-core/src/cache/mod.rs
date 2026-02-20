@@ -235,25 +235,13 @@ mod tests {
         };
 
         let deps_hash1 = hash_dependencies(&opts.depends).unwrap();
-        let hash1 = hashing::get_chunk_hash(
-            "read.csv('data.csv')",
-            &opts,
-            "",
-            &deps_hash1,
-            "",
-        );
+        let hash1 = hashing::get_chunk_hash("read.csv('data.csv')", &opts, "", &deps_hash1, "");
 
         // Modify file — content hashing detects the change immediately
         fs::write(&tmp_file, "a,b\n3,4").unwrap();
 
         let deps_hash2 = hash_dependencies(&opts.depends).unwrap();
-        let hash2 = hashing::get_chunk_hash(
-            "read.csv('data.csv')",
-            &opts,
-            "",
-            &deps_hash2,
-            "",
-        );
+        let hash2 = hashing::get_chunk_hash("read.csv('data.csv')", &opts, "", &deps_hash2, "");
 
         assert_ne!(deps_hash1, deps_hash2);
         assert_ne!(hash1, hash2);

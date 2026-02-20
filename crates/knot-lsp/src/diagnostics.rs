@@ -93,10 +93,7 @@ pub fn get_diagnostics(uri: &Url, text: &str) -> Vec<Diagnostic> {
             for chunk_cache in cache.metadata.chunks {
                 // Match cache entry with parsed chunk by ordinal index
                 // This is stable even when the document is edited before the chunk.
-                if let Some(parsed_chunk) = doc
-                    .chunks
-                    .iter()
-                    .find(|c| c.index == chunk_cache.index)
+                if let Some(parsed_chunk) = doc.chunks.iter().find(|c| c.index == chunk_cache.index)
                 {
                     // Add Warnings
                     for warning in chunk_cache.warnings {

@@ -136,8 +136,8 @@ impl ConstantObjectHandler for RExecutor {
             .join(", ");
         let code = format!("hash_objects_batch(c({}))", names_vec);
         let out = self.query(&code)?;
-        let map: std::collections::HashMap<String, String> =
-            serde_json::from_str(out.trim()).map_err(|e| anyhow::anyhow!("hash_objects_batch parse error: {}", e))?;
+        let map: std::collections::HashMap<String, String> = serde_json::from_str(out.trim())
+            .map_err(|e| anyhow::anyhow!("hash_objects_batch parse error: {}", e))?;
         Ok(map)
     }
 

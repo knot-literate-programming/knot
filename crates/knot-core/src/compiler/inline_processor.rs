@@ -70,8 +70,8 @@ pub fn process_inline_expr(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::test_helpers::{setup_test_cache, setup_test_manager};
+    use super::*;
 
     fn create_inline_expr(code: &str, options: crate::parser::InlineOptions) -> InlineExpr {
         InlineExpr {

@@ -176,8 +176,8 @@ fn get_constants_hash(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::test_helpers::{setup_test_cache, setup_test_manager};
+    use super::*;
     use crate::parser::{ChunkOptions, Position, Range};
     use tempfile::TempDir;
 

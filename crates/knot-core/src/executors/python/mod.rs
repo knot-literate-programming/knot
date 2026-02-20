@@ -150,8 +150,8 @@ impl ConstantObjectHandler for PythonExecutor {
             .join(", ");
         let code = format!("print(hash_objects_batch([{}]))", names_list);
         let out = self.query(&code)?;
-        let map: std::collections::HashMap<String, String> =
-            serde_json::from_str(out.trim()).map_err(|e| anyhow::anyhow!("hash_objects_batch parse error: {}", e))?;
+        let map: std::collections::HashMap<String, String> = serde_json::from_str(out.trim())
+            .map_err(|e| anyhow::anyhow!("hash_objects_batch parse error: {}", e))?;
         Ok(map)
     }
 
