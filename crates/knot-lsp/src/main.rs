@@ -24,6 +24,7 @@ use handlers::completion::handle_completion;
 use handlers::formatting::{handle_format_chunk, handle_formatting};
 use handlers::hover::handle_hover;
 use lsp_methods::text_document as lsp;
+use lsp_methods::window as win;
 use position_mapper::PositionMapper;
 use proxy::TinymistProxy;
 use state::ServerState;
@@ -117,6 +118,23 @@ impl LanguageServer for KnotLanguageServer {
                 TinymistProxy::spawn(root_uri, tinymist_path).await
             {
                 *this.state.tinymist.write().await = Some(proxy);
+
+                // VS Code may have sent didOpen for documents before Tinymist was
+                // ready. Re-sync any document not yet forwarded so Tinymist has the
+                // virtual content and can answer hover / diagnostic requests.
+                let pending: Vec<Url> = this
+                    .state
+                    .documents
+                    .read()
+                    .await
+                    .iter()
+                    .filter(|(_, doc)| !doc.opened_in_tinymist)
+                    .map(|(uri, _)| uri.clone())
+                    .collect();
+                for uri in pending {
+                    this.forward_to_tinymist(lsp::DID_OPEN, &uri).await;
+                }
+
                 while let Some(msg) = notification_rx.recv().await {
                     this.handle_tinymist_notification(msg).await;
                 }
@@ -242,16 +260,17 @@ impl KnotLanguageServer {
     }
 
     fn resolve_virtual_uri(&self, uri: &Url) -> Url {
-        if uri.scheme() == "knot-virtual" {
+        // Tinymist normalizes our knot-virtual:// URIs to file:// on receipt,
+        // so publishDiagnostics comes back as file://...foo.knot.typ.
+        // We handle both cases: knot-virtual:// (if ever preserved) and
+        // file:// with the .knot.typ double extension we create in to_virtual_uri.
+        let path = uri.path().to_string();
+        if uri.scheme() == "knot-virtual" || path.ends_with(".knot.typ") {
+            let stripped = path.trim_end_matches(".typ").to_string();
             let mut original_uri = uri.clone();
-            if original_uri.set_scheme("file").is_ok() {
-                let path = original_uri.path().to_string();
-                if path.ends_with(".typ") {
-                    let new_path = path.trim_end_matches(".typ").to_string();
-                    original_uri.set_path(&new_path);
-                }
-                return original_uri;
-            }
+            let _ = original_uri.set_scheme("file");
+            original_uri.set_path(&stripped);
+            return original_uri;
         }
         uri.clone()
     }
@@ -423,33 +442,61 @@ impl KnotLanguageServer {
     }
 
     async fn handle_tinymist_notification(&self, msg: serde_json::Value) {
-        if let Some(method) = msg.get("method").and_then(|m| m.as_str())
-            && method == lsp::PUBLISH_DIAGNOSTICS
-            && let Some(params) = msg.get("params")
-            && let (Some(uri_str), Some(diagnostics_val)) = (
-                params.get("uri").and_then(|u| u.as_str()),
-                params.get("diagnostics"),
-            )
-            && let (Ok(virtual_uri), Ok(mut diagnostics)) = (
-                Url::parse(uri_str),
-                serde_json::from_value::<Vec<Diagnostic>>(diagnostics_val.clone()),
-            )
-        {
-            let uri = self.resolve_virtual_uri(&virtual_uri);
-            let mut docs = self.state.documents.write().await;
-            if let Some(doc) = docs.get_mut(&uri) {
-                for d in &mut diagnostics {
-                    if let (Some(start), Some(end)) = (
-                        doc.mapper.typ_to_knot_position(d.range.start),
-                        doc.mapper.typ_to_knot_position(d.range.end),
-                    ) {
-                        d.range = Range { start, end };
+        let Some(method) = msg.get("method").and_then(|m| m.as_str()) else {
+            return;
+        };
+
+        match method {
+            lsp::PUBLISH_DIAGNOSTICS => {
+                if let Some(params) = msg.get("params")
+                    && let (Some(uri_str), Some(diagnostics_val)) = (
+                        params.get("uri").and_then(|u| u.as_str()),
+                        params.get("diagnostics"),
+                    )
+                    && let (Ok(virtual_uri), Ok(mut diagnostics)) = (
+                        Url::parse(uri_str),
+                        serde_json::from_value::<Vec<Diagnostic>>(diagnostics_val.clone()),
+                    )
+                {
+                    let uri = self.resolve_virtual_uri(&virtual_uri);
+                    let mut docs = self.state.documents.write().await;
+                    if let Some(doc) = docs.get_mut(&uri) {
+                        for d in &mut diagnostics {
+                            if let (Some(start), Some(end)) = (
+                                doc.mapper.typ_to_knot_position(d.range.start),
+                                doc.mapper.typ_to_knot_position(d.range.end),
+                            ) {
+                                d.range = Range { start, end };
+                            }
+                        }
+                        doc.tinymist_diagnostics = diagnostics;
+                    }
+                    drop(docs);
+                    self.publish_combined_diagnostics(&uri).await;
+                }
+            }
+
+            win::SHOW_MESSAGE | win::LOG_MESSAGE => {
+                if let Some(params) = msg.get("params")
+                    && let Some(type_num) = params.get("type").and_then(|t| t.as_u64())
+                    && let Some(message) = params.get("message").and_then(|m| m.as_str())
+                {
+                    let msg_type = match type_num {
+                        1 => MessageType::ERROR,
+                        2 => MessageType::WARNING,
+                        3 => MessageType::INFO,
+                        _ => MessageType::LOG,
+                    };
+                    let prefixed = format!("[Tinymist] {message}");
+                    if method == win::SHOW_MESSAGE {
+                        self.client.show_message(msg_type, prefixed).await;
+                    } else {
+                        self.client.log_message(msg_type, prefixed).await;
                     }
                 }
-                doc.tinymist_diagnostics = diagnostics;
             }
-            drop(docs);
-            self.publish_combined_diagnostics(&uri).await;
+
+            _ => {}
         }
     }
 }

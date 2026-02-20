@@ -61,7 +61,7 @@ Beyond external tools, Knot performs "Structural Normalization" to ensure consis
 
 ### Error surfacing to the user
 - [x] **Air / Ruff failures**: The user is now notified via `window/showMessage` when a formatter returns an error.
-- [ ] **Tinymist failures**: Forward Tinymist `window/showMessage` / `window/logMessage` notifications to the client.
+- [x] **Tinymist failures**: Tinymist `window/showMessage` notifications are forwarded to the client (visible toast); `window/logMessage` notifications are forwarded to the output panel. Both are prefixed `[Tinymist]` for easy identification. Implemented in `handle_tinymist_notification` (`knot-lsp/src/main.rs`).
 
 ### Integration Testing
 - [ ] **End-to-end integration test**: No test covers all three phases simultaneously (requires a live Air + Tinymist process).
