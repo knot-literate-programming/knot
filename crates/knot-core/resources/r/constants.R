@@ -30,3 +30,8 @@ load_constant <- function(obj_name, path) {
     FALSE
   }
 }
+
+hash_objects_batch <- function(names) {
+  results <- setNames(sapply(names, hash_object), names)
+  cat(jsonlite::toJSON(results, auto_unbox = TRUE), "\n")
+}

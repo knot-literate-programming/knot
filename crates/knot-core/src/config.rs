@@ -15,6 +15,8 @@ pub struct Config {
     pub document: DocumentConfig,
     #[serde(default)]
     pub helpers: HelpersConfig,
+    #[serde(default)]
+    pub execution: ExecutionConfig,
     #[serde(default, rename = "chunk-defaults")]
     pub chunk_defaults: ChunkDefaults,
     /// Codly configuration options (passed to #codly() during initialization)
@@ -45,6 +47,27 @@ pub struct DocumentConfig {
 #[derive(Debug, Default, Deserialize)]
 pub struct HelpersConfig {
     pub typst: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct ExecutionConfig {
+    /// Maximum execution time (seconds) for a single R/Python chunk.
+    /// If a chunk exceeds this limit, the process is killed and an error is returned.
+    #[serde(default = "default_timeout_secs")]
+    pub timeout_secs: u64,
+}
+
+fn default_timeout_secs() -> u64 {
+    crate::defaults::Defaults::DEFAULT_EXECUTION_TIMEOUT_SECS
+}
+
+impl Default for ExecutionConfig {
+    fn default() -> Self {
+        Self {
+            timeout_secs: crate::defaults::Defaults::DEFAULT_EXECUTION_TIMEOUT_SECS,
+        }
+    }
 }
 
 impl Config {
@@ -130,19 +153,27 @@ impl Config {
 
     /// Get language-specific chunk defaults for a given language
     pub fn get_language_defaults(&self, lang: &str) -> Option<&ChunkDefaults> {
-        match lang {
-            "r" => self.r_chunks.as_ref(),
-            "python" => self.python_chunks.as_ref(),
-            _ => None,
+        // Parse to Language enum for exhaustive matching
+        let language = lang.parse::<crate::defaults::Language>().ok()?;
+
+        match language {
+            crate::defaults::Language::R => self.r_chunks.as_ref(),
+            crate::defaults::Language::Python => self.python_chunks.as_ref(),
+            // Compiler enforces exhaustive matching - adding a new Language
+            // variant will cause a compilation error here
         }
     }
 
     /// Get language-specific error defaults for a given language
     pub fn get_language_error_defaults(&self, lang: &str) -> Option<&ChunkDefaults> {
-        match lang {
-            "r" => self.r_error.as_ref(),
-            "python" => self.python_error.as_ref(),
-            _ => None,
+        // Parse to Language enum for exhaustive matching
+        let language = lang.parse::<crate::defaults::Language>().ok()?;
+
+        match language {
+            crate::defaults::Language::R => self.r_error.as_ref(),
+            crate::defaults::Language::Python => self.python_error.as_ref(),
+            // Compiler enforces exhaustive matching - adding a new Language
+            // variant will cause a compilation error here
         }
     }
 }

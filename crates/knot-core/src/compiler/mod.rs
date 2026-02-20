@@ -4,10 +4,30 @@ use crate::executors::ExecutorManager;
 use crate::parser::ast::{Chunk, Document, InlineExpr};
 use std::collections::HashMap;
 use std::path::Path;
+use std::time::Duration;
 
 pub mod chunk_processor;
 pub mod formatters;
 pub mod inline_processor;
+
+#[cfg(test)]
+pub(super) mod test_helpers {
+    use crate::cache::Cache;
+    use crate::executors::ExecutorManager;
+    use tempfile::TempDir;
+
+    pub fn setup_test_cache() -> (TempDir, Cache) {
+        let temp_dir = TempDir::new().unwrap();
+        let cache = Cache::new(temp_dir.path().to_path_buf()).unwrap();
+        (temp_dir, cache)
+    }
+
+    pub fn setup_test_manager() -> (TempDir, ExecutorManager) {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = ExecutorManager::new(temp_dir.path().to_path_buf());
+        (temp_dir, manager)
+    }
+}
 pub mod snapshot_manager;
 
 /// Represents a node in the document that can be executed.
@@ -60,7 +80,10 @@ impl Compiler {
 
         info!("📦 Cache directory: {}", cache_dir.display());
 
-        let executor_manager = ExecutorManager::new(cache_dir.clone());
+        let executor_manager = ExecutorManager::with_timeout(
+            cache_dir.clone(),
+            Duration::from_secs(config.execution.timeout_secs),
+        );
 
         Ok(Self {
             executor_manager,
@@ -73,6 +96,7 @@ impl Compiler {
     /// Compiles a document by executing its code chunks and generating a new Typst source file.
     pub fn compile(&mut self, doc: &Document) -> Result<String> {
         let mut cache = Cache::new(self.cache_dir.clone())?;
+        let backend = crate::backend::TypstBackend::new();
 
         // Tracks the hash of the last chunk for EACH language (for chaining)
         let mut last_hash_per_lang: HashMap<String, String> = HashMap::new();
@@ -138,6 +162,7 @@ impl Compiler {
                             &previous_hash,
                             &self.config,
                             true, // is_inert
+                            &backend,
                         )?;
                         res
                     }
@@ -170,6 +195,7 @@ impl Compiler {
                     &previous_hash,
                     &self.config,
                     false, // is_inert
+                    &backend,
                 ),
                 ExecutableNode::InlineExpr(inline_expr) => inline_processor::process_inline_expr(
                     inline_expr,
@@ -188,13 +214,13 @@ impl Compiler {
                         "\n#code-chunk(
     lang: \"{}\",
     is-inert: false,
-    errors: ([#local(zebra-fill: none)[\n=== Erreur d'exécution ({})\nDans le {} `{}`\n\n```\n{}\n```\n\n_L'exécution des blocs `{}` suivants a été suspendue._]],)
+    errors: ([#local(zebra-fill: none)[\n=== Execution Error ({})\nIn {} `{}`\n\n```\n{}\n```\n\n_Execution of subsequent `{}` blocks has been suspended._]],)
 )\n",
                         lang,
                         lang,
                         match node {
                             ExecutableNode::Chunk(_) => "chunk",
-                            ExecutableNode::InlineExpr(_) => "expression inline",
+                            ExecutableNode::InlineExpr(_) => "inline expression",
                         },
                         match node {
                             ExecutableNode::Chunk(c) => c.name.as_deref().unwrap_or("unnamed"),

@@ -2,22 +2,23 @@ use crate::executors::{ExecutionOutput, ExecutionResult};
 use crate::parser::{Chunk, Layout, ResolvedChunkOptions, Show};
 use std::collections::HashMap;
 
-/// Formats a HashMap of codly options into a Typst #codly() function call.
-pub fn format_codly_call(options: &HashMap<String, String>) -> String {
+/// Helper function to format a HashMap of options into a Typst function call.
+fn format_typst_call(fn_name: &str, options: &HashMap<String, String>) -> String {
     let args: Vec<String> = options
         .iter()
         .map(|(key, value)| format!("{}: {}", key, value))
         .collect();
-    format!("#codly({})", args.join(", "))
+    format!("#{}({})", fn_name, args.join(", "))
+}
+
+/// Formats a HashMap of codly options into a Typst #codly() function call.
+pub fn format_codly_call(options: &HashMap<String, String>) -> String {
+    format_typst_call("codly", options)
 }
 
 /// Formats a HashMap of codly options into a Typst #local() function call.
 pub fn format_local_call(options: &HashMap<String, String>) -> String {
-    let args: Vec<String> = options
-        .iter()
-        .map(|(key, value)| format!("{}: {}", key, value))
-        .collect();
-    format!("#local({})", args.join(", "))
+    format_typst_call("local", options)
 }
 
 pub trait Backend {
@@ -317,6 +318,7 @@ mod tests {
         };
 
         Chunk {
+            index: 0, // Dummy chunk for test/inline contexts
             language: language.to_string(),
             code: code.to_string(),
             name,

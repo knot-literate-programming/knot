@@ -39,7 +39,7 @@ Done!
 
     // Parse the document
     let source = fs::read_to_string(&doc_path).expect("Failed to read document");
-    let doc = Document::parse(source).expect("Failed to parse document");
+    let doc = Document::parse(source);
 
     // Verify we parsed the chunk
     assert_eq!(doc.chunks.len(), 1);
@@ -76,7 +76,7 @@ print(y)
 
     let (_temp, doc_path) = setup_test_doc(content);
     let source = fs::read_to_string(&doc_path).expect("Failed to read document");
-    let doc = Document::parse(source).expect("Failed to parse document");
+    let doc = Document::parse(source);
 
     assert_eq!(doc.chunks.len(), 3);
     assert_eq!(doc.chunks[0].name, Some("setup".to_string()));
@@ -95,7 +95,7 @@ x <- 5
 
     let (_temp, doc_path) = setup_test_doc(content);
     let source = fs::read_to_string(&doc_path).expect("Failed to read document");
-    let doc = Document::parse(source).expect("Failed to parse document");
+    let doc = Document::parse(source);
 
     assert_eq!(doc.chunks.len(), 1);
     assert_eq!(doc.chunks[0].name, None);
@@ -111,7 +111,7 @@ No code chunks here, just text.
 
     let (_temp, doc_path) = setup_test_doc(content);
     let source = fs::read_to_string(&doc_path).expect("Failed to read document");
-    let doc = Document::parse(source).expect("Failed to parse document");
+    let doc = Document::parse(source);
 
     assert_eq!(doc.chunks.len(), 0);
 }
@@ -128,7 +128,7 @@ data <- read_csv("data.csv")
 
     let (_temp, doc_path) = setup_test_doc(content);
     let source = fs::read_to_string(&doc_path).expect("Failed to read document");
-    let doc = Document::parse(source).expect("Failed to parse document");
+    let doc = Document::parse(source);
 
     assert_eq!(doc.chunks.len(), 1);
     assert_eq!(doc.chunks[0].options.depends.len(), 2);

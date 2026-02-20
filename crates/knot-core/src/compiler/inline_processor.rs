@@ -70,8 +70,8 @@ pub fn process_inline_expr(
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_helpers::{setup_test_cache, setup_test_manager};
     use super::*;
-    use tempfile::TempDir;
 
     fn create_inline_expr(code: &str, options: crate::parser::InlineOptions) -> InlineExpr {
         InlineExpr {
@@ -84,18 +84,6 @@ mod tests {
             code_start_byte: 0,
             code_end_byte: code.len(),
         }
-    }
-
-    fn setup_test_cache() -> (TempDir, Cache) {
-        let temp_dir = TempDir::new().unwrap();
-        let cache = Cache::new(temp_dir.path().to_path_buf()).unwrap();
-        (temp_dir, cache)
-    }
-
-    fn setup_test_manager() -> (TempDir, ExecutorManager) {
-        let temp_dir = TempDir::new().unwrap();
-        let manager = ExecutorManager::new(temp_dir.path().to_path_buf());
-        (temp_dir, manager)
     }
 
     #[test]
@@ -233,7 +221,7 @@ mod tests {
             crate::parser::InlineOptions {
                 eval: Some(false),
                 show: Some(crate::parser::Show::Code),
-                digits: Some(Some(3)),
+                digits: Some(3),
             },
         );
         let resolved = inline.options.resolve();

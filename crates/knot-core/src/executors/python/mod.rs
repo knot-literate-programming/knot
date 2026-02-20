@@ -17,6 +17,7 @@ use super::{
 use crate::parser::ChunkOptions;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 pub use process::PythonProcess;
 
@@ -26,10 +27,15 @@ pub struct PythonExecutor {
 }
 
 impl PythonExecutor {
-    pub fn new(cache_dir: PathBuf) -> Result<Self> {
+    /// Create a new Python executor with an execution timeout.
+    ///
+    /// # Arguments
+    /// * `cache_dir` - Directory for caching Python outputs
+    /// * `timeout`   - Maximum allowed duration for a single chunk execution
+    pub fn new(cache_dir: PathBuf, timeout: Duration) -> Result<Self> {
         std::fs::create_dir_all(&cache_dir)?;
         Ok(Self {
-            process: PythonProcess::uninitialized(),
+            process: PythonProcess::uninitialized(timeout),
             cache_dir,
         })
     }
@@ -127,6 +133,26 @@ impl ConstantObjectHandler for PythonExecutor {
             anyhow::bail!("Object '{}' not found", object_name);
         }
         Ok(out.trim().to_string())
+    }
+
+    fn hash_objects(
+        &mut self,
+        object_names: &[String],
+    ) -> Result<std::collections::HashMap<String, String>> {
+        if object_names.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+        // Build Python list literal and call batch helper
+        let names_list = object_names
+            .iter()
+            .map(|n| format!("'{}'", n.replace('\'', "\\'")))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let code = format!("print(hash_objects_batch([{}]))", names_list);
+        let out = self.query(&code)?;
+        let map: std::collections::HashMap<String, String> = serde_json::from_str(out.trim())
+            .map_err(|e| anyhow::anyhow!("hash_objects_batch parse error: {}", e))?;
+        Ok(map)
     }
 
     fn save_constant(&mut self, object_name: &str, hash: &str, cache_dir: &Path) -> Result<()> {
@@ -231,7 +257,8 @@ mod tests {
     fn setup_executor() -> (TempDir, PythonExecutor) {
         let temp_dir = TempDir::new().unwrap();
         let cache_dir = temp_dir.path().to_path_buf();
-        let mut executor = PythonExecutor::new(cache_dir).unwrap();
+        let mut executor =
+            PythonExecutor::new(cache_dir, std::time::Duration::from_secs(30)).unwrap();
         executor.initialize().unwrap();
         (temp_dir, executor)
     }
@@ -333,7 +360,9 @@ mod tests {
         executor.save_session(&snapshot_path).unwrap();
 
         // New executor
-        let mut executor2 = PythonExecutor::new(tmp.path().to_path_buf()).unwrap();
+        let mut executor2 =
+            PythonExecutor::new(tmp.path().to_path_buf(), std::time::Duration::from_secs(30))
+                .unwrap();
         executor2.initialize().unwrap();
         executor2.load_session(&snapshot_path).unwrap();
 

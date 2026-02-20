@@ -102,6 +102,8 @@ pub fn metadata_to_execution_result(
     let mut text_content = String::new();
     let mut plot_path: Option<PathBuf> = None;
     let mut dataframe_path: Option<PathBuf> = None;
+    let mut plot_count = 0usize;
+    let mut dataframe_count = 0usize;
 
     for item in metadata.results {
         match item {
@@ -109,15 +111,32 @@ pub fn metadata_to_execution_result(
                 if !text_content.is_empty() {
                     text_content.push('\n');
                 }
-                text_content.push_str(content.as_str());
+                text_content.push_str(&content.to_string());
             }
             OutputMetadata::Plot { path, .. } => {
+                plot_count += 1;
                 plot_path = Some(path);
             }
             OutputMetadata::DataFrame { path } => {
+                dataframe_count += 1;
                 dataframe_path = Some(path);
             }
         }
+    }
+
+    if plot_count > 1 {
+        log::warn!(
+            "Chunk produced {} plots; only the last one is captured. \
+             Knot currently supports one plot per chunk.",
+            plot_count
+        );
+    }
+    if dataframe_count > 1 {
+        log::warn!(
+            "Chunk produced {} dataframes; only the last one is captured. \
+             Knot currently supports one dataframe per chunk.",
+            dataframe_count
+        );
     }
 
     if text_content.is_empty() && !stdout_text.trim().is_empty() {
@@ -177,6 +196,23 @@ pub trait ConstantObjectHandler: Send + Sync {
     /// - R: Requires `digest` package
     /// - Python: Requires `xxhash` package (pip install xxhash)
     fn hash_object(&mut self, object_name: &str) -> Result<String>;
+
+    /// Compute hashes for multiple objects in a single round-trip.
+    ///
+    /// Returns a map of object_name → hash (or "NONE" if not found).
+    /// Default implementation calls hash_object() N times; executors
+    /// should override with a batch query for better performance.
+    fn hash_objects(
+        &mut self,
+        object_names: &[String],
+    ) -> Result<std::collections::HashMap<String, String>> {
+        let mut result = std::collections::HashMap::new();
+        for name in object_names {
+            let hash = self.hash_object(name)?;
+            result.insert(name.clone(), hash);
+        }
+        Ok(result)
+    }
 
     /// Save a constant object to content-addressed storage
     ///

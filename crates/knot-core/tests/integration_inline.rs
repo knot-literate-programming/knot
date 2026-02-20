@@ -23,7 +23,7 @@ print(y)
     fs::write(&test_file, source).expect("Failed to write test file");
 
     // First pass: execute and cache everything
-    let doc1 = Document::parse(source.to_string()).expect("Failed to parse doc1");
+    let doc1 = Document::parse(source.to_string());
     let mut compiler1 = Compiler::new(&test_file).expect("Failed to create compiler1");
     let result1 = compiler1.compile(&doc1).expect("Failed to compile doc1");
 
@@ -35,7 +35,7 @@ print(y)
     assert!(result1.contains("30")); // from the print(y) chunk
 
     // Second pass: should be fully cached
-    let doc2 = Document::parse(source.to_string()).expect("Failed to parse doc2");
+    let doc2 = Document::parse(source.to_string());
     let mut compiler2 = Compiler::new(&test_file).expect("Failed to create compiler2");
     let result2 = compiler2.compile(&doc2).expect("Failed to compile doc2");
     assert_eq!(
@@ -53,7 +53,7 @@ print(y)
 ```
 "#;
     fs::write(&test_file, modified_source).expect("Failed to write modified test file");
-    let doc3 = Document::parse(modified_source.to_string()).expect("Failed to parse doc3");
+    let doc3 = Document::parse(modified_source.to_string());
     let mut compiler3 = Compiler::new(&test_file).expect("Failed to create compiler3");
     let result3 = compiler3.compile(&doc3).expect("Failed to compile doc3");
 

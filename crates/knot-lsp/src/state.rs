@@ -34,6 +34,21 @@ pub struct DocumentState {
 /// data — it does NOT deep-copy the state.  This is intentional: clones are
 /// used to hand the state to background tasks (`clone_for_task`) while keeping
 /// everything in sync.
+///
+/// # Lock ordering
+///
+/// To prevent deadlocks, locks must **never** be held simultaneously across
+/// two different fields.  All handlers follow the pattern of releasing one
+/// guard before acquiring another (using scoped blocks `{ let g = …; … }`).
+///
+/// If a future change requires holding two locks at the same time, the
+/// required acquisition order is:
+///
+/// ```text
+/// documents → tinymist → executors → formatter → (path overrides)
+/// ```
+///
+/// Always acquire locks in this order and release them in reverse order.
 #[derive(Clone)]
 pub struct ServerState {
     /// Per-document state

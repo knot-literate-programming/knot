@@ -27,16 +27,11 @@ impl std::fmt::Display for StringOrVec {
 }
 
 impl StringOrVec {
-    pub fn as_str(&self) -> &str {
+    /// Returns `true` if the content is empty (empty string or empty vec).
+    pub fn is_empty(&self) -> bool {
         match self {
-            StringOrVec::String(s) => s,
-            StringOrVec::Vec(v) => {
-                if v.is_empty() {
-                    ""
-                } else {
-                    &v[0]
-                }
-            }
+            StringOrVec::String(s) => s.is_empty(),
+            StringOrVec::Vec(v) => v.is_empty() || v.iter().all(|s| s.is_empty()),
         }
     }
 }

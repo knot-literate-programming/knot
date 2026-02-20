@@ -1,4 +1,3 @@
-use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -242,6 +241,11 @@ macro_rules! define_options {
                             _ => toml::to_string(value).unwrap_or_default().trim().to_string(),
                         };
                         self.codly_options.insert(codly_key, value_str);
+                    } else {
+                        log::warn!(
+                            "Unknown option in knot.toml: '{}' — ignored. Check for typos.",
+                            key
+                        );
                     }
                 }
             }
@@ -381,6 +385,7 @@ define_options! {
 
 #[derive(Debug, Clone)]
 pub struct Chunk {
+    pub index: usize, // Ordinal position in document (0-based)
     pub language: String,
     pub name: Option<String>,
     pub code: String,
@@ -459,14 +464,14 @@ macro_rules! define_inline_options {
     (
         $(
             $(#[doc = $doc:expr])*
-            $name:ident : $type:ty = $default:expr
+            [$kind:ident] $name:ident : $type:ty , $default:expr
         ),* $(,)?
     ) => {
         #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
         pub struct InlineOptions {
             $(
                 $(#[doc = $doc])*
-                pub $name: expand_type!(val, $type),
+                pub $name: expand_type!($kind, $type),
             )*
         }
 
@@ -474,7 +479,7 @@ macro_rules! define_inline_options {
         pub struct ResolvedInlineOptions {
             $(
                 $(#[doc = $doc])*
-                pub $name: expand_resolved_type!(val, $type),
+                pub $name: expand_resolved_type!($kind, $type),
             )*
         }
 
@@ -490,7 +495,7 @@ macro_rules! define_inline_options {
             pub fn resolve(&self) -> ResolvedInlineOptions {
                 ResolvedInlineOptions {
                     $(
-                        $name: expand_resolve!(self.$name, val, $type, $default),
+                        $name: expand_resolve!(self.$name, $kind, $type, $default),
                     )*
                 }
             }
@@ -499,9 +504,12 @@ macro_rules! define_inline_options {
 }
 
 define_inline_options! {
-    eval: bool = true,
-    show: Show = Show::Output,
-    digits: Option<u32> = None,
+    /// Whether to evaluate the inline expression
+    [val] eval: bool, true,
+    /// What to show in the output
+    [val] show: Show, Show::Output,
+    /// Number of digits for rounding (optional)
+    [opt] digits: u32, None,
 }
 
 #[derive(Debug, Clone)]
@@ -524,9 +532,12 @@ pub struct Document {
 }
 
 impl Document {
-    pub fn parse(source: String) -> Result<Self> {
-        let doc = super::winnow_parser::parse_document(&source);
-        Ok(doc)
+    /// Parse a knot document from source code.
+    ///
+    /// This function always succeeds. Syntax errors are stored in `doc.errors`
+    /// rather than returned as a `Result::Err`.
+    pub fn parse(source: String) -> Self {
+        super::winnow_parser::parse_document(&source)
     }
 
     /// Format the document by normalizing all its chunks and inlines.

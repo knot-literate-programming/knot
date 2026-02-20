@@ -10,6 +10,11 @@ use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::path::Path;
 
+/// Returns up to the first 8 characters of a hash string, safe for any length.
+fn short_hash(h: &str) -> &str {
+    &h[..h.len().min(8)]
+}
+
 #[derive(Default)]
 pub struct SnapshotManager {
     /// Tracks the hash of the snapshot currently loaded in EACH executor
@@ -52,7 +57,7 @@ impl SnapshotManager {
                     if previous_hash.is_empty() {
                         "N/A"
                     } else {
-                        &previous_hash[..8]
+                        short_hash(previous_hash)
                     }
                 );
 
@@ -60,7 +65,7 @@ impl SnapshotManager {
                 exec.load_session(&snapshot_path).context(format!(
                     "Failed to restore {} session snapshot for hash {}",
                     lang,
-                    &previous_hash[..8]
+                    short_hash(previous_hash)
                 ))?;
 
                 // Also restore constant objects for this language
@@ -117,7 +122,7 @@ impl SnapshotManager {
             exec.save_session(&snapshot_path).context(format!(
                 "Failed to save {} session snapshot for hash {}",
                 lang,
-                &node_hash[..8]
+                short_hash(node_hash)
             ))?;
 
             // Restore constant objects to environment
@@ -136,7 +141,7 @@ impl SnapshotManager {
                 if node_hash.is_empty() {
                     "N/A"
                 } else {
-                    &node_hash[..8]
+                    short_hash(node_hash)
                 },
                 lang
             );
@@ -153,12 +158,12 @@ impl SnapshotManager {
                 if node_hash.is_empty() {
                     "N/A"
                 } else {
-                    &node_hash[..8]
+                    short_hash(node_hash)
                 },
                 if previous_hash.is_empty() {
                     "N/A"
                 } else {
-                    &previous_hash[..8]
+                    short_hash(previous_hash)
                 }
             );
         }

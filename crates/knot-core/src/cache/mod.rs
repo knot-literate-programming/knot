@@ -6,7 +6,7 @@
 // - Dependency tracking (file mtime/size)
 // - Persistent metadata (metadata.json)
 
-mod hashing;
+pub mod hashing;
 mod metadata;
 mod storage;
 
@@ -14,7 +14,6 @@ pub use hashing::hash_dependencies;
 pub use metadata::{CacheMetadata, ChunkCacheEntry, ConstantObjectInfo, InlineCacheEntry};
 
 use crate::executors::ExecutionOutput;
-use crate::parser::ChunkOptions;
 use anyhow::{Result, anyhow};
 use chrono::Utc;
 use std::fs;
@@ -40,23 +39,6 @@ impl Cache {
     }
 
     /// Computes hash for a chunk (using sequential chaining and dependencies)
-    pub fn get_chunk_hash(
-        &self,
-        code: &str,
-        options: &ChunkOptions,
-        previous_hash: &str,
-        dependencies_hash: &str,
-        constants_hash: &str,
-    ) -> String {
-        hashing::get_chunk_hash(
-            code,
-            options,
-            previous_hash,
-            dependencies_hash,
-            constants_hash,
-        )
-    }
-
     /// Computes hash for an inline expression (using sequential chaining)
     pub fn get_inline_expr_hash(
         &self,
@@ -214,8 +196,7 @@ impl Cache {
 mod tests {
     use super::*;
     use crate::get_cache_dir;
-    use std::thread;
-    use std::time::Duration;
+    use crate::parser::ChunkOptions;
     use tempfile::tempdir;
 
     #[test]
@@ -223,17 +204,17 @@ mod tests {
         let tmp_dir = tempdir().unwrap();
         let project_root = tmp_dir.path();
         let cache_dir = get_cache_dir(project_root, "test");
-        let cache = Cache::new(cache_dir).unwrap();
+        let _cache = Cache::new(cache_dir).unwrap();
         let opts = ChunkOptions::default();
 
-        let hash1 = cache.get_chunk_hash("x <- 1", &opts, "", "", "");
-        let hash2 = cache.get_chunk_hash("y <- x + 1", &opts, &hash1, "", "");
-        let hash3 = cache.get_chunk_hash("z <- y * 2", &opts, &hash2, "", "");
+        let hash1 = hashing::get_chunk_hash("x <- 1", &opts, "", "", "");
+        let hash2 = hashing::get_chunk_hash("y <- x + 1", &opts, &hash1, "", "");
+        let hash3 = hashing::get_chunk_hash("z <- y * 2", &opts, &hash2, "", "");
 
         // Changer chunk 1 invalide tout
-        let hash1_mod = cache.get_chunk_hash("x <- 2", &opts, "", "", "");
-        let hash2_after = cache.get_chunk_hash("y <- x + 1", &opts, &hash1_mod, "", "");
-        let hash3_after = cache.get_chunk_hash("z <- y * 2", &opts, &hash2_after, "", "");
+        let hash1_mod = hashing::get_chunk_hash("x <- 2", &opts, "", "", "");
+        let hash2_after = hashing::get_chunk_hash("y <- x + 1", &opts, &hash1_mod, "", "");
+        let hash3_after = hashing::get_chunk_hash("z <- y * 2", &opts, &hash2_after, "", "");
 
         assert_ne!(hash1, hash1_mod);
         assert_ne!(hash2, hash2_after);
@@ -244,7 +225,7 @@ mod tests {
     fn test_dependency_invalidation() {
         let tmp_dir = tempdir().unwrap();
         let project_root = tmp_dir.path();
-        let cache_dir = get_cache_dir(project_root, "test");
+        let _cache_dir = get_cache_dir(project_root, "test");
         let tmp_file = tmp_dir.path().join("data.csv");
         fs::write(&tmp_file, "a,b\n1,2").unwrap();
 
@@ -254,26 +235,13 @@ mod tests {
         };
 
         let deps_hash1 = hash_dependencies(&opts.depends).unwrap();
-        let hash1 = Cache::new(cache_dir.clone()).unwrap().get_chunk_hash(
-            "read.csv('data.csv')",
-            &opts,
-            "",
-            &deps_hash1,
-            "",
-        );
+        let hash1 = hashing::get_chunk_hash("read.csv('data.csv')", &opts, "", &deps_hash1, "");
 
-        // Modifier fichier
-        thread::sleep(Duration::from_millis(10));
+        // Modify file — content hashing detects the change immediately
         fs::write(&tmp_file, "a,b\n3,4").unwrap();
 
         let deps_hash2 = hash_dependencies(&opts.depends).unwrap();
-        let hash2 = Cache::new(cache_dir).unwrap().get_chunk_hash(
-            "read.csv('data.csv')",
-            &opts,
-            "",
-            &deps_hash2,
-            "",
-        );
+        let hash2 = hashing::get_chunk_hash("read.csv('data.csv')", &opts, "", &deps_hash2, "");
 
         assert_ne!(deps_hash1, deps_hash2);
         assert_ne!(hash1, hash2);
@@ -284,7 +252,7 @@ mod tests {
         let tmp_dir = tempdir().unwrap();
         let project_root = tmp_dir.path();
         let cache_dir = get_cache_dir(project_root, "test");
-        let cache = Cache::new(cache_dir).unwrap();
+        let _cache = Cache::new(cache_dir).unwrap();
 
         let opts1 = ChunkOptions {
             eval: Some(true),
@@ -295,8 +263,8 @@ mod tests {
             ..Default::default()
         };
 
-        let hash1 = cache.get_chunk_hash("x <- 1", &opts1, "", "", "");
-        let hash2 = cache.get_chunk_hash("x <- 1", &opts2, "", "", "");
+        let hash1 = hashing::get_chunk_hash("x <- 1", &opts1, "", "", "");
+        let hash2 = hashing::get_chunk_hash("x <- 1", &opts2, "", "", "");
 
         assert_ne!(hash1, hash2);
     }

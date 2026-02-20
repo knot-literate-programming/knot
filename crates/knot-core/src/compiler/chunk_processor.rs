@@ -9,7 +9,7 @@
 //! 6. Format the output using the Typst backend.
 
 use crate::backend::{Backend, TypstBackend};
-use crate::cache::{Cache, hash_dependencies};
+use crate::cache::{Cache, hash_dependencies, hashing};
 use crate::config::Config;
 use crate::executors::{ExecutionOutput, ExecutionResult, ExecutorManager, GraphicsOptions};
 use crate::parser::Chunk;
@@ -24,6 +24,7 @@ pub fn process_chunk(
     previous_hash: &str,
     config: &Config,
     is_inert: bool,
+    backend: &TypstBackend,
 ) -> Result<(String, String)> {
     // Apply config defaults to chunk options and resolve to concrete values
     let mut chunk_options = chunk.options.clone();
@@ -57,13 +58,13 @@ pub fn process_chunk(
         .name
         .as_deref()
         .map(String::from)
-        .unwrap_or_else(|| format!("chunk-{}", chunk.start_byte));
+        .unwrap_or_else(|| format!("chunk-{}", chunk.index));
 
     let deps_hash = hash_dependencies(&chunk_options.depends)?;
     let constants_hash =
         get_constants_hash(executor_manager, &chunk.language, &chunk_options.constant)?;
 
-    let chunk_hash = cache.get_chunk_hash(
+    let chunk_hash = hashing::get_chunk_hash(
         &chunk.code,
         &chunk_options,
         previous_hash,
@@ -98,7 +99,7 @@ pub fn process_chunk(
             if let Some(error) = &output.error {
                 // Save execution error to cache
                 cache.save_error(
-                    chunk.start_byte,
+                    chunk.index,
                     chunk.name.clone(),
                     chunk.language.clone(),
                     chunk_hash.clone(),
@@ -108,7 +109,7 @@ pub fn process_chunk(
             } else {
                 // Save successful result to cache
                 cache.save_result(
-                    chunk.start_byte, // Use start_byte as unique ID for now
+                    chunk.index,
                     chunk.name.clone(),
                     chunk.language.clone(),
                     chunk_hash.clone(),
@@ -132,7 +133,6 @@ pub fn process_chunk(
     let mut chunk_with_codly = chunk.clone();
     chunk_with_codly.codly_options = merged_codly_options;
 
-    let backend = TypstBackend::new();
     let chunk_output_final = backend.format_chunk(
         &chunk_with_codly,
         &resolved_options,
@@ -152,18 +152,20 @@ fn get_constants_hash(
         return Ok(String::new());
     }
 
+    // Fetch all hashes in a single round-trip instead of N separate queries
     let exec = executor_manager.get_executor(lang)?;
+    let hashes = exec.hash_objects(constants)?;
+
     let mut combined_hash = Sha256::new();
     for var in constants {
-        match exec.hash_object(var) {
-            Ok(hash) => {
+        match hashes.get(var) {
+            Some(hash) if hash != "NONE" => {
                 combined_hash.update(var.as_bytes());
                 combined_hash.update(hash.as_bytes());
             }
-            Err(e) => {
-                // If we can't hash a constant, it implies it doesn't exist or is invalid.
-                // We force invalidation by adding a random component.
-                log::warn!("Could not hash constant '{}' in {}: {}", var, lang, e);
+            _ => {
+                // Object not found or invalid: force cache invalidation
+                log::warn!("Could not hash constant '{}' in {}: not found", var, lang);
                 combined_hash.update(var.as_bytes());
                 combined_hash.update(uuid::Uuid::new_v4().as_bytes());
             }
@@ -174,6 +176,7 @@ fn get_constants_hash(
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_helpers::{setup_test_cache, setup_test_manager};
     use super::*;
     use crate::parser::{ChunkOptions, Position, Range};
     use tempfile::TempDir;
@@ -191,6 +194,7 @@ mod tests {
         };
 
         Chunk {
+            index: 0, // Test helper: use dummy index
             language: language.to_string(),
             code: code.to_string(),
             name,
@@ -237,18 +241,6 @@ mod tests {
         }
     }
 
-    fn setup_test_cache() -> (TempDir, Cache) {
-        let temp_dir = TempDir::new().unwrap();
-        let cache = Cache::new(temp_dir.path().to_path_buf()).unwrap();
-        (temp_dir, cache)
-    }
-
-    fn setup_test_manager() -> (TempDir, ExecutorManager) {
-        let temp_dir = TempDir::new().unwrap();
-        let manager = ExecutorManager::new(temp_dir.path().to_path_buf());
-        (temp_dir, manager)
-    }
-
     fn setup_test_config() -> crate::config::Config {
         crate::config::Config::default()
     }
@@ -266,6 +258,7 @@ mod tests {
             "prev_hash",
             &setup_test_config(),
             false,
+            &crate::backend::TypstBackend::new(),
         )
         .unwrap();
 
@@ -287,6 +280,7 @@ mod tests {
             "prev_hash",
             &setup_test_config(),
             false,
+            &crate::backend::TypstBackend::new(),
         )
         .unwrap();
     }
@@ -304,6 +298,7 @@ mod tests {
             "prev_hash",
             &setup_test_config(),
             false,
+            &crate::backend::TypstBackend::new(),
         )
         .unwrap();
 
@@ -325,6 +320,7 @@ mod tests {
             "prev_hash",
             &setup_test_config(),
             false,
+            &crate::backend::TypstBackend::new(),
         )
         .unwrap();
 
@@ -336,6 +332,7 @@ mod tests {
             "prev_hash",
             &setup_test_config(),
             false,
+            &crate::backend::TypstBackend::new(),
         )
         .unwrap();
 
@@ -358,6 +355,7 @@ mod tests {
             "prev_hash",
             &setup_test_config(),
             false,
+            &crate::backend::TypstBackend::new(),
         )
         .unwrap();
         let (_output2, hash2) = process_chunk(
@@ -367,6 +365,7 @@ mod tests {
             "prev_hash",
             &setup_test_config(),
             false,
+            &crate::backend::TypstBackend::new(),
         )
         .unwrap();
 
@@ -387,6 +386,7 @@ mod tests {
             "prev_hash_1",
             &setup_test_config(),
             false,
+            &crate::backend::TypstBackend::new(),
         )
         .unwrap();
         let (_output2, hash2) = process_chunk(
@@ -396,6 +396,7 @@ mod tests {
             "prev_hash_2",
             &setup_test_config(),
             false,
+            &crate::backend::TypstBackend::new(),
         )
         .unwrap();
 
@@ -416,6 +417,7 @@ mod tests {
             "prev_hash",
             &setup_test_config(),
             false,
+            &crate::backend::TypstBackend::new(),
         );
 
         // Should fail with unsupported language
@@ -456,6 +458,7 @@ mod tests {
             "prev_hash",
             &setup_test_config(),
             false,
+            &crate::backend::TypstBackend::new(),
         )
         .unwrap();
 
@@ -471,6 +474,7 @@ mod tests {
             "prev_hash",
             &setup_test_config(),
             false,
+            &crate::backend::TypstBackend::new(),
         )
         .unwrap();
 
@@ -490,6 +494,7 @@ mod tests {
             "prev_hash",
             &setup_test_config(),
             false,
+            &crate::backend::TypstBackend::new(),
         )
         .unwrap();
 
@@ -510,6 +515,7 @@ mod tests {
             "prev_hash",
             &setup_test_config(),
             false,
+            &crate::backend::TypstBackend::new(),
         )
         .unwrap();
 
@@ -529,6 +535,7 @@ mod tests {
         };
 
         let chunk = Chunk {
+            index: 0,
             language: "r".to_string(),
             code: "x <- 1".to_string(),
             name: None,
@@ -573,6 +580,7 @@ mod tests {
             "prev_hash",
             &config,
             false,
+            &crate::backend::TypstBackend::new(),
         )
         .unwrap();
 
@@ -612,6 +620,7 @@ mod tests {
             "prev_hash",
             &config,
             false,
+            &crate::backend::TypstBackend::new(),
         )
         .unwrap();
 
@@ -631,6 +640,7 @@ mod tests {
         };
 
         let chunk = Chunk {
+            index: 0,
             language: "python".to_string(),
             code: "x = 1".to_string(),
             name: None,
@@ -671,6 +681,7 @@ mod tests {
             "prev_hash",
             &config,
             false,
+            &crate::backend::TypstBackend::new(),
         )
         .unwrap();
 

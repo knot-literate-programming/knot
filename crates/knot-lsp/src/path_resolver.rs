@@ -17,7 +17,9 @@ pub fn resolve_binary(name: &str) -> Result<PathBuf> {
     ];
 
     // Add OS-specific paths
-    if cfg!(target_os = "windows") && let Ok(appdata) = std::env::var("LOCALAPPDATA") {
+    if cfg!(target_os = "windows")
+        && let Ok(appdata) = std::env::var("LOCALAPPDATA")
+    {
         let win_path = PathBuf::from(appdata).join("Programs").join(name);
         if let Some(s) = win_path.to_str() {
             search_paths.push(s.to_string());
@@ -34,7 +36,9 @@ pub fn resolve_binary(name: &str) -> Result<PathBuf> {
         if (name == "tinymist" || name == "air") && cfg!(target_os = "macos") {
             let extensions_dir =
                 Path::new(&shellexpand::tilde("~/.vscode/extensions").to_string()).to_path_buf();
-            if extensions_dir.exists() && let Ok(entries) = std::fs::read_dir(extensions_dir) {
+            if extensions_dir.exists()
+                && let Ok(entries) = std::fs::read_dir(extensions_dir)
+            {
                 let prefix = if name == "tinymist" {
                     "myriad-dreamin.tinymist-"
                 } else {
@@ -50,11 +54,7 @@ pub fn resolve_binary(name: &str) -> Result<PathBuf> {
                             // Try common air subpaths
                             let p1 = entry.path().join("bin").join("air");
                             let p2 = entry.path().join("bundled").join("bin").join("air");
-                            if p2.exists() {
-                                p2
-                            } else {
-                                p1
-                            }
+                            if p2.exists() { p2 } else { p1 }
                         };
 
                         if candidate.exists() && candidate.is_file() {

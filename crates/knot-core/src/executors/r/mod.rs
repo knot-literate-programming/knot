@@ -16,6 +16,7 @@ use super::{
 };
 use anyhow::Result;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 pub use process::RProcess;
 
@@ -27,17 +28,15 @@ pub struct RExecutor {
 }
 
 impl RExecutor {
-    /// Create a new R executor
+    /// Create a new R executor with an execution timeout.
     ///
     /// # Arguments
     /// * `cache_dir` - Directory for caching R outputs
-    ///
-    /// The R helper script is embedded in the binary and loaded automatically
-    /// during initialization.
-    pub fn new(cache_dir: PathBuf) -> Result<Self> {
+    /// * `timeout`   - Maximum allowed duration for a single chunk execution
+    pub fn new(cache_dir: PathBuf, timeout: Duration) -> Result<Self> {
         std::fs::create_dir_all(&cache_dir)?;
         Ok(Self {
-            process: RProcess::uninitialized(),
+            process: RProcess::uninitialized(timeout),
             cache_dir,
         })
     }
@@ -120,6 +119,26 @@ impl ConstantObjectHandler for RExecutor {
             anyhow::bail!("Object '{}' not found", object_name);
         }
         Ok(out.trim().to_string())
+    }
+
+    fn hash_objects(
+        &mut self,
+        object_names: &[String],
+    ) -> Result<std::collections::HashMap<String, String>> {
+        if object_names.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+        // Build R character vector literal and call batch helper
+        let names_vec = object_names
+            .iter()
+            .map(|n| format!("'{}'", n.replace('\'', "\\'")))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let code = format!("hash_objects_batch(c({}))", names_vec);
+        let out = self.query(&code)?;
+        let map: std::collections::HashMap<String, String> = serde_json::from_str(out.trim())
+            .map_err(|e| anyhow::anyhow!("hash_objects_batch parse error: {}", e))?;
+        Ok(map)
     }
 
     fn save_constant(&mut self, object_name: &str, hash: &str, cache_dir: &Path) -> Result<()> {
@@ -213,7 +232,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let cache_dir = temp_dir.path().to_path_buf();
 
-        let mut executor = RExecutor::new(cache_dir).unwrap();
+        let mut executor = RExecutor::new(cache_dir, std::time::Duration::from_secs(30)).unwrap();
         executor.initialize().unwrap();
 
         (temp_dir, executor)
