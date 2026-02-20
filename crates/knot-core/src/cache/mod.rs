@@ -197,8 +197,6 @@ mod tests {
     use super::*;
     use crate::get_cache_dir;
     use crate::parser::ChunkOptions;
-    use std::thread;
-    use std::time::Duration;
     use tempfile::tempdir;
 
     #[test]
@@ -245,8 +243,7 @@ mod tests {
             "",
         );
 
-        // Modifier fichier
-        thread::sleep(Duration::from_millis(10));
+        // Modify file — content hashing detects the change immediately
         fs::write(&tmp_file, "a,b\n3,4").unwrap();
 
         let deps_hash2 = hash_dependencies(&opts.depends).unwrap();
