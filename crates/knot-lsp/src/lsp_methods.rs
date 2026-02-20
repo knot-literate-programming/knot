@@ -9,3 +9,8 @@ pub mod text_document {
     pub const DOCUMENT_SYMBOL: &str = "textDocument/documentSymbol";
     pub const PUBLISH_DIAGNOSTICS: &str = "textDocument/publishDiagnostics";
 }
+
+pub mod window {
+    pub const SHOW_MESSAGE: &str = "window/showMessage";
+    pub const LOG_MESSAGE: &str = "window/logMessage";
+}

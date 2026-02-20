@@ -24,6 +24,7 @@ use handlers::completion::handle_completion;
 use handlers::formatting::{handle_format_chunk, handle_formatting};
 use handlers::hover::handle_hover;
 use lsp_methods::text_document as lsp;
+use lsp_methods::window as win;
 use position_mapper::PositionMapper;
 use proxy::TinymistProxy;
 use state::ServerState;
@@ -423,33 +424,61 @@ impl KnotLanguageServer {
     }
 
     async fn handle_tinymist_notification(&self, msg: serde_json::Value) {
-        if let Some(method) = msg.get("method").and_then(|m| m.as_str())
-            && method == lsp::PUBLISH_DIAGNOSTICS
-            && let Some(params) = msg.get("params")
-            && let (Some(uri_str), Some(diagnostics_val)) = (
-                params.get("uri").and_then(|u| u.as_str()),
-                params.get("diagnostics"),
-            )
-            && let (Ok(virtual_uri), Ok(mut diagnostics)) = (
-                Url::parse(uri_str),
-                serde_json::from_value::<Vec<Diagnostic>>(diagnostics_val.clone()),
-            )
-        {
-            let uri = self.resolve_virtual_uri(&virtual_uri);
-            let mut docs = self.state.documents.write().await;
-            if let Some(doc) = docs.get_mut(&uri) {
-                for d in &mut diagnostics {
-                    if let (Some(start), Some(end)) = (
-                        doc.mapper.typ_to_knot_position(d.range.start),
-                        doc.mapper.typ_to_knot_position(d.range.end),
-                    ) {
-                        d.range = Range { start, end };
+        let Some(method) = msg.get("method").and_then(|m| m.as_str()) else {
+            return;
+        };
+
+        match method {
+            lsp::PUBLISH_DIAGNOSTICS => {
+                if let Some(params) = msg.get("params")
+                    && let (Some(uri_str), Some(diagnostics_val)) = (
+                        params.get("uri").and_then(|u| u.as_str()),
+                        params.get("diagnostics"),
+                    )
+                    && let (Ok(virtual_uri), Ok(mut diagnostics)) = (
+                        Url::parse(uri_str),
+                        serde_json::from_value::<Vec<Diagnostic>>(diagnostics_val.clone()),
+                    )
+                {
+                    let uri = self.resolve_virtual_uri(&virtual_uri);
+                    let mut docs = self.state.documents.write().await;
+                    if let Some(doc) = docs.get_mut(&uri) {
+                        for d in &mut diagnostics {
+                            if let (Some(start), Some(end)) = (
+                                doc.mapper.typ_to_knot_position(d.range.start),
+                                doc.mapper.typ_to_knot_position(d.range.end),
+                            ) {
+                                d.range = Range { start, end };
+                            }
+                        }
+                        doc.tinymist_diagnostics = diagnostics;
+                    }
+                    drop(docs);
+                    self.publish_combined_diagnostics(&uri).await;
+                }
+            }
+
+            win::SHOW_MESSAGE | win::LOG_MESSAGE => {
+                if let Some(params) = msg.get("params")
+                    && let Some(type_num) = params.get("type").and_then(|t| t.as_u64())
+                    && let Some(message) = params.get("message").and_then(|m| m.as_str())
+                {
+                    let msg_type = match type_num {
+                        1 => MessageType::ERROR,
+                        2 => MessageType::WARNING,
+                        3 => MessageType::INFO,
+                        _ => MessageType::LOG,
+                    };
+                    let prefixed = format!("[Tinymist] {message}");
+                    if method == win::SHOW_MESSAGE {
+                        self.client.show_message(msg_type, prefixed).await;
+                    } else {
+                        self.client.log_message(msg_type, prefixed).await;
                     }
                 }
-                doc.tinymist_diagnostics = diagnostics;
             }
-            drop(docs);
-            self.publish_combined_diagnostics(&uri).await;
+
+            _ => {}
         }
     }
 }
