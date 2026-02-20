@@ -62,10 +62,10 @@ pub fn get_inline_expr_hash(
 
 /// Computes combined hash for file dependencies
 ///
-/// Hash includes for each file:
-/// - File path
-/// - Last modified time
-/// - File size
+/// Hashes the actual file content (SHA256) for each dependency.
+/// Content hashing is more reliable than mtime-based approaches,
+/// which can miss rapid changes on file systems with coarse-grained
+/// timestamps (e.g. FAT32 has 2-second resolution).
 ///
 /// Returns empty string if no dependencies
 pub fn hash_dependencies(depends: &[PathBuf]) -> Result<String> {
@@ -73,21 +73,22 @@ pub fn hash_dependencies(depends: &[PathBuf]) -> Result<String> {
         return Ok(String::new());
     }
 
-    let mut hasher = Sha256::new();
+    let mut outer_hasher = Sha256::new();
 
     for path in depends {
         if !path.exists() {
             return Err(anyhow!("Dependency not found: {:?}", path));
         }
 
-        let metadata = fs::metadata(path)?;
-        let modified = metadata.modified()?;
+        // Include path in outer hash to detect renames
+        outer_hasher.update(path.to_string_lossy().as_bytes());
 
-        // Hash: path + modified_time + size
-        hasher.update(path.to_string_lossy().as_bytes());
-        hasher.update(format!("{:?}", modified).as_bytes());
-        hasher.update(metadata.len().to_string().as_bytes());
+        // Hash the file content
+        let content = fs::read(path)?;
+        let mut file_hasher = Sha256::new();
+        file_hasher.update(&content);
+        outer_hasher.update(file_hasher.finalize());
     }
 
-    Ok(format!("{:x}", hasher.finalize()))
+    Ok(format!("{:x}", outer_hasher.finalize()))
 }
