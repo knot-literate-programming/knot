@@ -59,3 +59,9 @@ def remove_from_env(object_name):
         del main_dict[object_name]
         return True
     return False
+
+
+def hash_objects_batch(names):
+    """Compute hashes for multiple objects in a single call."""
+    import json
+    return json.dumps({name: hash_object(name) for name in names})

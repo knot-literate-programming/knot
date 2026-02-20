@@ -135,6 +135,26 @@ impl ConstantObjectHandler for PythonExecutor {
         Ok(out.trim().to_string())
     }
 
+    fn hash_objects(
+        &mut self,
+        object_names: &[String],
+    ) -> Result<std::collections::HashMap<String, String>> {
+        if object_names.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+        // Build Python list literal and call batch helper
+        let names_list = object_names
+            .iter()
+            .map(|n| format!("'{}'", n.replace('\'', "\\'")))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let code = format!("print(hash_objects_batch([{}]))", names_list);
+        let out = self.query(&code)?;
+        let map: std::collections::HashMap<String, String> =
+            serde_json::from_str(out.trim()).map_err(|e| anyhow::anyhow!("hash_objects_batch parse error: {}", e))?;
+        Ok(map)
+    }
+
     fn save_constant(&mut self, object_name: &str, hash: &str, cache_dir: &Path) -> Result<()> {
         let objects_dir = cache_dir.join("objects");
         std::fs::create_dir_all(&objects_dir)?;

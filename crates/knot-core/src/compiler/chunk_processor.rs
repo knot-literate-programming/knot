@@ -152,18 +152,20 @@ fn get_constants_hash(
         return Ok(String::new());
     }
 
+    // Fetch all hashes in a single round-trip instead of N separate queries
     let exec = executor_manager.get_executor(lang)?;
+    let hashes = exec.hash_objects(constants)?;
+
     let mut combined_hash = Sha256::new();
     for var in constants {
-        match exec.hash_object(var) {
-            Ok(hash) => {
+        match hashes.get(var) {
+            Some(hash) if hash != "NONE" => {
                 combined_hash.update(var.as_bytes());
                 combined_hash.update(hash.as_bytes());
             }
-            Err(e) => {
-                // If we can't hash a constant, it implies it doesn't exist or is invalid.
-                // We force invalidation by adding a random component.
-                log::warn!("Could not hash constant '{}' in {}: {}", var, lang, e);
+            _ => {
+                // Object not found or invalid: force cache invalidation
+                log::warn!("Could not hash constant '{}' in {}: not found", var, lang);
                 combined_hash.update(var.as_bytes());
                 combined_hash.update(uuid::Uuid::new_v4().as_bytes());
             }

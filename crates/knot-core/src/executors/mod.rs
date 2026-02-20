@@ -197,6 +197,23 @@ pub trait ConstantObjectHandler: Send + Sync {
     /// - Python: Requires `xxhash` package (pip install xxhash)
     fn hash_object(&mut self, object_name: &str) -> Result<String>;
 
+    /// Compute hashes for multiple objects in a single round-trip.
+    ///
+    /// Returns a map of object_name → hash (or "NONE" if not found).
+    /// Default implementation calls hash_object() N times; executors
+    /// should override with a batch query for better performance.
+    fn hash_objects(
+        &mut self,
+        object_names: &[String],
+    ) -> Result<std::collections::HashMap<String, String>> {
+        let mut result = std::collections::HashMap::new();
+        for name in object_names {
+            let hash = self.hash_object(name)?;
+            result.insert(name.clone(), hash);
+        }
+        Ok(result)
+    }
+
     /// Save a constant object to content-addressed storage
     ///
     /// Stores the object at: cache_dir/objects/{hash}.{ext}
