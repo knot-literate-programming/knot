@@ -175,6 +175,7 @@ fn get_constants_hash(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::test_helpers::{setup_test_cache, setup_test_manager};
     use crate::parser::{ChunkOptions, Position, Range};
     use tempfile::TempDir;
 
@@ -236,18 +237,6 @@ mod tests {
             code_start_byte: 110,
             code_end_byte: 190,
         }
-    }
-
-    fn setup_test_cache() -> (TempDir, Cache) {
-        let temp_dir = TempDir::new().unwrap();
-        let cache = Cache::new(temp_dir.path().to_path_buf()).unwrap();
-        (temp_dir, cache)
-    }
-
-    fn setup_test_manager() -> (TempDir, ExecutorManager) {
-        let temp_dir = TempDir::new().unwrap();
-        let manager = ExecutorManager::new(temp_dir.path().to_path_buf());
-        (temp_dir, manager)
     }
 
     fn setup_test_config() -> crate::config::Config {
