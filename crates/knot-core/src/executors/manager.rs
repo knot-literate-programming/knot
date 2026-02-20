@@ -45,6 +45,7 @@
 use crate::defaults::Defaults;
 use crate::executors::{KnotExecutor, LanguageExecutor, python::PythonExecutor, r::RExecutor};
 use anyhow::Result;
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -75,36 +76,32 @@ impl ExecutorManager {
 
     /// Get or initialize an executor for the given language
     pub fn get_executor(&mut self, lang: &str) -> Result<&mut (dyn KnotExecutor + '_)> {
-        if !self.executors.contains_key(lang) {
-            // Parse language string to enum for exhaustive matching
-            let language = lang
-                .parse::<crate::defaults::Language>()
-                .map_err(|e| anyhow::anyhow!("{}", e))?;
+        let executor = match self.executors.entry(lang.to_string()) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => {
+                // Parse language string to enum for exhaustive matching
+                let language = lang
+                    .parse::<crate::defaults::Language>()
+                    .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-            let executor: Box<dyn KnotExecutor> = match language {
-                crate::defaults::Language::R => {
-                    let mut exec = RExecutor::new(self.cache_dir.clone(), self.timeout)?;
-                    exec.initialize()?;
-                    Box::new(exec)
-                }
-                crate::defaults::Language::Python => {
-                    let mut exec = PythonExecutor::new(self.cache_dir.clone(), self.timeout)?;
-                    exec.initialize()?;
-                    Box::new(exec)
-                }
-                // Compiler enforces exhaustive matching - adding a new Language
-                // variant will cause a compilation error here
-            };
-            self.executors.insert(lang.to_string(), executor);
-        }
-
-        match self.executors.get_mut(lang) {
-            Some(executor) => Ok(executor.as_mut()),
-            None => anyhow::bail!(
-                "Failed to retrieve executor for language '{}' after initialization",
-                lang
-            ),
-        }
+                let executor: Box<dyn KnotExecutor> = match language {
+                    crate::defaults::Language::R => {
+                        let mut exec = RExecutor::new(self.cache_dir.clone(), self.timeout)?;
+                        exec.initialize()?;
+                        Box::new(exec)
+                    }
+                    crate::defaults::Language::Python => {
+                        let mut exec = PythonExecutor::new(self.cache_dir.clone(), self.timeout)?;
+                        exec.initialize()?;
+                        Box::new(exec)
+                    }
+                    // Compiler enforces exhaustive matching - adding a new Language
+                    // variant will cause a compilation error here
+                };
+                entry.insert(executor)
+            }
+        };
+        Ok(executor.as_mut())
     }
 
     /// Check if a language is supported
