@@ -86,8 +86,7 @@ pub fn get_diagnostics(uri: &Url, text: &str) -> Vec<Diagnostic> {
     if let Ok(path) = uri.to_file_path()
         && let Ok(project_root) = Config::find_project_root(&path)
     {
-        let file_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("main");
-        let cache_dir = get_cache_dir(&project_root, file_stem);
+        let cache_dir = get_cache_dir(&project_root);
 
         if let Ok(cache) = Cache::new(cache_dir) {
             for chunk_cache in cache.metadata.chunks {

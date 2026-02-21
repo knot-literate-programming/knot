@@ -72,12 +72,8 @@ impl Compiler {
             Config::default()
         };
 
-        // Determine isolated cache directory for this file
-        let file_stem = knot_file_path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("main");
-        let cache_dir = get_cache_dir(&project_root, file_stem);
+        // Determine project-wide cache directory
+        let cache_dir = get_cache_dir(&project_root);
 
         info!("📦 Cache directory: {}", cache_dir.display());
 

@@ -142,52 +142,14 @@ export async function activate(context: ExtensionContext) {
         })
     );
 
-    // Manual backward sync: jump from current .typ position to the .knot source
-    context.subscriptions.push(
-        commands.registerCommand('knot.jumpToKnotSource', async () => {
-            await jumpToKnotSource(outputChannel);
-        })
-    );
-
-    // Auto backward sync: redirect cursor from .typ to .knot
+    // Disable auto backward sync for now to avoid focus issues
+    /*
     context.subscriptions.push(
         window.onDidChangeTextEditorSelection((event) => {
-            const doc = event.textEditor.document;
-            if (!doc.fileName.endsWith('.typ') || doc.fileName.endsWith('.knot.typ')) { return; }
-            if (event.selections.length !== 1 || !event.selections[0].isEmpty) { return; }
-            if (suppressAutoSync) { return; }
-            if (!isKnotCompiledTyp(doc.fileName)) { return; }
-
-            const typFileName = doc.fileName;
-            const typLine = event.selections[0].active.line;
-
-            if (syncDebounceTimer) { clearTimeout(syncDebounceTimer); }
-            syncDebounceTimer = setTimeout(async () => {
-                syncDebounceTimer = undefined;
-                try {
-                    const knotBinary = resolveBinaryPath('knot', outputChannel);
-                    const result = await runKnotCommand(knotBinary, ['jump-to-source', typFileName, (typLine + 1).toString()], outputChannel);
-                    
-                    if (!result || !result.includes(':')) { return; }
-
-                    const [knotFile, lineStr] = result.split(':');
-                    const knotLine = parseInt(lineStr, 10) - 1;
-                    
-                    if (!fs.existsSync(knotFile)) { return; }
-
-                    outputChannel.appendLine(`[backward-sync] → ${path.basename(knotFile)}:${knotLine + 1}`);
-                    const knotUri = Uri.file(knotFile);
-                    const pos = new Position(knotLine, 0);
-                    const targetDoc = await workspace.openTextDocument(knotUri);
-                    await window.showTextDocument(targetDoc, {
-                        selection: new Range(pos, pos),
-                        viewColumn: ViewColumn.One,
-                        preserveFocus: false,
-                    });
-                } catch { /* ignore */ }
-            }, 150);
+            // ... (disabled)
         })
     );
+    */
 
     // Forward sync command: scroll preview to current .knot position
     context.subscriptions.push(
@@ -218,18 +180,34 @@ export async function activate(context: ExtensionContext) {
             try {
                 const mainTypUri = Uri.file(mainTypPath);
                 const mainTypDoc = await workspace.openTextDocument(mainTypUri);
-                const mainTypEditor = await window.showTextDocument(mainTypDoc, {
+                // 1. Show main.typ to make sure Tinymist knows what to preview
+                await window.showTextDocument(mainTypDoc, {
                     viewColumn: ViewColumn.One,
                     preserveFocus: false,
                 });
-                mainTypEditor.selection = new Selection(
-                    new Position(mappedTypLine, 0),
-                    new Position(mappedTypLine, 0),
-                );
+                
+                // 2. Set cursor in main.typ
+                const mainTypEditor = window.activeTextEditor;
+                if (mainTypEditor && mainTypEditor.document.uri.fsPath === mainTypPath) {
+                    mainTypEditor.selection = new Selection(
+                        new Position(mappedTypLine, 0),
+                        new Position(mappedTypLine, 0),
+                    );
+                }
+
+                // 3. Re-run preview command to be sure panel is focused on main.typ
                 await commands.executeCommand('typst-preview.preview');
-                await new Promise(r => setTimeout(r, 100));
+                
+                // 4. Brief pause for the panel to attach
+                await new Promise(r => setTimeout(r, 250));
+                
+                // 5. Call sync (scrolling)
                 await commands.executeCommand('typst-preview.sync');
-            } catch { /* ignore */ } finally {
+                
+                outputChannel.appendLine(`[forward-sync] sync called for main.typ line ${mappedTypLine + 1}`);
+            } catch (e) {
+                outputChannel.appendLine(`[forward-sync] error: ${e}`);
+            } finally {
                 suppressAutoSync = false;
             }
         })
@@ -399,46 +377,29 @@ async function openPreview(outputChannel: any): Promise<void> {
                     await new Promise(resolve => setTimeout(resolve, 200));
                 }
 
-                                progress.report({ message: 'Opening preview...' });
-                                compilationStatusBar.text = '$(check) Compilation complete!';
-                
-                                const mainTypPath = path.join(projectRoot, `${mainStem}.typ`);
-                                const mainTypUri = Uri.file(mainTypPath);
-                                const knotUri = Uri.file(knotPath);
-                
-                                if (fs.existsSync(mainTypPath)) {
-                                    suppressAutoSync = true;
-                                    try {
-                                        await window.showTextDocument(mainTypUri, { viewColumn: ViewColumn.One, preserveFocus: false });
-                                        await commands.executeCommand('tinymist.pinMainToCurrent');
-                                        await commands.executeCommand('typst-preview.preview');
-                                        const knotDoc = await workspace.openTextDocument(knotUri);
-                                        await window.showTextDocument(knotDoc, { viewColumn: ViewColumn.One, preserveFocus: false });
-                                    } catch (e) {
-                                        const pdfUri = Uri.file(pdfPath);
-                                        await commands.executeCommand('vscode.open', pdfUri, { viewColumn: ViewColumn.Two });
-                                    } finally {
-                                        setTimeout(() => { suppressAutoSync = false; }, 1000);
+                                                progress.report({ message: 'Opening PDF...' });
+                                                compilationStatusBar.text = '$(check) Compilation complete!';
+                                
+                                                if (fs.existsSync(pdfPath)) {
+                                                    const pdfUri = Uri.file(pdfPath);
+                                                    await commands.executeCommand('vscode.open', pdfUri, { viewColumn: ViewColumn.Two });
+                                                } else {
+                                                    window.showErrorMessage(`PDF not found: ${pdfPath}`);
+                                                }
+                                
+                                                // Hide status bar after a short delay
+                                                setTimeout(() => {
+                                                    compilationStatusBar.hide();
+                                                }, 2000);
+                                            }
+                                        );
+                                    } catch (error) {
+                                        outputChannel.appendLine(`ERROR in openPreview: ${error}`);
+                                        compilationStatusBar.hide();
+                                        throw error;
                                     }
-                                } else {
-                                    const pdfUri = Uri.file(pdfPath);
-                                    await commands.executeCommand('vscode.open', pdfUri, { viewColumn: ViewColumn.Two });
                                 }
-                
-                                // Hide status bar after a short delay
-                                setTimeout(() => {
-                                    compilationStatusBar.hide();
-                                }, 2000);
-                            }
-                        );
-                    } catch (error) {
-                        outputChannel.appendLine(`ERROR in openPreview: ${error}`);
-                        compilationStatusBar.hide();
-                        throw error;
-                    }
-                }
-                
-                /**
+                                                /**
                  * Manual backward sync command: jump from current .typ to .knot
                  */
                 async function jumpToKnotSource(outputChannel: any): Promise<void> {
