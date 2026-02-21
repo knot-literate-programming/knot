@@ -102,12 +102,10 @@ pub fn build_project(start_path: Option<&Path>) -> Result<()> {
                 .with_context(|| format!("Failed to read compiled file: {:?}", compiled_path))?;
 
             generated_includes.push_str(&format!(
-                "// ============================================\n\
-                 // Content from: {}\n\
-                 // ============================================\n\
-                 {}\n\n",
+                "// BEGIN-FILE {}\n{}\n// END-FILE {}\n\n",
                 include_name,
-                chapter_content.trim()
+                chapter_content.trim(),
+                include_name
             ));
 
             // Delete intermediate .typ file after reading its content
@@ -183,6 +181,19 @@ pub fn build_project(start_path: Option<&Path>) -> Result<()> {
         }
     }
 
+    // Step 5.75: Wrap entire main.typ with BEGIN-FILE / END-FILE for main.knot.
+    {
+        let main_content = fs::read_to_string(&final_main_typ_path)?;
+        let wrapped = format!(
+            "// BEGIN-FILE {}\n{}\n// END-FILE {}\n",
+            main_file_name,
+            main_content.trim(),
+            main_file_name
+        );
+        fs::write(&final_main_typ_path, wrapped)?;
+        info!("✓ Wrapped main.typ with BEGIN-FILE / END-FILE markers");
+    }
+
     // Step 6: Determine PDF output path (named after main file from knot.toml)
     // e.g., main.knot -> main.pdf, thesis.knot -> thesis.pdf
     let pdf_output_path = project_root.join(format!("{}.pdf", main_stem));
@@ -229,8 +240,13 @@ pub fn compile_file(file: &Path, output_path: Option<&PathBuf>) -> Result<PathBu
     let doc = Document::parse(source);
     info!("✓ Parsed {} chunk(s)", doc.chunks.len());
 
+    let source_file_name = file
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "unknown.knot".to_string());
+
     let mut compiler = Compiler::new(file)?;
-    let typst_source = compiler.compile(&doc)?;
+    let typst_source = compiler.compile(&doc, &source_file_name)?;
 
     // Determine output path
     let typ_output_path = if let Some(path) = output_path {

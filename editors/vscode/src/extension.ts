@@ -10,7 +10,7 @@
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
-import { workspace, ExtensionContext, window, commands, Uri, ProgressLocation, StatusBarAlignment, StatusBarItem } from 'vscode';
+import { workspace, ExtensionContext, window, commands, Uri, ProgressLocation, StatusBarAlignment, StatusBarItem, Range, Position, ViewColumn, Selection } from 'vscode';
 import { ChildProcess, spawn } from 'child_process';
 import {
     LanguageClient,
@@ -20,11 +20,13 @@ import {
     ExecuteCommandRequest,
 } from 'vscode-languageclient/node';
 import { KnotProjectProvider } from './projectExplorer';
-import { resolveBinaryPath, findProjectRoot, parseMainFromToml } from './utils';
+import { resolveBinaryPath, findProjectRoot, parseMainFromToml, runKnotCommand, isKnotCompiledTyp } from './utils';
 
 let client: LanguageClient | undefined;
 let watchProcesses: Map<string, ChildProcess> = new Map();
 let compilationStatusBar: StatusBarItem;
+let suppressAutoSync = false;
+let syncDebounceTimer: ReturnType<typeof setTimeout> | undefined;
 
 export async function activate(context: ExtensionContext) {
     const outputChannel = window.createOutputChannel('Knot Extension');
@@ -137,6 +139,99 @@ export async function activate(context: ExtensionContext) {
     context.subscriptions.push(
         commands.registerCommand('knot.openPreview', async () => {
             await openPreview(outputChannel);
+        })
+    );
+
+    // Manual backward sync: jump from current .typ position to the .knot source
+    context.subscriptions.push(
+        commands.registerCommand('knot.jumpToKnotSource', async () => {
+            await jumpToKnotSource(outputChannel);
+        })
+    );
+
+    // Auto backward sync: redirect cursor from .typ to .knot
+    context.subscriptions.push(
+        window.onDidChangeTextEditorSelection((event) => {
+            const doc = event.textEditor.document;
+            if (!doc.fileName.endsWith('.typ') || doc.fileName.endsWith('.knot.typ')) { return; }
+            if (event.selections.length !== 1 || !event.selections[0].isEmpty) { return; }
+            if (suppressAutoSync) { return; }
+            if (!isKnotCompiledTyp(doc.fileName)) { return; }
+
+            const typFileName = doc.fileName;
+            const typLine = event.selections[0].active.line;
+
+            if (syncDebounceTimer) { clearTimeout(syncDebounceTimer); }
+            syncDebounceTimer = setTimeout(async () => {
+                syncDebounceTimer = undefined;
+                try {
+                    const knotBinary = resolveBinaryPath('knot', outputChannel);
+                    const result = await runKnotCommand(knotBinary, ['jump-to-source', typFileName, (typLine + 1).toString()], outputChannel);
+                    
+                    if (!result || !result.includes(':')) { return; }
+
+                    const [knotFile, lineStr] = result.split(':');
+                    const knotLine = parseInt(lineStr, 10) - 1;
+                    
+                    if (!fs.existsSync(knotFile)) { return; }
+
+                    outputChannel.appendLine(`[backward-sync] → ${path.basename(knotFile)}:${knotLine + 1}`);
+                    const knotUri = Uri.file(knotFile);
+                    const pos = new Position(knotLine, 0);
+                    const targetDoc = await workspace.openTextDocument(knotUri);
+                    await window.showTextDocument(targetDoc, {
+                        selection: new Range(pos, pos),
+                        viewColumn: ViewColumn.One,
+                        preserveFocus: false,
+                    });
+                } catch { /* ignore */ }
+            }, 150);
+        })
+    );
+
+    // Forward sync command: scroll preview to current .knot position
+    context.subscriptions.push(
+        commands.registerCommand('knot.syncPreview', async () => {
+            const editor = window.activeTextEditor;
+            if (!editor || editor.document.languageId !== 'knot') { return; }
+
+            const knotFilePath = editor.document.uri.fsPath;
+            const knotLine = editor.selection.active.line;
+            const projectRoot = findProjectRoot(path.dirname(knotFilePath));
+            if (!projectRoot) { return; }
+
+            const tomlPath = path.join(projectRoot, 'knot.toml');
+            const mainFile = parseMainFromToml(tomlPath);
+            const mainStem = path.basename(mainFile, path.extname(mainFile));
+            const mainTypPath = path.join(projectRoot, `${mainStem}.typ`);
+            if (!fs.existsSync(mainTypPath)) { return; }
+
+            const knotRelFile = path.relative(projectRoot, knotFilePath);
+            let mappedTypLine: number;
+            try {
+                const knotBinary = resolveBinaryPath('knot', outputChannel);
+                const result = await runKnotCommand(knotBinary, ['jump-to-typ', mainTypPath, knotRelFile, (knotLine + 1).toString()], outputChannel);
+                mappedTypLine = parseInt(result, 10) - 1;
+            } catch { return; }
+            
+            suppressAutoSync = true;
+            try {
+                const mainTypUri = Uri.file(mainTypPath);
+                const mainTypDoc = await workspace.openTextDocument(mainTypUri);
+                const mainTypEditor = await window.showTextDocument(mainTypDoc, {
+                    viewColumn: ViewColumn.One,
+                    preserveFocus: false,
+                });
+                mainTypEditor.selection = new Selection(
+                    new Position(mappedTypLine, 0),
+                    new Position(mappedTypLine, 0),
+                );
+                await commands.executeCommand('typst-preview.preview');
+                await new Promise(r => setTimeout(r, 100));
+                await commands.executeCommand('typst-preview.sync');
+            } catch { /* ignore */ } finally {
+                suppressAutoSync = false;
+            }
         })
     );
 
@@ -304,26 +399,76 @@ async function openPreview(outputChannel: any): Promise<void> {
                     await new Promise(resolve => setTimeout(resolve, 200));
                 }
 
-                progress.report({ message: 'Opening PDF preview...' });
-                compilationStatusBar.text = '$(check) Compilation complete!';
-
-                outputChannel.appendLine(`DEBUG: Opening PDF at ${pdfPath}`);
-                const pdfUri = Uri.file(pdfPath);
-                outputChannel.appendLine(`DEBUG: PDF URI: ${pdfUri.toString()}`);
-
-                await commands.executeCommand('vscode.open', pdfUri, { viewColumn: 2 });
-                outputChannel.appendLine('DEBUG: PDF opened successfully');
-
-                // Hide status bar after a short delay
-                setTimeout(() => {
-                    compilationStatusBar.hide();
-                    outputChannel.appendLine('DEBUG: Status bar hidden');
-                }, 2000);
-            }
-        );
-    } catch (error) {
-        outputChannel.appendLine(`ERROR in openPreview: ${error}`);
-        compilationStatusBar.hide();
-        throw error;
-    }
-}
+                                progress.report({ message: 'Opening preview...' });
+                                compilationStatusBar.text = '$(check) Compilation complete!';
+                
+                                const mainTypPath = path.join(projectRoot, `${mainStem}.typ`);
+                                const mainTypUri = Uri.file(mainTypPath);
+                                const knotUri = Uri.file(knotPath);
+                
+                                if (fs.existsSync(mainTypPath)) {
+                                    suppressAutoSync = true;
+                                    try {
+                                        await window.showTextDocument(mainTypUri, { viewColumn: ViewColumn.One, preserveFocus: false });
+                                        await commands.executeCommand('tinymist.pinMainToCurrent');
+                                        await commands.executeCommand('typst-preview.preview');
+                                        const knotDoc = await workspace.openTextDocument(knotUri);
+                                        await window.showTextDocument(knotDoc, { viewColumn: ViewColumn.One, preserveFocus: false });
+                                    } catch (e) {
+                                        const pdfUri = Uri.file(pdfPath);
+                                        await commands.executeCommand('vscode.open', pdfUri, { viewColumn: ViewColumn.Two });
+                                    } finally {
+                                        setTimeout(() => { suppressAutoSync = false; }, 1000);
+                                    }
+                                } else {
+                                    const pdfUri = Uri.file(pdfPath);
+                                    await commands.executeCommand('vscode.open', pdfUri, { viewColumn: ViewColumn.Two });
+                                }
+                
+                                // Hide status bar after a short delay
+                                setTimeout(() => {
+                                    compilationStatusBar.hide();
+                                }, 2000);
+                            }
+                        );
+                    } catch (error) {
+                        outputChannel.appendLine(`ERROR in openPreview: ${error}`);
+                        compilationStatusBar.hide();
+                        throw error;
+                    }
+                }
+                
+                /**
+                 * Manual backward sync command: jump from current .typ to .knot
+                 */
+                async function jumpToKnotSource(outputChannel: any): Promise<void> {
+                    const editor = window.activeTextEditor;
+                    if (!editor || !editor.document.fileName.endsWith('.typ')) { return; }
+                
+                    const doc = editor.document;
+                    if (!isKnotCompiledTyp(doc.fileName)) { return; }
+                
+                    const typLine = editor.selection.active.line;
+                
+                    try {
+                        const knotBinary = resolveBinaryPath('knot', outputChannel);
+                        const result = await runKnotCommand(knotBinary, ['jump-to-source', doc.fileName, (typLine + 1).toString()], outputChannel);
+                        
+                        if (!result || !result.includes(':')) { return; }
+                
+                        const [knotFile, lineStr] = result.split(':');
+                        const knotLine = parseInt(lineStr, 10) - 1;
+                
+                        if (!fs.existsSync(knotFile)) { return; }
+                
+                        const knotUri = Uri.file(knotFile);
+                        const pos = new Position(knotLine, 0);
+                        const knotDoc = await workspace.openTextDocument(knotUri);
+                        await window.showTextDocument(knotDoc, {
+                            selection: new Range(pos, pos),
+                            viewColumn: ViewColumn.One,
+                            preserveFocus: false,
+                        });
+                    } catch { /* ignore */ }
+                }
+                

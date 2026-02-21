@@ -9,6 +9,7 @@ use std::time::Duration;
 pub mod chunk_processor;
 pub mod formatters;
 pub mod inline_processor;
+pub mod sync;
 
 #[cfg(test)]
 pub(super) mod test_helpers {
@@ -94,7 +95,11 @@ impl Compiler {
     }
 
     /// Compiles a document by executing its code chunks and generating a new Typst source file.
-    pub fn compile(&mut self, doc: &Document) -> Result<String> {
+    ///
+    /// `source_file` is the filename of the `.knot` source (e.g. `"chapter1.knot"`).
+    /// It is embedded in `// #KNOT-SYNC` comments so the CLI and editors can map
+    /// positions in the compiled `main.typ` back to the original `.knot` file.
+    pub fn compile(&mut self, doc: &Document, source_file: &str) -> Result<String> {
         let mut cache = Cache::new(self.cache_dir.clone())?;
         let backend = crate::backend::TypstBackend::new();
 
@@ -152,7 +157,8 @@ impl Compiler {
             }
 
             if broken_languages.contains(lang) {
-                // This language is broken: render as inert
+                // This language is broken: render as inert.
+                // Chunks still receive KNOT-SYNC markers so sync mapping stays correct.
                 let result_str = match node {
                     ExecutableNode::Chunk(chunk) => {
                         let (res, _) = chunk_processor::process_chunk(
@@ -173,8 +179,29 @@ impl Compiler {
                         )
                     }
                 };
-                typst_output.push_str(&result_str);
+                if let ExecutableNode::Chunk(chunk) = node {
+                    typst_output.push_str(&format!(
+                        "// #KNOT-SYNC source={} line={}\n",
+                        source_file,
+                        chunk.range.start.line + 1,
+                    ));
+                    typst_output.push_str(&result_str);
+                    if !result_str.is_empty() && !result_str.ends_with('\n') {
+                        typst_output.push('\n');
+                    }
+                    typst_output.push_str("// END-KNOT-SYNC\n");
+                } else {
+                    typst_output.push_str(&result_str);
+                }
                 last_pos = node_end;
+                // chunk.end_byte stops just before the closing fence's trailing \n;
+                // advance past it so the next verbatim slice doesn't gain an extra blank line.
+                if matches!(node, ExecutableNode::Chunk(_))
+                    && last_pos < doc.source.len()
+                    && doc.source.as_bytes()[last_pos] == b'\n'
+                {
+                    last_pos += 1;
+                }
                 continue;
             }
 
@@ -208,10 +235,11 @@ impl Compiler {
             let (result_str, node_hash) = match execution_result {
                 Ok(res) => res,
                 Err(e) => {
-                    // Fatal execution error: Insert red error block and mark language as broken
+                    // Fatal execution error: insert red error block and mark language as broken.
+                    // The block is wrapped with KNOT-SYNC markers like any other chunk output.
                     let error_msg = format!("{}", e).replace('"', "\\\"");
                     let error_block = format!(
-                        "\n#code-chunk(
+                        "#code-chunk(
     lang: \"{}\",
     is-inert: false,
     errors: ([#local(zebra-fill: none)[\n=== Execution Error ({})\nIn {} `{}`\n\n```\n{}\n```\n\n_Execution of subsequent `{}` blocks has been suspended._]],)
@@ -229,8 +257,24 @@ impl Compiler {
                         error_msg,
                         lang
                     );
-                    typst_output.push_str(&error_block);
+                    if let ExecutableNode::Chunk(chunk) = node {
+                        typst_output.push_str(&format!(
+                            "// #KNOT-SYNC source={} line={}\n",
+                            source_file,
+                            chunk.range.start.line + 1,
+                        ));
+                        typst_output.push_str(&error_block);
+                        typst_output.push_str("// END-KNOT-SYNC\n");
+                    } else {
+                        typst_output.push_str(&error_block);
+                    }
                     last_pos = node_end;
+                    if matches!(node, ExecutableNode::Chunk(_))
+                        && last_pos < doc.source.len()
+                        && doc.source.as_bytes()[last_pos] == b'\n'
+                    {
+                        last_pos += 1;
+                    }
                     broken_languages.insert(lang.to_string());
                     continue;
                 }
@@ -299,8 +343,33 @@ impl Compiler {
                 &self.project_root,
             )?;
 
-            typst_output.push_str(&result_str);
+            // Wrap the compiled chunk with sync markers so the CLI and editors can
+            // map any position in the compiled .typ back to the originating .knot file.
+            if let ExecutableNode::Chunk(chunk) = node {
+                typst_output.push_str(&format!(
+                    "// #KNOT-SYNC source={} line={}\n",
+                    source_file,
+                    chunk.range.start.line + 1,
+                ));
+                typst_output.push_str(&result_str);
+                // Ensure END-KNOT-SYNC is always on its own line.
+                if !result_str.is_empty() && !result_str.ends_with('\n') {
+                    typst_output.push('\n');
+                }
+                typst_output.push_str("// END-KNOT-SYNC\n");
+            } else {
+                typst_output.push_str(&result_str);
+            }
+
             last_pos = node_end;
+            // chunk.end_byte stops just before the closing fence's trailing \n;
+            // advance past it so the next verbatim slice doesn't gain an extra blank line.
+            if matches!(node, ExecutableNode::Chunk(_))
+                && last_pos < doc.source.len()
+                && doc.source.as_bytes()[last_pos] == b'\n'
+            {
+                last_pos += 1;
+            }
         }
 
         // Append any remaining raw text after the last node

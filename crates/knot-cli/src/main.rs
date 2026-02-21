@@ -31,7 +31,11 @@ enum Commands {
         file: PathBuf,
     },
     /// Watch project and regenerate on changes (with live PDF preview)
-    Watch,
+    Watch {
+        /// Use tinymist preview instead of typst watch
+        #[arg(long)]
+        preview: bool,
+    },
     /// Build the entire project and generate final PDF
     Build,
     /// Clean project (remove cache and generated files)
@@ -46,6 +50,22 @@ enum Commands {
     },
     /// Install the VSCode extension
     InstallVscode,
+    /// Map a line in a compiled .typ file back to its .knot source
+    JumpToSource {
+        /// The compiled .typ file
+        file: PathBuf,
+        /// The 1-indexed line number in the .typ file
+        line: usize,
+    },
+    /// Map a line in a .knot source back to the compiled .typ file
+    JumpToTyp {
+        /// The compiled .typ file
+        typ_file: PathBuf,
+        /// The .knot source file (path relative to project root)
+        knot_file: String,
+        /// The 1-indexed line number in the .knot file
+        line: usize,
+    },
 }
 
 fn main() -> Result<()> {
@@ -61,8 +81,8 @@ fn main() -> Result<()> {
         Commands::Compile { file } => {
             compile_file(file, None)?;
         }
-        Commands::Watch => {
-            watch()?;
+        Commands::Watch { preview } => {
+            watch(*preview)?;
         }
         Commands::Build => {
             build_project(None)?;
@@ -84,6 +104,72 @@ fn main() -> Result<()> {
         Commands::InstallVscode => {
             install_vscode()?;
         }
+        Commands::JumpToSource { file, line } => {
+            jump_to_source(file, *line)?;
+        }
+        Commands::JumpToTyp {
+            typ_file,
+            knot_file,
+            line,
+        } => {
+            jump_to_typ(typ_file, knot_file, *line)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Map a line in a compiled .typ file back to its .knot source
+fn jump_to_source(typ_file: &PathBuf, typ_line: usize) -> Result<()> {
+    use knot_core::config::Config;
+    use knot_core::sync;
+
+    let content = fs::read_to_string(typ_file)
+        .with_context(|| format!("Failed to read .typ file: {:?}", typ_file))?;
+
+    let project_root = Config::find_project_root(typ_file)?;
+    let blocks = sync::parse_knot_markers(&content);
+
+    // typ_line is 1-indexed from CLI/viewers, convert to 0-indexed for the mapper
+    if let Some((knot_path, knot_line)) =
+        sync::map_typ_line_to_knot(typ_line.saturating_sub(1), &blocks, &project_root)
+    {
+        // Output format: file:line (1-indexed for IDEs)
+        println!("{}:{}", knot_path.display(), knot_line + 1);
+    } else {
+        anyhow::bail!("Could not map line {} to any .knot source.", typ_line);
+    }
+
+    Ok(())
+}
+
+/// Map a line in a .knot source back to the compiled .typ file
+fn jump_to_typ(typ_file: &PathBuf, knot_file: &str, knot_line: usize) -> Result<()> {
+    use knot_core::config::Config;
+    use knot_core::sync;
+
+    let content = fs::read_to_string(typ_file)
+        .with_context(|| format!("Failed to read .typ file: {:?}", typ_file))?;
+
+    let project_root = Config::find_project_root(typ_file)?;
+    let blocks = sync::parse_knot_markers(&content);
+    let knot_file_path = project_root.join(knot_file);
+
+    // knot_line is 1-indexed, convert to 0-indexed
+    if let Some(typ_line) = sync::map_knot_line_to_typ(
+        knot_file,
+        knot_line.saturating_sub(1),
+        &blocks,
+        &knot_file_path,
+    ) {
+        // Output format: line (1-indexed)
+        println!("{}", typ_line + 1);
+    } else {
+        anyhow::bail!(
+            "Could not map {}:{} to the compiled .typ file.",
+            knot_file,
+            knot_line
+        );
     }
 
     Ok(())
@@ -138,8 +224,8 @@ fn init(project_name: &PathBuf) -> Result<()> {
 /// - Finds project root (knot.toml)
 /// - Does initial build (compiles all includes + main)
 /// - Watches .knot files for changes and rebuilds automatically
-/// - Launches 'typst watch' in parallel for live PDF preview
-fn watch() -> Result<()> {
+/// - Launches 'typst watch' or 'tinymist preview' in parallel for live PDF preview
+fn watch(preview: bool) -> Result<()> {
     use knot_core::config::Config;
     use notify::{Config as NotifyConfig, RecommendedWatcher, RecursiveMode, Watcher};
     use std::sync::mpsc::channel;
@@ -215,15 +301,27 @@ fn watch() -> Result<()> {
         project_root.join(format!("{}.typ", stem.to_string_lossy()))
     };
 
-    // Step 6: Launch typst watch in background
-    info!("🔍 Launching typst watch for live PDF preview...");
-    let _typst_watch = std::process::Command::new("typst")
-        .arg("watch")
-        .arg("--root")
-        .arg(&project_root)
-        .arg(&typ_output_path)
-        .spawn()
-        .context("Failed to launch 'typst watch'. Is Typst installed?")?;
+    // Step 6: Launch preview in background
+    let _preview_process = if preview {
+        info!("🔍 Launching tinymist preview for live PDF preview...");
+        std::process::Command::new("tinymist")
+            .arg("preview")
+            .arg("--root")
+            .arg(&project_root)
+            .arg(&typ_output_path)
+            .arg("--open")
+            .spawn()
+            .context("Failed to launch 'tinymist preview'. Is Tinymist installed?")?
+    } else {
+        info!("🔍 Launching typst watch for live PDF preview...");
+        std::process::Command::new("typst")
+            .arg("watch")
+            .arg("--root")
+            .arg(&project_root)
+            .arg(&typ_output_path)
+            .spawn()
+            .context("Failed to launch 'typst watch'. Is Typst installed?")?
+    };
 
     // Step 7: Setup file watcher
     let (tx, rx) = channel();
