@@ -94,11 +94,18 @@ impl Compiler {
         })
     }
 
+    /// Reset all active executors to a clean state.
+    /// Useful between multiple file compilations in a single build.
+    pub fn reset_executors(&mut self) {
+        self.executor_manager.shutdown_all();
+    }
+
     /// Compiles a document by executing its code chunks and generating a new Typst source file.
     ///
     /// `source_file` is the filename of the `.knot` source (e.g. `"chapter1.knot"`).
-    /// It is embedded in `// #KNOT-SYNC` comments so the CLI and editors can map
-    /// positions in the compiled `main.typ` back to the original `.knot` file.
+    /// Compiles a document by executing its code chunks and generating a new Typst source file.
+    ///
+    /// `source_file` is the filename of the `.knot` source (e.g. `"chapter1.knot"`).
     pub fn compile(&mut self, doc: &Document, source_file: &str) -> Result<String> {
         let mut cache = Cache::new(self.cache_dir.clone())?;
         let backend = crate::backend::TypstBackend::new();

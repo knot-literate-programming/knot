@@ -113,6 +113,11 @@ impl ExecutorManager {
     pub fn executor_count(&self) -> usize {
         self.executors.len()
     }
+
+    /// Shutdown all active executors
+    pub fn shutdown_all(&mut self) {
+        self.executors.clear();
+    }
 }
 
 #[cfg(test)]

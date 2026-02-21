@@ -6,14 +6,16 @@ use knot_core::{Compiler, Document};
 use log::info;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 /// Build the project and generate final PDF
 pub fn build_project(start_path: Option<&Path>) -> Result<()> {
     use knot_core::config::Config;
 
+    let start_total = Instant::now();
     info!("🔨 Building project...");
 
-    // Step 1: Find project root by searching for knot.toml
+    // Step 1: Find project root
     let search_path = if let Some(path) = start_path {
         path.to_path_buf()
     } else {
@@ -22,37 +24,27 @@ pub fn build_project(start_path: Option<&Path>) -> Result<()> {
 
     let (config, project_root) = Config::find_and_load(&search_path)?;
 
-    // Step 2: Get main file from knot.toml
+    // Step 2: Get main file
     let main_file_name = config.document.main.as_deref().ok_or_else(|| {
-        anyhow::anyhow!(
-            "No 'main' file specified in knot.toml.\n\
-             Add: [document]\n     main = \"main.knot\""
-        )
+        anyhow::anyhow!("No 'main' file specified in knot.toml.")
     })?;
 
     let main_file = project_root.join(main_file_name);
-
     if !main_file.exists() {
-        anyhow::bail!(
-            "Main file not found: {:?}\n\
-             Specified in knot.toml as: {}",
-            main_file,
-            main_file_name
-        );
+        anyhow::bail!("Main file not found: {:?}", main_file);
     }
 
     let main_stem = main_file
         .file_stem()
         .and_then(|s| s.to_str())
-        .ok_or_else(|| anyhow::anyhow!("Invalid main filename: {}", main_file_name))?;
+        .ok_or_else(|| anyhow::anyhow!("Invalid main filename"))?;
 
     info!("📄 Main file: {}", main_file.display());
     info!("📁 Project root: {}", project_root.display());
 
-    // --- OPTIMIZATION: Reuse one compiler instance for all files ---
-    let mut compiler = Compiler::new(&main_file)?;
+    let start_compile = Instant::now();
 
-    // Step 3: Compile included files if present
+    // Step 3: Compile included files
     let mut generated_includes = String::new();
     if let Some(includes) = &config.document.includes {
         info!("📚 Compiling {} included files...", includes.len());
@@ -60,24 +52,17 @@ pub fn build_project(start_path: Option<&Path>) -> Result<()> {
         for include_name in includes {
             let include_path = project_root.join(include_name);
 
-            // Security: Validate that included file is within project root
-            let canonical_include = include_path
-                .canonicalize()
+            // Security check
+            let canonical_include = include_path.canonicalize()
                 .with_context(|| format!("Included file not found: {:?}", include_name))?;
-            let canonical_root = project_root
-                .canonicalize()
-                .context("Failed to canonicalize project root")?;
+            let canonical_root = project_root.canonicalize()?;
 
             if !canonical_include.starts_with(&canonical_root) {
-                anyhow::bail!(
-                    "Security: Included file '{}' is outside project root.",
-                    include_name
-                );
+                anyhow::bail!("Security: Included file '{}' is outside project root.", include_name);
             }
 
-            // Compile included file IN MEMORY
-            let (chapter_content, _) = compile_to_string(&include_path, &mut compiler)
-                .with_context(|| format!("Failed to compile included file: {}", include_name))?;
+            let mut chapter_compiler = Compiler::new(&include_path)?;
+            let (chapter_content, _) = compile_to_string(&include_path, &mut chapter_compiler)?;
 
             generated_includes.push_str(&format!(
                 "// BEGIN-FILE {}\n{}\n// END-FILE {}\n\n",
@@ -88,10 +73,11 @@ pub fn build_project(start_path: Option<&Path>) -> Result<()> {
         }
     }
 
-    // Step 4: Compile main file IN MEMORY
-    let (main_typ_content, main_typ_path) = compile_to_string(&main_file, &mut compiler)?;
+    // Step 4: Compile main file
+    let mut main_compiler = Compiler::new(&main_file)?;
+    let (main_typ_content, _main_typ_path) = compile_to_string(&main_file, &mut main_compiler)?;
 
-    // Step 5: Assemble content
+    // Step 5: Assemble
     let mut final_content = if !generated_includes.is_empty() {
         if !main_typ_content.contains("/* KNOT-INJECT-CHAPTERS */") {
             anyhow::bail!("No /* KNOT-INJECT-CHAPTERS */ placeholder in main file.");
@@ -101,7 +87,7 @@ pub fn build_project(start_path: Option<&Path>) -> Result<()> {
         main_typ_content
     };
 
-    // Step 5.5: Inject codly configuration
+    // Codly injection
     if !config.codly.is_empty() && final_content.contains("/* KNOT-CODLY-INIT */") {
         let codly_options: std::collections::HashMap<String, String> = config
             .codly
@@ -112,7 +98,7 @@ pub fn build_project(start_path: Option<&Path>) -> Result<()> {
         final_content = final_content.replace("/* KNOT-CODLY-INIT */", &codly_init);
     }
 
-    // Step 5.75: Wrap entire main.typ with BEGIN-FILE / END-FILE
+    // Final wrapping
     let final_wrapped = format!(
         "// BEGIN-FILE {}\n{}\n// END-FILE {}\n",
         main_file_name,
@@ -120,19 +106,17 @@ pub fn build_project(start_path: Option<&Path>) -> Result<()> {
         main_file_name
     );
 
-    // Write final main.typ (rename to remove dot prefix)
-    let final_main_typ_path = {
-        let parent = main_typ_path.parent().unwrap_or(std::path::Path::new("."));
-        parent.join(format!("{}.typ", main_stem))
-    };
+    let final_main_typ_path = project_root.join(format!("{}.typ", main_stem));
     fs::write(&final_main_typ_path, final_wrapped)?;
-    info!("✓ Generated {}.typ", main_stem);
+    
+    info!("⏱️  Knot compilation & assembly: {:?}", start_compile.elapsed());
 
-    // Step 6: Determine PDF output path
+    // Step 6: PDF path
     let pdf_output_path = project_root.join(format!("{}.pdf", main_stem));
 
-    // Step 7: Compile PDF with typst
+    // Step 7: Typst
     info!("📦 Compiling PDF with Typst...");
+    let start_typst = Instant::now();
     let output = std::process::Command::new("typst")
         .arg("compile")
         .arg("--root")
@@ -142,12 +126,13 @@ pub fn build_project(start_path: Option<&Path>) -> Result<()> {
         .output()
         .context("Failed to execute typst command.")?;
 
+    info!("⏱️  Typst execution: {:?}", start_typst.elapsed());
+
     if !output.status.success() {
         anyhow::bail!("Typst compilation failed.");
     }
 
-    info!("✅ Successfully built PDF: {:?}", pdf_output_path);
-    println!("✅ PDF generated: {}", pdf_output_path.display());
+    println!("✅ PDF generated: {} (Total time: {:?})", pdf_output_path.display(), start_total.elapsed());
 
     Ok(())
 }
@@ -164,7 +149,6 @@ pub fn compile_to_string(file: &Path, compiler: &mut Compiler) -> Result<(String
 
     let typst_source = compiler.compile(&doc, &source_file_name)?;
 
-    // Determine path for fix_paths (relative to file)
     let typ_output_path = {
         let parent = file.parent().unwrap_or(std::path::Path::new("."));
         let stem = file.file_stem().unwrap_or(std::ffi::OsStr::new("main"));
@@ -175,94 +159,65 @@ pub fn compile_to_string(file: &Path, compiler: &mut Compiler) -> Result<(String
     Ok((fixed_source, typ_output_path))
 }
 
-/// Compile a .knot file to .typ (standard file-based version)
+/// Compile a .knot file to .typ
 pub fn compile_file(file: &Path, output_path: Option<&PathBuf>) -> Result<PathBuf> {
     info!("📄 Compiling {:?}...", file);
     let mut compiler = Compiler::new(file)?;
     let (fixed_source, typ_default_path) = compile_to_string(file, &mut compiler)?;
-
     let typ_output_path = output_path.cloned().unwrap_or(typ_default_path);
-
     fs::write(&typ_output_path, fixed_source).context("Failed to write Typst file")?;
-    info!("✓ Generated Typst file: {:?}", typ_output_path);
-
     Ok(typ_output_path)
 }
 
-/// Copies generated files (CSVs, plots) to a local directory and updates paths
-///
 /// Converts absolute cache paths to relative paths in _knot_files/
 fn fix_paths_in_typst(source: &str, typ_file: &Path) -> Result<String> {
     use knot_core::Defaults;
+    use once_cell::sync::Lazy;
     use regex::Regex;
-    use std::path::Path;
+    use std::collections::HashSet;
 
-    // Create _knot_files directory next to the .typ file
-    let typ_dir = typ_file
-        .parent()
-        .context("Failed to get parent directory of .typ file")?;
+    static PATH_REGEX: Lazy<Regex> =
+        Lazy::new(|| Regex::new(r#""(/[^"]+\.knot_cache/[^"]+)""#).unwrap());
+
+    let typ_dir = typ_file.parent().context("No parent dir")?;
     let local_files_dir = typ_dir.join(Defaults::LANGUAGE_FILES_DIR);
     fs::create_dir_all(&local_files_dir)?;
 
-    // Pattern to match absolute paths to .knot_cache (including sub-directories)
-    let path_regex = Regex::new(r#""(/[^"]+\.knot_cache/[^"]+)""#)?;
+    let mut processed_files = HashSet::new();
 
-    let result = path_regex.replace_all(source, |caps: &regex::Captures| {
+    let result = PATH_REGEX.replace_all(source, |caps: &regex::Captures| {
         let abs_path_str = &caps[1];
         let abs_path = Path::new(abs_path_str);
-
-        // Get filename
-        let filename = abs_path.file_name().unwrap().to_string_lossy();
-        let dest_path = local_files_dir.join(filename.as_ref());
-
-        // Copy file
-        if abs_path.exists() {
-            if let Err(e) = fs::copy(abs_path, &dest_path) {
-                log::warn!("Failed to copy {}: {}", abs_path.display(), e);
-                format!("\"{}\"", abs_path_str)
-            } else {
-                format!("\"{}/{}\"", Defaults::LANGUAGE_FILES_DIR, filename)
+        let filename_os = abs_path.file_name().unwrap();
+        let filename = filename_os.to_string_lossy();
+        
+        if !processed_files.contains(filename_os) {
+            let dest_path = local_files_dir.join(filename.as_ref());
+            if abs_path.exists() && !dest_path.exists() {
+                let _ = fs::copy(abs_path, &dest_path);
             }
-        } else {
-            log::error!("Cache file not found: {}", abs_path.display());
-            // Keep absolute path so the user can see where it was expected
-            format!("\"{}\"", abs_path_str)
+            processed_files.insert(filename_os.to_owned());
         }
+        
+        format!("\"{}/{}\"", Defaults::LANGUAGE_FILES_DIR, filename)
     });
 
     Ok(result.to_string())
 }
 
-/// Format a .knot file by normalizing all its chunks
+/// Format a .knot file
 pub fn format_file(file_path: &Path, check_only: bool) -> Result<bool> {
-    info!("🧹 Formatting {:?}...", file_path);
-    let original_text =
-        fs::read_to_string(file_path).context(format!("Failed to read file: {:?}", file_path))?;
-
+    let original_text = fs::read_to_string(file_path)?;
     let doc = Document::parse(original_text.clone());
-
     let formatter = knot_core::CodeFormatter::new(None, None);
-    let formatted_text = doc.format(|_index, code, lang| {
-        let result = formatter.format_code(code, lang);
-        if result.is_err() {
-            log::debug!(
-                "External formatter skipped or failed for {}: {:?}",
-                lang,
-                result.as_ref().err()
-            );
-        }
-        result.ok()
-    });
+    let formatted_text = doc.format(|_, code, lang| formatter.format_code(code, lang).ok());
 
     if original_text == formatted_text {
-        info!("  ✓ Already formatted");
         Ok(false)
     } else if check_only {
-        info!("  ✗ Needs formatting");
         Ok(true)
     } else {
         fs::write(file_path, formatted_text)?;
-        info!("  ✓ Formatted successfully");
         Ok(true)
     }
 }

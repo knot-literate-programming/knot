@@ -65,16 +65,52 @@ pub fn process_chunk(
         .unwrap_or_else(|| format!("chunk-{}", chunk.index));
 
     let deps_hash = hash_dependencies(&chunk_options.depends)?;
-    let constants_hash =
-        get_constants_hash(executor_manager, &chunk.language, &chunk_options.constant)?;
 
-    let chunk_hash = hashing::get_chunk_hash(
+    // 1. First, try to compute a hash WITHOUT constants to check cache
+    let partial_chunk_hash = hashing::get_chunk_hash(
         &chunk.code,
         &chunk_options,
         previous_hash,
         &deps_hash,
-        &constants_hash,
+        "", // No constants yet
     );
+
+    // If we have no constants, this is our final hash
+    let chunk_hash = if chunk_options.constant.is_empty() {
+        partial_chunk_hash
+    } else {
+        // If we have constants, we NEED the executor to get their hashes.
+        // This will start the engine if not already running.
+        let constants_hash = get_constants_hash(executor_manager, &chunk.language, &chunk_options.constant)?;
+        hashing::get_chunk_hash(
+            &chunk.code,
+            &chunk_options,
+            previous_hash,
+            &deps_hash,
+            &constants_hash,
+        )
+    };
+
+    if resolved_options.cache && cache.has_cached_result(&chunk_hash) {
+        info!("  ✓ {} [cached]", chunk_name);
+        let execution_output = cache.get_cached_result(&chunk_hash)?;
+        
+        // Even on cache hit, we need to handle potential fatal errors stored in cache
+        if let Some(error) = &execution_output.error {
+            return Err(anyhow::anyhow!("{}", error));
+        }
+
+        // Format and return
+        let mut chunk_with_codly = chunk.clone();
+        chunk_with_codly.codly_options = merged_codly_options;
+        let chunk_output_final = backend.format_chunk(
+            &chunk_with_codly,
+            &resolved_options,
+            &execution_output,
+            is_inert,
+        );
+        return Ok((chunk_output_final, chunk_hash));
+    }
 
     let execution_output = if is_inert || !resolved_options.eval {
         ExecutionOutput {
@@ -82,9 +118,6 @@ pub fn process_chunk(
             warnings: vec![],
             error: None,
         }
-    } else if resolved_options.cache && cache.has_cached_result(&chunk_hash) {
-        info!("  ✓ {} [cached]", chunk_name);
-        cache.get_cached_result(&chunk_hash)?
     } else {
         info!("  ⚙️ {} [executing]", chunk_name);
 
@@ -178,10 +211,10 @@ fn get_constants_hash(
                 combined_hash.update(hash.as_bytes());
             }
             _ => {
-                // Object not found or invalid: force cache invalidation
-                log::warn!("Could not hash constant '{}' in {}: not found", var, lang);
+                // Object not found or invalid: use a stable marker to avoid invalidating 
+                // the cache with random values (like UUIDs).
                 combined_hash.update(var.as_bytes());
-                combined_hash.update(uuid::Uuid::new_v4().as_bytes());
+                combined_hash.update(b"NOT_FOUND");
             }
         }
     }
@@ -272,7 +305,7 @@ mod tests {
             "prev_hash",
             &setup_test_config(),
             false,
-            &crate::backend::TypstBackend::new(),
+            &crate::backend::TypstBackend::new(),crate::backend::TypstBackend::new(), &mut SnapshotManager::new(), Path::new("."),
             &mut SnapshotManager::new(),
             Path::new("."),
         )
@@ -296,7 +329,7 @@ mod tests {
             "prev_hash",
             &setup_test_config(),
             false,
-            &crate::backend::TypstBackend::new(),
+            &crate::backend::TypstBackend::new(),crate::backend::TypstBackend::new(), &mut SnapshotManager::new(), Path::new("."),
             &mut SnapshotManager::new(),
             Path::new("."),
         )
@@ -316,7 +349,7 @@ mod tests {
             "prev_hash",
             &setup_test_config(),
             false,
-            &crate::backend::TypstBackend::new(),
+            &crate::backend::TypstBackend::new(),crate::backend::TypstBackend::new(), &mut SnapshotManager::new(), Path::new("."),
             &mut SnapshotManager::new(),
             Path::new("."),
         )
@@ -340,7 +373,7 @@ mod tests {
             "prev_hash",
             &setup_test_config(),
             false,
-            &crate::backend::TypstBackend::new(),
+            &crate::backend::TypstBackend::new(),crate::backend::TypstBackend::new(), &mut SnapshotManager::new(), Path::new("."),
             &mut SnapshotManager::new(),
             Path::new("."),
         )
@@ -354,7 +387,7 @@ mod tests {
             "prev_hash",
             &setup_test_config(),
             false,
-            &crate::backend::TypstBackend::new(),
+            &crate::backend::TypstBackend::new(),crate::backend::TypstBackend::new(), &mut SnapshotManager::new(), Path::new("."),
             &mut SnapshotManager::new(),
             Path::new("."),
         )
@@ -379,7 +412,7 @@ mod tests {
             "prev_hash",
             &setup_test_config(),
             false,
-            &crate::backend::TypstBackend::new(),
+            &crate::backend::TypstBackend::new(),crate::backend::TypstBackend::new(), &mut SnapshotManager::new(), Path::new("."),
             &mut SnapshotManager::new(),
             Path::new("."),
         )
@@ -391,7 +424,7 @@ mod tests {
             "prev_hash",
             &setup_test_config(),
             false,
-            &crate::backend::TypstBackend::new(),
+            &crate::backend::TypstBackend::new(),crate::backend::TypstBackend::new(), &mut SnapshotManager::new(), Path::new("."),
             &mut SnapshotManager::new(),
             Path::new("."),
         )
@@ -414,7 +447,7 @@ mod tests {
             "prev_hash_1",
             &setup_test_config(),
             false,
-            &crate::backend::TypstBackend::new(),
+            &crate::backend::TypstBackend::new(),crate::backend::TypstBackend::new(), &mut SnapshotManager::new(), Path::new("."),
             &mut SnapshotManager::new(),
             Path::new("."),
         )
@@ -426,7 +459,7 @@ mod tests {
             "prev_hash_2",
             &setup_test_config(),
             false,
-            &crate::backend::TypstBackend::new(),
+            &crate::backend::TypstBackend::new(),crate::backend::TypstBackend::new(), &mut SnapshotManager::new(), Path::new("."),
             &mut SnapshotManager::new(),
             Path::new("."),
         )
@@ -449,7 +482,7 @@ mod tests {
             "prev_hash",
             &setup_test_config(),
             false,
-            &crate::backend::TypstBackend::new(),
+            &crate::backend::TypstBackend::new(),crate::backend::TypstBackend::new(), &mut SnapshotManager::new(), Path::new("."),
         );
 
         // Should fail with unsupported language
@@ -490,7 +523,7 @@ mod tests {
             "prev_hash",
             &setup_test_config(),
             false,
-            &crate::backend::TypstBackend::new(),
+            &crate::backend::TypstBackend::new(),crate::backend::TypstBackend::new(), &mut SnapshotManager::new(), Path::new("."),
             &mut SnapshotManager::new(),
             Path::new("."),
         )
@@ -508,7 +541,7 @@ mod tests {
             "prev_hash",
             &setup_test_config(),
             false,
-            &crate::backend::TypstBackend::new(),
+            &crate::backend::TypstBackend::new(),crate::backend::TypstBackend::new(), &mut SnapshotManager::new(), Path::new("."),
             &mut SnapshotManager::new(),
             Path::new("."),
         )
@@ -530,7 +563,7 @@ mod tests {
             "prev_hash",
             &setup_test_config(),
             false,
-            &crate::backend::TypstBackend::new(),
+            &crate::backend::TypstBackend::new(),crate::backend::TypstBackend::new(), &mut SnapshotManager::new(), Path::new("."),
             &mut SnapshotManager::new(),
             Path::new("."),
         )
@@ -553,7 +586,7 @@ mod tests {
             "prev_hash",
             &setup_test_config(),
             false,
-            &crate::backend::TypstBackend::new(),
+            &crate::backend::TypstBackend::new(),crate::backend::TypstBackend::new(), &mut SnapshotManager::new(), Path::new("."),
             &mut SnapshotManager::new(),
             Path::new("."),
         )
@@ -620,7 +653,7 @@ mod tests {
             "prev_hash",
             &config,
             false,
-            &crate::backend::TypstBackend::new(),
+            &crate::backend::TypstBackend::new(),crate::backend::TypstBackend::new(), &mut SnapshotManager::new(), Path::new("."),
         )
         .unwrap();
 
@@ -660,7 +693,7 @@ mod tests {
             "prev_hash",
             &config,
             false,
-            &crate::backend::TypstBackend::new(),
+            &crate::backend::TypstBackend::new(),crate::backend::TypstBackend::new(), &mut SnapshotManager::new(), Path::new("."),
         )
         .unwrap();
 
@@ -721,7 +754,7 @@ mod tests {
             "prev_hash",
             &config,
             false,
-            &crate::backend::TypstBackend::new(),
+            &crate::backend::TypstBackend::new(),crate::backend::TypstBackend::new(), &mut SnapshotManager::new(), Path::new("."),
         )
         .unwrap();
 
