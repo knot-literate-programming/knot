@@ -56,6 +56,9 @@ enum Commands {
         file: PathBuf,
         /// The 1-indexed line number in the .typ file
         line: usize,
+        /// Open the source file in the editor (VS Code)
+        #[arg(long)]
+        open: bool,
     },
     /// Map a line in a .knot source back to the compiled .typ file
     JumpToTyp {
@@ -104,8 +107,8 @@ fn main() -> Result<()> {
         Commands::InstallVscode => {
             install_vscode()?;
         }
-        Commands::JumpToSource { file, line } => {
-            jump_to_source(file, *line)?;
+        Commands::JumpToSource { file, line, open } => {
+            jump_to_source(file, *line, *open)?;
         }
         Commands::JumpToTyp {
             typ_file,
@@ -120,7 +123,7 @@ fn main() -> Result<()> {
 }
 
 /// Map a line in a compiled .typ file back to its .knot source
-fn jump_to_source(typ_file: &PathBuf, typ_line: usize) -> Result<()> {
+fn jump_to_source(typ_file: &PathBuf, typ_line: usize, open: bool) -> Result<()> {
     use knot_core::config::Config;
     use knot_core::sync;
 
@@ -134,8 +137,24 @@ fn jump_to_source(typ_file: &PathBuf, typ_line: usize) -> Result<()> {
     if let Some((knot_path, knot_line)) =
         sync::map_typ_line_to_knot(typ_line.saturating_sub(1), &blocks, &project_root)
     {
-        // Output format: file:line (1-indexed for IDEs)
-        println!("{}:{}", knot_path.display(), knot_line + 1);
+        let target = format!("{}:{}", knot_path.display(), knot_line + 1);
+        if open {
+            info!("Opening editor at {}", target);
+            // Try to open with VS Code by default
+            // We use --goto to jump to the exact line
+            let status = std::process::Command::new("code")
+                .arg("--goto")
+                .arg(&target)
+                .status()
+                .context("Failed to launch 'code'. Is VS Code CLI installed and in your PATH?")?;
+
+            if !status.success() {
+                anyhow::bail!("Editor command failed.");
+            }
+        } else {
+            // Output format: file:line (1-indexed for IDEs)
+            println!("{}", target);
+        }
     } else {
         anyhow::bail!("Could not map line {} to any .knot source.", typ_line);
     }
@@ -304,13 +323,18 @@ fn watch(preview: bool) -> Result<()> {
     // Step 6: Launch preview in background
     let _preview_process = if preview {
         info!("🔍 Launching tinymist preview for live PDF preview...");
-        std::process::Command::new("tinymist")
-            .arg("preview")
+        let abs_root = project_root.canonicalize().unwrap_or(project_root.clone());
+        let abs_typ = typ_output_path
+            .canonicalize()
+            .unwrap_or(typ_output_path.clone());
+
+        let mut cmd = std::process::Command::new("tinymist");
+        cmd.arg("preview")
             .arg("--root")
-            .arg(&project_root)
-            .arg(&typ_output_path)
-            .arg("--open")
-            .spawn()
+            .arg(&abs_root)
+            .arg(&abs_typ);
+
+        cmd.spawn()
             .context("Failed to launch 'tinymist preview'. Is Tinymist installed?")?
     } else {
         info!("🔍 Launching typst watch for live PDF preview...");

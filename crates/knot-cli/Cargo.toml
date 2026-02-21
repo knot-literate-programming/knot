@@ -14,6 +14,7 @@ clap = { workspace = true }
 anyhow = { workspace = true }
 regex = { workspace = true }
 once_cell = { workspace = true }
+dirs = "5.0"
 env_logger = "0.11.8"
 log = "0.4.29"
 pathdiff = "0.2"
