@@ -8,18 +8,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Build the project and generate final PDF
-///
-/// This function:
-/// - Finds project root (knot.toml)
-/// - Reads main file and chapters from knot.toml
-/// - Compiles all chapters to .typ
-/// - Compiles main file to .typ
-/// - Injects chapter content directly into main .typ file (preserving imports scope)
-/// - Compiles final PDF with typst (using --root for imports)
-///
-/// # Arguments
-/// * `start_path` - Optional path to start searching for knot.toml.
-///   If None, uses current working directory.
 pub fn build_project(start_path: Option<&Path>) -> Result<()> {
     use knot_core::config::Config;
 
@@ -35,14 +23,14 @@ pub fn build_project(start_path: Option<&Path>) -> Result<()> {
     let (config, project_root) = Config::find_and_load(&search_path)?;
 
     // Step 2: Get main file from knot.toml
-    let main_file_name = config.document.main.ok_or_else(|| {
+    let main_file_name = config.document.main.as_deref().ok_or_else(|| {
         anyhow::anyhow!(
             "No 'main' file specified in knot.toml.\n\
              Add: [document]\n     main = \"main.knot\""
         )
     })?;
 
-    let main_file = project_root.join(&main_file_name);
+    let main_file = project_root.join(main_file_name);
 
     if !main_file.exists() {
         anyhow::bail!(
@@ -53,7 +41,6 @@ pub fn build_project(start_path: Option<&Path>) -> Result<()> {
         );
     }
 
-    // Extract stem from main file (e.g., "main.knot" -> "main", "thesis.knot" -> "thesis")
     let main_stem = main_file
         .file_stem()
         .and_then(|s| s.to_str())
@@ -62,16 +49,14 @@ pub fn build_project(start_path: Option<&Path>) -> Result<()> {
     info!("📄 Main file: {}", main_file.display());
     info!("📁 Project root: {}", project_root.display());
 
+    // --- OPTIMIZATION: Reuse one compiler instance for all files ---
+    let mut compiler = Compiler::new(&main_file)?;
+
     // Step 3: Compile included files if present
     let mut generated_includes = String::new();
     if let Some(includes) = &config.document.includes {
         info!("📚 Compiling {} included files...", includes.len());
 
-        // TODO: Parallelize compilation using `rayon`.
-        // Since each included file is independent (isolated R sessions), we can
-        // compile them in parallel to significantly speed up the build.
-        // IMPORTANT: Before parallelizing, ensure the cache system is thread-safe
-        // (use file-level locks or isolated cache directories per file).
         for include_name in includes {
             let include_path = project_root.join(include_name);
 
@@ -85,21 +70,14 @@ pub fn build_project(start_path: Option<&Path>) -> Result<()> {
 
             if !canonical_include.starts_with(&canonical_root) {
                 anyhow::bail!(
-                    "Security: Included file '{}' is outside project root.\n\
-                     Only files within the project directory can be included.",
+                    "Security: Included file '{}' is outside project root.",
                     include_name
                 );
             }
 
-            // Compile included file with error context
-            let compiled_path = compile_file(&include_path, None)
+            // Compile included file IN MEMORY
+            let (chapter_content, _) = compile_to_string(&include_path, &mut compiler)
                 .with_context(|| format!("Failed to compile included file: {}", include_name))?;
-
-            // Read and inject content directly instead of using #include
-            // This preserves the import scope from main.typ, allowing included content
-            // to use functions imported in main (like #code-chunk from lib/knot.typ)
-            let chapter_content = fs::read_to_string(&compiled_path)
-                .with_context(|| format!("Failed to read compiled file: {:?}", compiled_path))?;
 
             generated_includes.push_str(&format!(
                 "// BEGIN-FILE {}\n{}\n// END-FILE {}\n\n",
@@ -107,100 +85,54 @@ pub fn build_project(start_path: Option<&Path>) -> Result<()> {
                 chapter_content.trim(),
                 include_name
             ));
-
-            // Delete intermediate .typ file after reading its content
-            // These files are regenerated on each build and no longer needed after injection
-            fs::remove_file(&compiled_path).with_context(|| {
-                format!("Failed to delete intermediate file: {:?}", compiled_path)
-            })?;
-            info!("✓ Cleaned up intermediate file: {:?}", compiled_path);
         }
     }
 
-    // Step 4: Compile main file
-    let main_typ_path = compile_file(&main_file, None)?;
+    // Step 4: Compile main file IN MEMORY
+    let (main_typ_content, main_typ_path) = compile_to_string(&main_file, &mut compiler)?;
 
-    // Rename .{stem}.typ to {stem}.typ (remove dot prefix for main file)
-    // e.g., .main.typ -> main.typ, .thesis.typ -> thesis.typ
-    let final_main_typ_path = {
-        let parent = main_typ_path.parent().unwrap_or(std::path::Path::new("."));
-        let new_path = parent.join(format!("{}.typ", main_stem));
-        fs::rename(&main_typ_path, &new_path)
-            .with_context(|| format!("Failed to rename {:?} to {:?}", main_typ_path, new_path))?;
-        info!("✓ Generated {}.typ", main_stem);
-        new_path
+    // Step 5: Assemble content
+    let mut final_content = if !generated_includes.is_empty() {
+        if !main_typ_content.contains("/* KNOT-INJECT-CHAPTERS */") {
+            anyhow::bail!("No /* KNOT-INJECT-CHAPTERS */ placeholder in main file.");
+        }
+        main_typ_content.replace("/* KNOT-INJECT-CHAPTERS */", &generated_includes)
+    } else {
+        main_typ_content
     };
 
-    // Step 5: Inject includes into main file
-    if !generated_includes.is_empty() {
-        let mut main_content = fs::read_to_string(&final_main_typ_path)?;
-
-        // Placeholder is mandatory when includes are present
-        if !main_content.contains("/* KNOT-INJECT-CHAPTERS */") {
-            anyhow::bail!(
-                "Found includes in knot.toml but no /* KNOT-INJECT-CHAPTERS */ placeholder in main file.\n\
-                 Add this comment in {} where you want the chapters to be injected.",
-                main_file.display()
-            );
-        }
-
-        main_content = main_content.replace("/* KNOT-INJECT-CHAPTERS */", &generated_includes);
-        fs::write(&final_main_typ_path, main_content)?;
-        info!("✓ Injected included files into main file");
+    // Step 5.5: Inject codly configuration
+    if !config.codly.is_empty() && final_content.contains("/* KNOT-CODLY-INIT */") {
+        let codly_options: std::collections::HashMap<String, String> = config
+            .codly
+            .iter()
+            .map(|(key, value)| (key.clone(), value.to_string()))
+            .collect();
+        let codly_init = knot_core::format_codly_call(&codly_options);
+        final_content = final_content.replace("/* KNOT-CODLY-INIT */", &codly_init);
     }
 
-    // Step 5.5: Inject codly configuration if present (optional placeholder)
-    if !config.codly.is_empty() {
-        let mut main_content = fs::read_to_string(&final_main_typ_path)?;
+    // Step 5.75: Wrap entire main.typ with BEGIN-FILE / END-FILE
+    let final_wrapped = format!(
+        "// BEGIN-FILE {}\n{}\n// END-FILE {}\n",
+        main_file_name,
+        final_content.trim(),
+        main_file_name
+    );
 
-        if main_content.contains("/* KNOT-CODLY-INIT */") {
-            // Convert TOML values to strings first
-            let codly_options: std::collections::HashMap<String, String> = config
-                .codly
-                .iter()
-                .map(|(key, value)| {
-                    let value_str = match value {
-                        toml::Value::String(s) => s.clone(),
-                        toml::Value::Boolean(b) => b.to_string(),
-                        toml::Value::Integer(i) => i.to_string(),
-                        toml::Value::Float(f) => f.to_string(),
-                        _ => toml::to_string(value)
-                            .unwrap_or_default()
-                            .trim()
-                            .to_string(),
-                    };
-                    (key.clone(), value_str)
-                })
-                .collect();
+    // Write final main.typ (rename to remove dot prefix)
+    let final_main_typ_path = {
+        let parent = main_typ_path.parent().unwrap_or(std::path::Path::new("."));
+        parent.join(format!("{}.typ", main_stem))
+    };
+    fs::write(&final_main_typ_path, final_wrapped)?;
+    info!("✓ Generated {}.typ", main_stem);
 
-            // Use the shared helper function to format the codly call
-            let codly_init = knot_core::format_codly_call(&codly_options);
-            main_content = main_content.replace("/* KNOT-CODLY-INIT */", &codly_init);
-            fs::write(&final_main_typ_path, main_content)?;
-            info!("✓ Injected codly configuration from knot.toml");
-        }
-    }
-
-    // Step 5.75: Wrap entire main.typ with BEGIN-FILE / END-FILE for main.knot.
-    {
-        let main_content = fs::read_to_string(&final_main_typ_path)?;
-        let wrapped = format!(
-            "// BEGIN-FILE {}\n{}\n// END-FILE {}\n",
-            main_file_name,
-            main_content.trim(),
-            main_file_name
-        );
-        fs::write(&final_main_typ_path, wrapped)?;
-        info!("✓ Wrapped main.typ with BEGIN-FILE / END-FILE markers");
-    }
-
-    // Step 6: Determine PDF output path (named after main file from knot.toml)
-    // e.g., main.knot -> main.pdf, thesis.knot -> thesis.pdf
+    // Step 6: Determine PDF output path
     let pdf_output_path = project_root.join(format!("{}.pdf", main_stem));
 
-    // Step 7: Compile PDF with typst (with --root for imports)
+    // Step 7: Compile PDF with typst
     info!("📦 Compiling PDF with Typst...");
-
     let output = std::process::Command::new("typst")
         .arg("compile")
         .arg("--root")
@@ -208,16 +140,10 @@ pub fn build_project(start_path: Option<&Path>) -> Result<()> {
         .arg(&final_main_typ_path)
         .arg(&pdf_output_path)
         .output()
-        .context("Failed to execute typst command. Is Typst installed and in your PATH?")?;
+        .context("Failed to execute typst command.")?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        anyhow::bail!(
-            "Typst compilation failed:\n--- Stdout ---\n{}\n--- Stderr ---\n{}",
-            stdout,
-            stderr
-        );
+        anyhow::bail!("Typst compilation failed.");
     }
 
     info!("✅ Successfully built PDF: {:?}", pdf_output_path);
@@ -226,45 +152,38 @@ pub fn build_project(start_path: Option<&Path>) -> Result<()> {
     Ok(())
 }
 
-/// Compile a .knot file to .typ (without generating PDF)
-///
-/// This function:
-/// - Parses the .knot file
-/// - Executes R chunks and caches results
-/// - Generates a hidden .typ file (dotfile convention)
-/// - Returns the path to the generated .typ file
-pub fn compile_file(file: &Path, output_path: Option<&PathBuf>) -> Result<PathBuf> {
-    info!("📄 Compiling {:?}...", file);
+/// Compile a .knot file to a Typst string (in-memory)
+pub fn compile_to_string(file: &Path, compiler: &mut Compiler) -> Result<(String, PathBuf)> {
     let source = fs::read_to_string(file).context(format!("Failed to read file: {:?}", file))?;
-
     let doc = Document::parse(source);
-    info!("✓ Parsed {} chunk(s)", doc.chunks.len());
 
     let source_file_name = file
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "unknown.knot".to_string());
 
-    let mut compiler = Compiler::new(file)?;
     let typst_source = compiler.compile(&doc, &source_file_name)?;
 
-    // Determine output path
-    let typ_output_path = if let Some(path) = output_path {
-        path.clone()
-    } else {
-        // Generate hidden .typ file (dotfile convention)
+    // Determine path for fix_paths (relative to file)
+    let typ_output_path = {
         let parent = file.parent().unwrap_or(std::path::Path::new("."));
         let stem = file.file_stem().unwrap_or(std::ffi::OsStr::new("main"));
         parent.join(format!(".{}.typ", stem.to_string_lossy()))
     };
 
-    // Fix file paths before writing
     let fixed_source = fix_paths_in_typst(&typst_source, &typ_output_path)?;
+    Ok((fixed_source, typ_output_path))
+}
 
-    fs::write(&typ_output_path, fixed_source).context(format!(
-        "Failed to write Typst file to {:?}",
-        typ_output_path
-    ))?;
+/// Compile a .knot file to .typ (standard file-based version)
+pub fn compile_file(file: &Path, output_path: Option<&PathBuf>) -> Result<PathBuf> {
+    info!("📄 Compiling {:?}...", file);
+    let mut compiler = Compiler::new(file)?;
+    let (fixed_source, typ_default_path) = compile_to_string(file, &mut compiler)?;
+
+    let typ_output_path = output_path.cloned().unwrap_or(typ_default_path);
+
+    fs::write(&typ_output_path, fixed_source).context("Failed to write Typst file")?;
     info!("✓ Generated Typst file: {:?}", typ_output_path);
 
     Ok(typ_output_path)

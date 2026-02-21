@@ -1,6 +1,12 @@
+use once_cell::sync::Lazy;
 use regex::Regex;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+static BEGIN_FILE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\s*// BEGIN-FILE (.+)$").unwrap());
+static END_FILE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\s*// END-FILE (.+)$").unwrap());
+static SYNC_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^\s*// #KNOT-SYNC source=(\S+) line=(\d+)$").unwrap());
 
 #[derive(Debug, Clone)]
 pub struct ChunkMarker {
@@ -33,12 +39,8 @@ pub fn parse_knot_markers(content: &str) -> Vec<FileBlock> {
     let mut block_stack: Vec<FileBlock> = Vec::new();
     let mut current_chunk: Option<ChunkMarker> = None;
 
-    let begin_file_re = Regex::new(r"^\s*// BEGIN-FILE (.+)$").unwrap();
-    let end_file_re = Regex::new(r"^\s*// END-FILE (.+)$").unwrap();
-    let sync_re = Regex::new(r"^\s*// #KNOT-SYNC source=(\S+) line=(\d+)$").unwrap();
-
     for (i, line) in content.lines().enumerate() {
-        if let Some(caps) = begin_file_re.captures(line) {
+        if let Some(caps) = BEGIN_FILE_RE.captures(line) {
             let filename = caps[1].trim().to_string();
 
             // If we are already in a block, this inner block acts like a "virtual chunk"
@@ -58,7 +60,7 @@ pub fn parse_knot_markers(content: &str) -> Vec<FileBlock> {
             continue;
         }
 
-        if let Some(caps) = end_file_re.captures(line) {
+        if let Some(caps) = END_FILE_RE.captures(line) {
             let filename = caps[1].trim().to_string();
             if let Some(mut block) = block_stack.pop() {
                 if block.file == filename {
@@ -85,7 +87,7 @@ pub fn parse_knot_markers(content: &str) -> Vec<FileBlock> {
             continue;
         }
 
-        if let Some(caps) = sync_re.captures(line) {
+        if let Some(caps) = SYNC_RE.captures(line) {
             if let Some(ref mut block) = block_stack.last_mut() {
                 if let Some(chunk) = current_chunk.take() {
                     block.chunks.push(chunk);
