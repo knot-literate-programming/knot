@@ -203,7 +203,7 @@ mod tests {
     fn test_hash_chaining_basic() {
         let tmp_dir = tempdir().unwrap();
         let project_root = tmp_dir.path();
-        let cache_dir = get_cache_dir(project_root);
+        let cache_dir = get_cache_dir(project_root, "test");
         let _cache = Cache::new(cache_dir).unwrap();
         let opts = ChunkOptions::default();
 
@@ -225,7 +225,7 @@ mod tests {
     fn test_dependency_invalidation() {
         let tmp_dir = tempdir().unwrap();
         let project_root = tmp_dir.path();
-        let _cache_dir = get_cache_dir(project_root);
+        let _cache_dir = get_cache_dir(project_root, "test");
         let tmp_file = tmp_dir.path().join("data.csv");
         fs::write(&tmp_file, "a,b\n1,2").unwrap();
 
@@ -251,7 +251,7 @@ mod tests {
     fn test_options_affect_hash() {
         let tmp_dir = tempdir().unwrap();
         let project_root = tmp_dir.path();
-        let cache_dir = get_cache_dir(project_root);
+        let cache_dir = get_cache_dir(project_root, "test");
         let _cache = Cache::new(cache_dir).unwrap();
 
         let opts1 = ChunkOptions {
@@ -273,7 +273,7 @@ mod tests {
     fn test_snapshot_path_generation() {
         let tmp_dir = tempdir().unwrap();
         let project_root = tmp_dir.path();
-        let cache_dir = get_cache_dir(project_root);
+        let cache_dir = get_cache_dir(project_root, "test");
         let cache = Cache::new(cache_dir.clone()).unwrap();
 
         let hash = "abc123def456";
@@ -302,7 +302,7 @@ mod tests {
     fn test_snapshot_different_hashes() {
         let tmp_dir = tempdir().unwrap();
         let project_root = tmp_dir.path();
-        let cache_dir = get_cache_dir(project_root);
+        let cache_dir = get_cache_dir(project_root, "test");
         let cache = Cache::new(cache_dir).unwrap();
 
         let hash1 = "hash1";

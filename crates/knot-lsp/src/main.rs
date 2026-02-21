@@ -381,7 +381,8 @@ impl KnotLanguageServer {
             Ok(root) => root,
             Err(_) => return,
         };
-        let cache_dir = get_cache_dir(&project_root);
+        let file_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("main");
+        let cache_dir = get_cache_dir(&project_root, file_stem);
         if let Ok(cache) = Cache::new(cache_dir) {
             self.try_load_snapshot(uri, &cache, "r", "RData").await;
             self.try_load_snapshot(uri, &cache, "python", "pkl").await;

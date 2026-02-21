@@ -1,6 +1,6 @@
 = Data Visualization with Python
 
-This chapter #emph[demonstrates] Python's matplotlib for scientific visualization using object-oriented approach.
+This chapter #emph[demonstrates] Python's matplotlib for scientific visualization using object-oriented approach. A simple test to evaluate the performance of knot compiler.
 
 == Setting Up
 
@@ -217,7 +217,7 @@ typst(fig)
     (code hidden, custom styling)_
 ]
 
-The regression analysis shows R² = `{python} f"{r_value**2:.3f}"`, with slope = `{python} f"{slope:.2f}"`.
+The regression analysis shows R² = `{python} f"{r_value**2:.3f}"`, with slope = `{python} f"{slope:.2f}"`. Test.
 
 == Warnings Demonstration
 

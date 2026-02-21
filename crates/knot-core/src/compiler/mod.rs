@@ -72,8 +72,12 @@ impl Compiler {
             Config::default()
         };
 
-        // Determine project-wide cache directory
-        let cache_dir = get_cache_dir(&project_root);
+        // Determine isolated cache directory for this file
+        let file_stem = knot_file_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("main");
+        let cache_dir = get_cache_dir(&project_root, file_stem);
 
         info!("📦 Cache directory: {}", cache_dir.display());
 
@@ -165,6 +169,8 @@ impl Compiler {
                             &self.config,
                             true, // is_inert
                             &backend,
+                            &mut snapshot_manager,
+                            &self.project_root,
                         )?;
                         res
                     }
@@ -201,15 +207,6 @@ impl Compiler {
                 continue;
             }
 
-            // --- PROACTIVE STATE RESTORATION ---
-            snapshot_manager.restore_if_needed(
-                lang,
-                &previous_hash,
-                &mut self.executor_manager,
-                &cache,
-                &self.project_root,
-            )?;
-
             let execution_result = match node {
                 ExecutableNode::Chunk(chunk) => chunk_processor::process_chunk(
                     chunk,
@@ -219,6 +216,8 @@ impl Compiler {
                     &self.config,
                     false, // is_inert
                     &backend,
+                    &mut snapshot_manager,
+                    &self.project_root,
                 ),
                 ExecutableNode::InlineExpr(inline_expr) => inline_processor::process_inline_expr(
                     inline_expr,

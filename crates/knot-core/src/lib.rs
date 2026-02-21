@@ -50,8 +50,9 @@ use std::path::{Path, PathBuf};
 ///
 /// # Arguments
 /// * `project_root` - Path to the project root directory
-pub fn get_cache_dir(project_root: &Path) -> PathBuf {
-    project_root.join(Defaults::CACHE_DIR_NAME)
+/// * `sub_dir` - Sub-directory for isolation (e.g., "main" or "01-intro")
+pub fn get_cache_dir(project_root: &Path, sub_dir: &str) -> PathBuf {
+    project_root.join(Defaults::CACHE_DIR_NAME).join(sub_dir)
 }
 
 /// Clean project (remove cache and generated files)

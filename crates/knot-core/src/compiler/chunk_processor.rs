@@ -10,12 +10,14 @@
 
 use crate::backend::{Backend, TypstBackend};
 use crate::cache::{Cache, hash_dependencies, hashing};
+use crate::compiler::snapshot_manager::SnapshotManager;
 use crate::config::Config;
 use crate::executors::{ExecutionOutput, ExecutionResult, ExecutorManager, GraphicsOptions};
 use crate::parser::Chunk;
 use anyhow::Result;
 use log::info;
 use sha2::{Digest, Sha256};
+use std::path::Path;
 
 pub fn process_chunk(
     chunk: &Chunk,
@@ -25,6 +27,8 @@ pub fn process_chunk(
     config: &Config,
     is_inert: bool,
     backend: &TypstBackend,
+    snapshot_manager: &mut SnapshotManager,
+    project_root: &Path,
 ) -> Result<(String, String)> {
     // Apply config defaults to chunk options and resolve to concrete values
     let mut chunk_options = chunk.options.clone();
@@ -83,6 +87,16 @@ pub fn process_chunk(
         cache.get_cached_result(&chunk_hash)?
     } else {
         info!("  ⚙️ {} [executing]", chunk_name);
+
+        // --- LAZY STATE RESTORATION ---
+        // We only restore state if we are actually going to execute code.
+        snapshot_manager.restore_if_needed(
+            &chunk.language,
+            previous_hash,
+            executor_manager,
+            cache,
+            project_root,
+        )?;
 
         // Prepare graphics options for executor
         let graphics_opts = GraphicsOptions {
@@ -259,6 +273,8 @@ mod tests {
             &setup_test_config(),
             false,
             &crate::backend::TypstBackend::new(),
+            &mut SnapshotManager::new(),
+            Path::new("."),
         )
         .unwrap();
 
@@ -281,6 +297,8 @@ mod tests {
             &setup_test_config(),
             false,
             &crate::backend::TypstBackend::new(),
+            &mut SnapshotManager::new(),
+            Path::new("."),
         )
         .unwrap();
     }
@@ -299,6 +317,8 @@ mod tests {
             &setup_test_config(),
             false,
             &crate::backend::TypstBackend::new(),
+            &mut SnapshotManager::new(),
+            Path::new("."),
         )
         .unwrap();
 
@@ -321,6 +341,8 @@ mod tests {
             &setup_test_config(),
             false,
             &crate::backend::TypstBackend::new(),
+            &mut SnapshotManager::new(),
+            Path::new("."),
         )
         .unwrap();
 
@@ -333,6 +355,8 @@ mod tests {
             &setup_test_config(),
             false,
             &crate::backend::TypstBackend::new(),
+            &mut SnapshotManager::new(),
+            Path::new("."),
         )
         .unwrap();
 
@@ -356,6 +380,8 @@ mod tests {
             &setup_test_config(),
             false,
             &crate::backend::TypstBackend::new(),
+            &mut SnapshotManager::new(),
+            Path::new("."),
         )
         .unwrap();
         let (_output2, hash2) = process_chunk(
@@ -366,6 +392,8 @@ mod tests {
             &setup_test_config(),
             false,
             &crate::backend::TypstBackend::new(),
+            &mut SnapshotManager::new(),
+            Path::new("."),
         )
         .unwrap();
 
@@ -387,6 +415,8 @@ mod tests {
             &setup_test_config(),
             false,
             &crate::backend::TypstBackend::new(),
+            &mut SnapshotManager::new(),
+            Path::new("."),
         )
         .unwrap();
         let (_output2, hash2) = process_chunk(
@@ -397,6 +427,8 @@ mod tests {
             &setup_test_config(),
             false,
             &crate::backend::TypstBackend::new(),
+            &mut SnapshotManager::new(),
+            Path::new("."),
         )
         .unwrap();
 
@@ -459,6 +491,8 @@ mod tests {
             &setup_test_config(),
             false,
             &crate::backend::TypstBackend::new(),
+            &mut SnapshotManager::new(),
+            Path::new("."),
         )
         .unwrap();
 
@@ -475,6 +509,8 @@ mod tests {
             &setup_test_config(),
             false,
             &crate::backend::TypstBackend::new(),
+            &mut SnapshotManager::new(),
+            Path::new("."),
         )
         .unwrap();
 
@@ -495,6 +531,8 @@ mod tests {
             &setup_test_config(),
             false,
             &crate::backend::TypstBackend::new(),
+            &mut SnapshotManager::new(),
+            Path::new("."),
         )
         .unwrap();
 
@@ -516,6 +554,8 @@ mod tests {
             &setup_test_config(),
             false,
             &crate::backend::TypstBackend::new(),
+            &mut SnapshotManager::new(),
+            Path::new("."),
         )
         .unwrap();
 
