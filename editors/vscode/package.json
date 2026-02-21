@@ -88,6 +88,18 @@
         "title": "Format Chunk",
         "category": "Knot",
         "icon": "$(zap)"
+      },
+      {
+        "command": "knot.jumpToKnot",
+        "title": "Jump to source (.knot)",
+        "category": "Knot",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "knot.jumpToTyp",
+        "title": "Jump to compiled (.typ)",
+        "category": "Knot",
+        "icon": "$(go-to-file)"
       }
     ],
     "menus": {
@@ -96,6 +108,16 @@
           "command": "knot.formatChunk",
           "when": "resourceLangId == knot",
           "group": "1_modification"
+        },
+        {
+          "command": "knot.jumpToTyp",
+          "when": "resourceLangId == knot",
+          "group": "navigation"
+        },
+        {
+          "command": "knot.jumpToKnot",
+          "when": "resourceLangId == typst",
+          "group": "navigation"
         }
       ],
       "editor/title": [
@@ -122,6 +144,18 @@
         "key": "ctrl+k v",
         "mac": "cmd+k v",
         "when": "resourceLangId == knot"
+      },
+      {
+        "command": "knot.jumpToTyp",
+        "key": "ctrl+k t",
+        "mac": "cmd+k t",
+        "when": "resourceLangId == knot"
+      },
+      {
+        "command": "knot.jumpToKnot",
+        "key": "ctrl+k j",
+        "mac": "cmd+k j",
+        "when": "resourceLangId == typst"
       },
       {
         "command": "knot.formatChunk",

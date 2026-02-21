@@ -36,6 +36,65 @@ export async function activate(context: ExtensionContext) {
     compilationStatusBar = window.createStatusBarItem(StatusBarAlignment.Left, 100);
     context.subscriptions.push(compilationStatusBar);
 
+    // Manual backward sync: jump from current .typ position to the .knot source
+    context.subscriptions.push(
+        commands.registerCommand('knot.jumpToKnot', async () => {
+            const editor = window.activeTextEditor;
+            if (!editor || !editor.document.fileName.endsWith('.typ')) {
+                window.showInformationMessage('This command must be run from a .typ file');
+                return;
+            }
+            await jumpToKnotSource(outputChannel);
+        })
+    );
+
+    // Manual forward sync: jump from current .knot position to the .typ compiled file
+    context.subscriptions.push(
+        commands.registerCommand('knot.jumpToTyp', async () => {
+            const editor = window.activeTextEditor;
+            if (!editor || editor.document.languageId !== 'knot') {
+                window.showInformationMessage('This command must be run from a .knot file');
+                return;
+            }
+
+            const knotFilePath = editor.document.uri.fsPath;
+            const knotLine = editor.selection.active.line;
+            const projectRoot = findProjectRoot(path.dirname(knotFilePath));
+            if (!projectRoot) {
+                window.showErrorMessage('Could not find project root (knot.toml)');
+                return;
+            }
+
+            const tomlPath = path.join(projectRoot, 'knot.toml');
+            const mainFile = parseMainFromToml(tomlPath);
+            const mainStem = path.basename(mainFile, path.extname(mainFile));
+            const mainTypPath = path.join(projectRoot, `${mainStem}.typ`);
+            
+            if (!fs.existsSync(mainTypPath)) {
+                window.showErrorMessage(`Compiled file not found: ${mainTypPath}. Please run Build or Open Preview first.`);
+                return;
+            }
+
+            const knotRelFile = path.relative(projectRoot, knotFilePath);
+            try {
+                const knotBinary = resolveBinaryPath('knot', outputChannel);
+                const result = await runKnotCommand(knotBinary, ['jump-to-typ', mainTypPath, knotRelFile, (knotLine + 1).toString()], outputChannel);
+                const mappedTypLine = parseInt(result, 10) - 1;
+
+                const typUri = Uri.file(mainTypPath);
+                const typDoc = await workspace.openTextDocument(typUri);
+                const pos = new Position(mappedTypLine, 0);
+                await window.showTextDocument(typDoc, {
+                    selection: new Range(pos, pos),
+                    viewColumn: ViewColumn.Two,
+                    preserveFocus: false,
+                });
+            } catch (e) {
+                window.showErrorMessage(`Jump to Typ failed: ${e}`);
+            }
+        })
+    );
+
     // Register Knot Project View
     const knotProjectProvider = new KnotProjectProvider();
     window.registerTreeDataProvider('knotExplorer', knotProjectProvider);

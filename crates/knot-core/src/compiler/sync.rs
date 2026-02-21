@@ -45,10 +45,10 @@ pub fn parse_knot_markers(content: &str) -> Vec<FileBlock> {
 
             // If we are already in a block, this inner block acts like a "virtual chunk"
             // for the parent's line-count arithmetic.
-            if let Some(parent) = block_stack.last_mut() {
-                if let Some(chunk) = current_chunk.take() {
-                    parent.chunks.push(chunk);
-                }
+            if let Some(parent) = block_stack.last_mut()
+                && let Some(chunk) = current_chunk.take()
+            {
+                parent.chunks.push(chunk);
             }
 
             block_stack.push(FileBlock {
@@ -102,13 +102,12 @@ pub fn parse_knot_markers(content: &str) -> Vec<FileBlock> {
             continue;
         }
 
-        if line.trim_end() == "// END-KNOT-SYNC" {
-            if let (Some(ref mut block), Some(mut chunk)) =
+        if line.trim_end() == "// END-KNOT-SYNC"
+            && let (Some(ref mut block), Some(mut chunk)) =
                 (block_stack.last_mut(), current_chunk.take())
-            {
-                chunk.end_line = i;
-                block.chunks.push(chunk);
-            }
+        {
+            chunk.end_line = i;
+            block.chunks.push(chunk);
         }
     }
 
@@ -122,7 +121,6 @@ pub fn map_typ_line_to_knot(
     project_root: &Path,
 ) -> Option<(PathBuf, usize)> {
     // 1. Find the innermost file block that contains this line.
-    // finished_blocks contains blocks in order of completion (innermost first).
     let block = blocks
         .iter()
         .find(|b| typ_line >= b.start_line && typ_line <= b.end_line)?;
@@ -143,7 +141,6 @@ pub fn map_typ_line_to_knot(
     if let Some(chunk) = containing_chunk {
         if chunk.knot_line == 0 {
             // This is a virtual chunk (an included file).
-            // Should be handled by the fact that the inner block was already found.
             return None;
         }
         // Case b: inside a real chunk's compiled output
@@ -159,11 +156,6 @@ pub fn map_typ_line_to_knot(
             let knot_lines = if chunk.knot_line == 0 {
                 1 // An included file occupies exactly 1 line in the parent .knot
             } else {
-                // For code chunks, we don't have the original knot line count easily,
-                // BUT we know that verbatim mapping only happens OUTSIDE chunks.
-                // In a verbatim region, we only care about how many lines the chunk
-                // replaced in the .typ file relative to its "presence" in .knot.
-                // Actually, for chunks, the mapping is usually done via next_chunk.
                 typ_lines
             };
             lines_to_skip += typ_lines - knot_lines;
@@ -172,13 +164,11 @@ pub fn map_typ_line_to_knot(
 
     // Special case: if we are after all chunks, we can use Case d (from the end).
     let chunks_below = block.chunks.iter().any(|c| c.start_line > typ_line);
-    if !chunks_below {
-        if let Ok(content) = fs::read_to_string(&knot_file) {
-            let total_knot_lines = content.lines().count();
-            let delta = block.end_line.saturating_sub(typ_line);
-            let line = total_knot_lines.saturating_sub(delta);
-            return Some((knot_file, line));
-        }
+    if !chunks_below && let Ok(content) = fs::read_to_string(&knot_file) {
+        let total_knot_lines = content.lines().count();
+        let delta = block.end_line.saturating_sub(typ_line);
+        let line = total_knot_lines.saturating_sub(delta);
+        return Some((knot_file, line));
     }
 
     let knot_line = (typ_line as isize - block.start_line as isize - 1) - lines_to_skip;
@@ -211,9 +201,9 @@ pub fn map_knot_line_to_typ(
 
         let close_fence = if k < chunks.len() - 1 {
             let mut next_real = None;
-            for j in (k + 1)..chunks.len() {
-                if chunks[j].knot_line > 0 {
-                    next_real = Some(&chunks[j]);
+            for next in chunks.iter().skip(k + 1) {
+                if next.knot_line > 0 {
+                    next_real = Some(next);
                     break;
                 }
             }
@@ -229,17 +219,17 @@ pub fn map_knot_line_to_typ(
             } else {
                 chunks[k].knot_line
             }
+        } else if let Ok(content) = fs::read_to_string(knot_file_path) {
+            let total_knot_lines = content.lines().count();
+            let verbatim_after_in_typ = block
+                .end_line
+                .saturating_sub(1)
+                .saturating_sub(chunks[k].end_line);
+            total_knot_lines
+                .saturating_sub(1)
+                .saturating_sub(verbatim_after_in_typ)
         } else {
-            if let Ok(content) = fs::read_to_string(knot_file_path) {
-                let total_knot_lines = content.lines().count();
-                let verbatim_after_in_typ =
-                    block.end_line.saturating_sub(1).saturating_sub(chunks[k].end_line);
-                total_knot_lines
-                    .saturating_sub(1)
-                    .saturating_sub(verbatim_after_in_typ)
-            } else {
-                chunks[k].knot_line
-            }
+            chunks[k].knot_line
         };
 
         if knot_line <= close_fence {
@@ -249,21 +239,21 @@ pub fn map_knot_line_to_typ(
         let verbatim_start = close_fence.saturating_add(1);
         if k < chunks.len() - 1 {
             let mut next_real = None;
-            for j in (k + 1)..chunks.len() {
-                if chunks[j].knot_line > 0 {
-                    next_real = Some(&chunks[j]);
+            for next in chunks.iter().skip(k + 1) {
+                if next.knot_line > 0 {
+                    next_real = Some(next);
                     break;
                 }
             }
-            if let Some(next) = next_real {
-                if knot_line < next.knot_line.saturating_sub(1) {
-                    return Some(
-                        chunks[k]
-                            .end_line
-                            .saturating_add(1)
-                            .saturating_add(knot_line.saturating_sub(verbatim_start)),
-                    );
-                }
+            if let Some(next) = next_real
+                && knot_line < next.knot_line.saturating_sub(1)
+            {
+                return Some(
+                    chunks[k]
+                        .end_line
+                        .saturating_add(1)
+                        .saturating_add(knot_line.saturating_sub(verbatim_start)),
+                );
             }
         } else {
             return Some(

@@ -25,9 +25,11 @@ pub fn build_project(start_path: Option<&Path>) -> Result<()> {
     let (config, project_root) = Config::find_and_load(&search_path)?;
 
     // Step 2: Get main file
-    let main_file_name = config.document.main.as_deref().ok_or_else(|| {
-        anyhow::anyhow!("No 'main' file specified in knot.toml.")
-    })?;
+    let main_file_name = config
+        .document
+        .main
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("No 'main' file specified in knot.toml."))?;
 
     let main_file = project_root.join(main_file_name);
     if !main_file.exists() {
@@ -53,12 +55,16 @@ pub fn build_project(start_path: Option<&Path>) -> Result<()> {
             let include_path = project_root.join(include_name);
 
             // Security check
-            let canonical_include = include_path.canonicalize()
+            let canonical_include = include_path
+                .canonicalize()
                 .with_context(|| format!("Included file not found: {:?}", include_name))?;
             let canonical_root = project_root.canonicalize()?;
 
             if !canonical_include.starts_with(&canonical_root) {
-                anyhow::bail!("Security: Included file '{}' is outside project root.", include_name);
+                anyhow::bail!(
+                    "Security: Included file '{}' is outside project root.",
+                    include_name
+                );
             }
 
             let mut chapter_compiler = Compiler::new(&include_path)?;
@@ -108,8 +114,11 @@ pub fn build_project(start_path: Option<&Path>) -> Result<()> {
 
     let final_main_typ_path = project_root.join(format!("{}.typ", main_stem));
     fs::write(&final_main_typ_path, final_wrapped)?;
-    
-    info!("⏱️  Knot compilation & assembly: {:?}", start_compile.elapsed());
+
+    info!(
+        "⏱️  Knot compilation & assembly: {:?}",
+        start_compile.elapsed()
+    );
 
     // Step 6: PDF path
     let pdf_output_path = project_root.join(format!("{}.pdf", main_stem));
@@ -132,7 +141,11 @@ pub fn build_project(start_path: Option<&Path>) -> Result<()> {
         anyhow::bail!("Typst compilation failed.");
     }
 
-    println!("✅ PDF generated: {} (Total time: {:?})", pdf_output_path.display(), start_total.elapsed());
+    println!(
+        "✅ PDF generated: {} (Total time: {:?})",
+        pdf_output_path.display(),
+        start_total.elapsed()
+    );
 
     Ok(())
 }
@@ -190,7 +203,7 @@ fn fix_paths_in_typst(source: &str, typ_file: &Path) -> Result<String> {
         let abs_path = Path::new(abs_path_str);
         let filename_os = abs_path.file_name().unwrap();
         let filename = filename_os.to_string_lossy();
-        
+
         if !processed_files.contains(filename_os) {
             let dest_path = local_files_dir.join(filename.as_ref());
             if abs_path.exists() && !dest_path.exists() {
@@ -198,7 +211,7 @@ fn fix_paths_in_typst(source: &str, typ_file: &Path) -> Result<String> {
             }
             processed_files.insert(filename_os.to_owned());
         }
-        
+
         format!("\"{}/{}\"", Defaults::LANGUAGE_FILES_DIR, filename)
     });
 
