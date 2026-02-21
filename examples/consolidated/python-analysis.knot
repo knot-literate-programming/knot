@@ -242,7 +242,7 @@ print("Code execution continues normally after a warning.")
 cos(1)
 ```
 
-Test
+Test. Encore un petit test !
 
 ```{python}
 import warnings

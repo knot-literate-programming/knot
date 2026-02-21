@@ -81,6 +81,15 @@ pub fn build_project(start_path: Option<&Path>) -> Result<()> {
 
     // Step 4: Compile main file
     let mut main_compiler = Compiler::new(&main_file)?;
+
+    // Find at which line the injection placeholder is located in the source
+    let main_source = fs::read_to_string(&main_file)?;
+    let placeholder_line = main_source
+        .lines()
+        .position(|l| l.contains("/* KNOT-INJECT-CHAPTERS */"))
+        .map(|idx| idx + 1) // 1-indexed for the marker
+        .unwrap_or(1);
+
     let (main_typ_content, _main_typ_path) = compile_to_string(&main_file, &mut main_compiler)?;
 
     // Step 5: Assemble
@@ -88,7 +97,14 @@ pub fn build_project(start_path: Option<&Path>) -> Result<()> {
         if !main_typ_content.contains("/* KNOT-INJECT-CHAPTERS */") {
             anyhow::bail!("No /* KNOT-INJECT-CHAPTERS */ placeholder in main file.");
         }
-        main_typ_content.replace("/* KNOT-INJECT-CHAPTERS */", &generated_includes)
+
+        // Wrap includes with the source line info of the placeholder
+        let wrapped_includes = format!(
+            "// #KNOT-INJECTION-START line={}\n{}\n// #KNOT-INJECTION-END\n",
+            placeholder_line,
+            generated_includes.trim()
+        );
+        main_typ_content.replace("/* KNOT-INJECT-CHAPTERS */", &wrapped_includes)
     } else {
         main_typ_content
     };
