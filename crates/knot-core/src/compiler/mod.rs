@@ -1,6 +1,6 @@
 use crate::cache::ConstantObjectInfo;
 use crate::config::Config;
-use crate::executors::ExecutorManager;
+use crate::executors::{ExecutionOutput, ExecutionResult, ExecutorManager, GraphicsOptions};
 use crate::parser::ast::{Chunk, Document, InlineExpr};
 use std::collections::HashMap;
 use std::path::Path;
@@ -9,29 +9,12 @@ use std::time::Duration;
 pub mod chunk_processor;
 pub mod formatters;
 pub mod inline_processor;
+pub mod pipeline;
+pub mod snapshot_manager;
 pub mod sync;
 
 pub use chunk_processor::{ChunkExecutionState, ChunkProcessor};
-
-#[cfg(test)]
-pub(super) mod test_helpers {
-    use crate::cache::Cache;
-    use crate::executors::ExecutorManager;
-    use tempfile::TempDir;
-
-    pub fn setup_test_cache() -> (TempDir, Cache) {
-        let temp_dir = TempDir::new().unwrap();
-        let cache = Cache::new(temp_dir.path().to_path_buf()).unwrap();
-        (temp_dir, cache)
-    }
-
-    pub fn setup_test_manager() -> (TempDir, ExecutorManager) {
-        let temp_dir = TempDir::new().unwrap();
-        let manager = ExecutorManager::new(temp_dir.path().to_path_buf());
-        (temp_dir, manager)
-    }
-}
-pub mod snapshot_manager;
+pub use pipeline::{ExecutedNode, ExecutionNeed, PlannedNode};
 
 /// Represents a node in the document that can be executed.
 pub enum ExecutableNode<'a> {
@@ -39,13 +22,19 @@ pub enum ExecutableNode<'a> {
     InlineExpr(&'a InlineExpr),
 }
 
+use crate::backend::TypstBackend;
 use crate::cache::Cache;
+use crate::compiler::pipeline::ChunkPlanData;
 use crate::compiler::snapshot_manager::SnapshotManager;
 use crate::defaults::Defaults;
 use crate::get_cache_dir;
 use anyhow::{Context, Result};
 use log::info;
+use std::collections::HashSet;
 use std::path::PathBuf;
+
+/// Return type of `execute_pass`: executed nodes + constant objects registered during execution.
+type ExecutePassResult = (Vec<ExecutedNode>, HashMap<String, (String, String)>);
 
 pub struct Compiler {
     executor_manager: ExecutorManager,
@@ -97,94 +86,22 @@ impl Compiler {
     /// `source_file` is the filename of the `.knot` source (e.g. `"chapter1.knot"`).
     pub fn compile(&mut self, doc: &Document, source_file: &str) -> Result<String> {
         let mut cache = Cache::new(self.cache_dir.clone())?;
-        let backend = crate::backend::TypstBackend::new();
-        let mut last_hash_per_lang: HashMap<String, String> = HashMap::new();
+        let backend = TypstBackend::new();
         let mut snapshot_manager = SnapshotManager::new();
-        let mut typst_output = String::new();
-        let mut last_pos = 0;
-        let mut constant_objects: HashMap<String, (String, String)> = HashMap::new();
-        let mut broken_languages = std::collections::HashSet::new();
 
-        let executable_nodes = build_executable_nodes(doc);
-        info!(
-            "🔧 Processing {} executable nodes...",
-            executable_nodes.len()
-        );
+        let nodes = build_executable_nodes(doc);
+        info!("🔧 Processing {} executable nodes...", nodes.len());
 
-        for node in &executable_nodes {
-            let (node_start, node_end, lang) = node_bounds(node);
-            let previous_hash = last_hash_per_lang.get(lang).cloned().unwrap_or_default();
+        // Pass 1: resolve options, compute hashes, check cache — no code executed.
+        let planned = self.plan_pass(nodes, &mut cache)?;
 
-            if node_start > last_pos {
-                typst_output.push_str(&doc.source[last_pos..node_start]);
-            }
+        // Pass 2: execute pending nodes, format output, handle error cascade.
+        let (executed, constant_objects) =
+            self.execute_pass(planned, &mut cache, &mut snapshot_manager, &backend)?;
 
-            let state = if broken_languages.contains(lang) {
-                ChunkExecutionState::Inert
-            } else {
-                ChunkExecutionState::Ready
-            };
+        // Pass 3: interleave node outputs with source text.
+        let typst_output = assemble_pass(&executed, &doc.source, source_file);
 
-            let execution_result = {
-                let mut processor = ChunkProcessor::new(
-                    &mut self.executor_manager,
-                    &mut cache,
-                    &mut snapshot_manager,
-                    &self.config,
-                    &backend,
-                    &self.project_root,
-                );
-                match node {
-                    ExecutableNode::Chunk(chunk) => {
-                        processor.process_chunk(chunk, state, &previous_hash)
-                    }
-                    ExecutableNode::InlineExpr(inline_expr) => {
-                        processor.process_inline(inline_expr, &previous_hash)
-                    }
-                }
-            };
-
-            let (result_str, node_hash) = match execution_result {
-                Ok(res) => res,
-                Err(e) => {
-                    let error_block = format_error_block(node, lang, &e.to_string());
-                    append_node_output(node, &error_block, source_file, &mut typst_output);
-                    last_pos = advance_last_pos(node, &doc.source, node_end);
-                    broken_languages.insert(lang.to_string());
-                    continue;
-                }
-            };
-
-            // Register constant objects declared by this chunk
-            if let ExecutableNode::Chunk(chunk) = node
-                && !chunk.options.constant.is_empty()
-            {
-                register_constant_objects(
-                    chunk,
-                    &mut self.executor_manager,
-                    &mut cache,
-                    &self.project_root,
-                    &mut constant_objects,
-                )?;
-            }
-
-            last_hash_per_lang.insert(lang.to_string(), node_hash.clone());
-            snapshot_manager.update_after_node(
-                lang,
-                &node_hash,
-                &previous_hash,
-                &mut self.executor_manager,
-                &cache,
-                &self.project_root,
-            )?;
-
-            append_node_output(node, &result_str, source_file, &mut typst_output);
-            last_pos = advance_last_pos(node, &doc.source, node_end);
-        }
-
-        if last_pos < doc.source.len() {
-            typst_output.push_str(&doc.source[last_pos..]);
-        }
         info!("✓ All nodes processed.");
 
         verify_constant_objects(
@@ -197,76 +114,481 @@ impl Compiler {
 
         Ok(typst_output)
     }
-}
 
-// ---------------------------------------------------------------------------
-// Private helpers for compile()
-// ---------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
+    // Pass 1 — Plan
+    // -----------------------------------------------------------------------
 
-/// Collects all executable nodes from the document and sorts them by source position.
-fn build_executable_nodes(doc: &Document) -> Vec<ExecutableNode<'_>> {
-    let mut nodes: Vec<ExecutableNode<'_>> = doc
-        .chunks
-        .iter()
-        .map(ExecutableNode::Chunk)
-        .chain(doc.inline_exprs.iter().map(ExecutableNode::InlineExpr))
-        .collect();
-    nodes.sort_by_key(|node| match node {
-        ExecutableNode::Chunk(c) => c.start_byte,
-        ExecutableNode::InlineExpr(e) => e.start,
-    });
-    nodes
-}
+    /// For every node: resolve options, compute hash, check cache.
+    /// Returns a `PlannedNode` for each node — no code is executed.
+    fn plan_pass<'a>(
+        &mut self,
+        nodes: Vec<ExecutableNode<'a>>,
+        cache: &mut Cache,
+    ) -> Result<Vec<PlannedNode<'a>>> {
+        use chunk_processor::{compute_hash, resolve_options};
 
-/// Returns `(start_byte, end_byte, language)` for a node.
-fn node_bounds<'a>(node: &'a ExecutableNode<'a>) -> (usize, usize, &'a str) {
-    match node {
-        ExecutableNode::Chunk(c) => (c.start_byte, c.end_byte, c.language.as_str()),
-        ExecutableNode::InlineExpr(e) => (e.start, e.end, e.language.as_str()),
-    }
-}
+        let mut planned = Vec::with_capacity(nodes.len());
+        let mut last_hash_per_lang: HashMap<String, String> = HashMap::new();
 
-/// Advances `node_end` past a trailing `\n` for chunk nodes.
-///
-/// `chunk.end_byte` stops just before the closing fence's trailing newline.
-/// Skipping it prevents an extra blank line in the output.
-fn advance_last_pos(node: &ExecutableNode<'_>, source: &str, node_end: usize) -> usize {
-    if matches!(node, ExecutableNode::Chunk(_))
-        && node_end < source.len()
-        && source.as_bytes()[node_end] == b'\n'
-    {
-        node_end + 1
-    } else {
-        node_end
-    }
-}
+        for node in nodes {
+            let lang = match &node {
+                ExecutableNode::Chunk(c) => c.language.clone(),
+                ExecutableNode::InlineExpr(e) => e.language.clone(),
+            };
+            let previous_hash = last_hash_per_lang.get(&lang).cloned().unwrap_or_default();
+            let (source_start, source_end) = match &node {
+                ExecutableNode::Chunk(c) => (c.start_byte, c.end_byte),
+                ExecutableNode::InlineExpr(e) => (e.start, e.end),
+            };
 
-/// Appends `content` to `output`, wrapped with KNOT-SYNC markers for chunks.
-/// Inline expressions are appended verbatim (no markers).
-fn append_node_output(
-    node: &ExecutableNode<'_>,
-    content: &str,
-    source_file: &str,
-    output: &mut String,
-) {
-    if let ExecutableNode::Chunk(chunk) = node {
-        output.push_str(&format!(
-            "// #KNOT-SYNC source={} line={}\n",
-            source_file,
-            chunk.range.start.line + 1,
-        ));
-        output.push_str(content);
-        if !content.is_empty() && !content.ends_with('\n') {
-            output.push('\n');
+            let (hash, need, chunk_data) = match &node {
+                ExecutableNode::Chunk(chunk) => {
+                    let (chunk_options, resolved_options, merged_codly_options) =
+                        resolve_options(chunk, &self.config, &ChunkExecutionState::Ready);
+                    let name = chunk
+                        .name
+                        .as_deref()
+                        .map(String::from)
+                        .unwrap_or_else(|| format!("chunk-{}", chunk.index));
+                    let hash = compute_hash(
+                        &chunk.code,
+                        &chunk_options,
+                        &previous_hash,
+                        &mut self.executor_manager,
+                        &chunk.language,
+                    )?;
+                    let need = if !resolved_options.eval {
+                        ExecutionNeed::Skip
+                    } else if resolved_options.cache && cache.has_cached_result(&hash) {
+                        ExecutionNeed::CacheHit(cache.get_cached_result(&hash)?)
+                    } else {
+                        ExecutionNeed::MustExecute
+                    };
+                    let data = ChunkPlanData {
+                        resolved_options,
+                        chunk_options,
+                        merged_codly_options,
+                        name,
+                    };
+                    (hash, need, Some(data))
+                }
+                ExecutableNode::InlineExpr(inline) => {
+                    let resolved = inline.options.resolve();
+                    let hash =
+                        cache.get_inline_expr_hash(&inline.code, &inline.options, &previous_hash);
+                    let need = if !resolved.eval {
+                        ExecutionNeed::Skip
+                    } else if cache.has_cached_inline_result(&hash) {
+                        ExecutionNeed::CacheHitInline(cache.get_cached_inline_result(&hash)?)
+                    } else {
+                        ExecutionNeed::MustExecute
+                    };
+                    (hash, need, None)
+                }
+            };
+
+            last_hash_per_lang.insert(lang.clone(), hash.clone());
+            planned.push(PlannedNode {
+                node,
+                lang,
+                hash,
+                previous_hash,
+                source_start,
+                source_end,
+                chunk_data,
+                need,
+            });
         }
-        output.push_str("// END-KNOT-SYNC\n");
-    } else {
-        output.push_str(content);
+
+        Ok(planned)
+    }
+
+    // -----------------------------------------------------------------------
+    // Pass 2 — Execute
+    // -----------------------------------------------------------------------
+
+    /// Execute pending nodes, format all outputs, propagate the Inert cascade on error.
+    ///
+    /// Returns the list of executed nodes (one per planned node) and any constant
+    /// objects registered during this pass (for post-pass verification).
+    fn execute_pass<'a>(
+        &mut self,
+        planned: Vec<PlannedNode<'a>>,
+        cache: &mut Cache,
+        snapshot_manager: &mut SnapshotManager,
+        backend: &TypstBackend,
+    ) -> Result<ExecutePassResult> {
+        use chunk_processor::format_output;
+
+        let mut executed = Vec::with_capacity(planned.len());
+        let mut broken_languages: HashSet<String> = HashSet::new();
+        let mut constant_objects: HashMap<String, (String, String)> = HashMap::new();
+
+        for pn in planned {
+            let is_chunk = matches!(&pn.node, ExecutableNode::Chunk(_));
+            let source_line = match &pn.node {
+                ExecutableNode::Chunk(c) => (c.range.start.line + 1) as u32,
+                ExecutableNode::InlineExpr(_) => 0,
+            };
+
+            // Determine effective execution state for this node.
+            let state = if broken_languages.contains(&pn.lang) {
+                ChunkExecutionState::Inert
+            } else {
+                ChunkExecutionState::Ready
+            };
+
+            let (typst_content, errored) = if matches!(state, ChunkExecutionState::Inert) {
+                // Language is broken — render as inert (no execution).
+                (inert_output(&pn, backend, &self.config), false)
+            } else {
+                match pn.need {
+                    ExecutionNeed::CacheHit(ref output) => {
+                        let data = pn.chunk_data.as_ref().unwrap();
+                        info!("  ✓ {} [cached]", data.name);
+                        if let Some(error) = &output.error {
+                            broken_languages.insert(pn.lang.clone());
+                            (
+                                format_error_block_for_node(&pn.node, &pn.lang, &error.to_string()),
+                                true,
+                            )
+                        } else {
+                            let chunk = match &pn.node {
+                                ExecutableNode::Chunk(c) => c,
+                                _ => unreachable!(),
+                            };
+                            (
+                                format_output(
+                                    backend,
+                                    chunk,
+                                    &data.merged_codly_options,
+                                    &data.resolved_options,
+                                    output,
+                                    &state,
+                                ),
+                                false,
+                            )
+                        }
+                    }
+
+                    ExecutionNeed::CacheHitInline(ref result) => {
+                        info!("  ✓ [cached inline]");
+                        (result.clone(), false)
+                    }
+
+                    ExecutionNeed::Skip => {
+                        // eval = false: format with empty output.
+                        (skip_output(&pn, backend, &state), false)
+                    }
+
+                    ExecutionNeed::MustExecute => {
+                        match self.run_node(&pn, cache, snapshot_manager) {
+                            Ok(output) => {
+                                if let Some(error) = &output.error {
+                                    broken_languages.insert(pn.lang.clone());
+                                    (
+                                        format_error_block_for_node(
+                                            &pn.node,
+                                            &pn.lang,
+                                            &error.to_string(),
+                                        ),
+                                        true,
+                                    )
+                                } else {
+                                    // Register constants if declared.
+                                    if let ExecutableNode::Chunk(chunk) = &pn.node
+                                        && !chunk.options.constant.is_empty()
+                                    {
+                                        register_constant_objects(
+                                            chunk,
+                                            &mut self.executor_manager,
+                                            cache,
+                                            &self.project_root,
+                                            &mut constant_objects,
+                                        )?;
+                                    }
+                                    snapshot_manager.update_after_node(
+                                        &pn.lang,
+                                        &pn.hash,
+                                        &pn.previous_hash,
+                                        &mut self.executor_manager,
+                                        cache,
+                                        &self.project_root,
+                                    )?;
+                                    let content =
+                                        format_executed_node(&pn, &output, backend, &state);
+                                    (content, false)
+                                }
+                            }
+                            Err(e) => {
+                                broken_languages.insert(pn.lang.clone());
+                                (
+                                    format_error_block_for_node(&pn.node, &pn.lang, &e.to_string()),
+                                    true,
+                                )
+                            }
+                        }
+                    }
+                }
+            };
+
+            // For non-error, non-inert, non-MustExecute nodes: update snapshot state.
+            if !errored && !matches!(state, ChunkExecutionState::Inert) {
+                match &pn.need {
+                    ExecutionNeed::CacheHit(_)
+                    | ExecutionNeed::CacheHitInline(_)
+                    | ExecutionNeed::Skip => {
+                        snapshot_manager.update_after_node(
+                            &pn.lang,
+                            &pn.hash,
+                            &pn.previous_hash,
+                            &mut self.executor_manager,
+                            cache,
+                            &self.project_root,
+                        )?;
+                    }
+                    ExecutionNeed::MustExecute => {}
+                }
+            }
+
+            executed.push(ExecutedNode {
+                lang: pn.lang,
+                hash: pn.hash,
+                source_start: pn.source_start,
+                source_end: pn.source_end,
+                typst_content,
+                is_chunk,
+                source_line,
+                errored,
+            });
+        }
+
+        Ok((executed, constant_objects))
+    }
+
+    /// Restore session snapshot if needed, then execute the node's code.
+    ///
+    /// Returns the raw `ExecutionOutput` without formatting.  Only called for
+    /// `ExecutionNeed::MustExecute` nodes.
+    fn run_node(
+        &mut self,
+        pn: &PlannedNode<'_>,
+        cache: &mut Cache,
+        snapshot_manager: &mut SnapshotManager,
+    ) -> Result<ExecutionOutput> {
+        match &pn.node {
+            ExecutableNode::Chunk(chunk) => {
+                let data = pn.chunk_data.as_ref().unwrap();
+                info!("  ⚙️ {} [executing]", data.name);
+
+                // Lazy state restoration.
+                {
+                    let sm = &mut *snapshot_manager;
+                    let em = &mut self.executor_manager;
+                    let c = &*cache;
+                    let pr = self.project_root.as_path();
+                    sm.restore_if_needed(&pn.lang, &pn.previous_hash, em, c, pr)?;
+                }
+
+                let graphics_opts = GraphicsOptions {
+                    width: data.resolved_options.fig_width,
+                    height: data.resolved_options.fig_height,
+                    dpi: data.resolved_options.dpi,
+                    format: data.resolved_options.fig_format.as_str().to_string(),
+                };
+
+                let output = {
+                    let exec = self.executor_manager.get_executor(&pn.lang)?;
+                    exec.execute(&chunk.code, &graphics_opts)?
+                };
+
+                if data.resolved_options.cache {
+                    if let Some(error) = &output.error {
+                        cache.save_error(
+                            chunk.index,
+                            chunk.name.clone(),
+                            chunk.language.clone(),
+                            pn.hash.clone(),
+                            error.clone(),
+                            data.chunk_options.depends.clone(),
+                        )?;
+                    } else {
+                        cache.save_result(
+                            chunk.index,
+                            chunk.name.clone(),
+                            chunk.language.clone(),
+                            pn.hash.clone(),
+                            &output,
+                            data.chunk_options.depends.clone(),
+                        )?;
+                    }
+                }
+
+                Ok(output)
+            }
+            ExecutableNode::InlineExpr(inline) => {
+                info!("  ⚙️ `{{{}}} {}` [executing]", inline.language, inline.code);
+                let result = self
+                    .executor_manager
+                    .get_executor(&pn.lang)?
+                    .execute_inline(&inline.code)
+                    .context(format!(
+                        "Failed to execute inline expression: `{{{}}} {}`",
+                        inline.language, inline.code
+                    ))?;
+
+                let resolved = inline.options.resolve();
+                let final_result = match resolved.show {
+                    crate::parser::Show::Output | crate::parser::Show::Both => result,
+                    crate::parser::Show::Code | crate::parser::Show::None => String::new(),
+                };
+
+                cache.save_inline_result(pn.hash.clone(), &final_result)?;
+
+                Ok(ExecutionOutput {
+                    result: ExecutionResult::Text(final_result),
+                    warnings: vec![],
+                    error: None,
+                })
+            }
+        }
     }
 }
 
-/// Formats the Typst error block shown when a node fails to execute.
-fn format_error_block(node: &ExecutableNode<'_>, lang: &str, error_msg: &str) -> String {
+// ---------------------------------------------------------------------------
+// Pass 3 — Assemble
+// ---------------------------------------------------------------------------
+
+/// Interleave formatted node outputs with the verbatim source text between nodes.
+fn assemble_pass(executed: &[ExecutedNode], source: &str, source_file: &str) -> String {
+    let mut output = String::new();
+    let mut last_pos = 0;
+
+    for node in executed {
+        if node.source_start > last_pos {
+            output.push_str(&source[last_pos..node.source_start]);
+        }
+
+        if node.is_chunk {
+            output.push_str(&format!(
+                "// #KNOT-SYNC source={} line={}\n",
+                source_file, node.source_line,
+            ));
+            output.push_str(&node.typst_content);
+            if !node.typst_content.is_empty() && !node.typst_content.ends_with('\n') {
+                output.push('\n');
+            }
+            output.push_str("// END-KNOT-SYNC\n");
+        } else {
+            output.push_str(&node.typst_content);
+        }
+
+        // Advance past the closing fence's trailing newline for chunks.
+        last_pos = node.source_end;
+        if node.is_chunk && last_pos < source.len() && source.as_bytes()[last_pos] == b'\n' {
+            last_pos += 1;
+        }
+    }
+
+    if last_pos < source.len() {
+        output.push_str(&source[last_pos..]);
+    }
+
+    output
+}
+
+// ---------------------------------------------------------------------------
+// Per-node output helpers (called from execute_pass)
+// ---------------------------------------------------------------------------
+
+/// Format the output of a freshly executed node.
+fn format_executed_node(
+    pn: &PlannedNode<'_>,
+    output: &ExecutionOutput,
+    backend: &TypstBackend,
+    state: &ChunkExecutionState,
+) -> String {
+    use chunk_processor::format_output;
+    match &pn.node {
+        ExecutableNode::Chunk(chunk) => {
+            let data = pn.chunk_data.as_ref().unwrap();
+            format_output(
+                backend,
+                chunk,
+                &data.merged_codly_options,
+                &data.resolved_options,
+                output,
+                state,
+            )
+        }
+        ExecutableNode::InlineExpr(_) => match &output.result {
+            ExecutionResult::Text(s) => s.clone(),
+            _ => String::new(),
+        },
+    }
+}
+
+/// Format a node that is in the Inert state (upstream error, no execution).
+fn inert_output(pn: &PlannedNode<'_>, backend: &TypstBackend, config: &Config) -> String {
+    use chunk_processor::{format_output, resolve_options};
+    match &pn.node {
+        ExecutableNode::Chunk(chunk) => {
+            let (_, inert_resolved, inert_codly) =
+                resolve_options(chunk, config, &ChunkExecutionState::Inert);
+            let empty = ExecutionOutput {
+                result: ExecutionResult::Text(String::new()),
+                warnings: vec![],
+                error: None,
+            };
+            format_output(
+                backend,
+                chunk,
+                &inert_codly,
+                &inert_resolved,
+                &empty,
+                &ChunkExecutionState::Inert,
+            )
+        }
+        ExecutableNode::InlineExpr(inline) => {
+            format!(
+                "#text(fill: luma(150))[`{{{} {}}}`]",
+                inline.language, inline.code
+            )
+        }
+    }
+}
+
+/// Format a node with eval = false (no execution, empty result).
+fn skip_output(
+    pn: &PlannedNode<'_>,
+    backend: &TypstBackend,
+    state: &ChunkExecutionState,
+) -> String {
+    use chunk_processor::format_output;
+    match &pn.node {
+        ExecutableNode::Chunk(chunk) => {
+            let data = pn.chunk_data.as_ref().unwrap();
+            let empty = ExecutionOutput {
+                result: ExecutionResult::Text(String::new()),
+                warnings: vec![],
+                error: None,
+            };
+            format_output(
+                backend,
+                chunk,
+                &data.merged_codly_options,
+                &data.resolved_options,
+                &empty,
+                state,
+            )
+        }
+        ExecutableNode::InlineExpr(_) => String::new(),
+    }
+}
+
+/// Format the Typst error block shown when a node fails to execute.
+fn format_error_block_for_node(node: &ExecutableNode<'_>, lang: &str, error_msg: &str) -> String {
     let error_msg = error_msg.replace('"', "\\\"");
     let node_kind = match node {
         ExecutableNode::Chunk(_) => "chunk",
@@ -284,6 +606,29 @@ fn format_error_block(node: &ExecutableNode<'_>, lang: &str, error_msg: &str) ->
 )\n"
     )
 }
+
+// ---------------------------------------------------------------------------
+// Document node helpers
+// ---------------------------------------------------------------------------
+
+/// Collects all executable nodes from the document and sorts them by source position.
+fn build_executable_nodes(doc: &Document) -> Vec<ExecutableNode<'_>> {
+    let mut nodes: Vec<ExecutableNode<'_>> = doc
+        .chunks
+        .iter()
+        .map(ExecutableNode::Chunk)
+        .chain(doc.inline_exprs.iter().map(ExecutableNode::InlineExpr))
+        .collect();
+    nodes.sort_by_key(|node| match node {
+        ExecutableNode::Chunk(c) => c.start_byte,
+        ExecutableNode::InlineExpr(e) => e.start,
+    });
+    nodes
+}
+
+// ---------------------------------------------------------------------------
+// Constant object helpers (unchanged logic, moved here from old compile loop)
+// ---------------------------------------------------------------------------
 
 /// Saves all constant objects declared by a chunk and records them in the tracking map.
 fn register_constant_objects(
@@ -384,4 +729,23 @@ fn verify_constant_objects(
 
     info!("✓ All constant objects verified successfully.");
     Ok(())
+}
+
+#[cfg(test)]
+pub(super) mod test_helpers {
+    use crate::cache::Cache;
+    use crate::executors::ExecutorManager;
+    use tempfile::TempDir;
+
+    pub fn setup_test_cache() -> (TempDir, Cache) {
+        let temp_dir = TempDir::new().unwrap();
+        let cache = Cache::new(temp_dir.path().to_path_buf()).unwrap();
+        (temp_dir, cache)
+    }
+
+    pub fn setup_test_manager() -> (TempDir, ExecutorManager) {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = ExecutorManager::new(temp_dir.path().to_path_buf());
+        (temp_dir, manager)
+    }
 }

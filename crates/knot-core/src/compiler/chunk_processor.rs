@@ -229,7 +229,7 @@ impl<'a> ChunkProcessor<'a> {
 // ---------------------------------------------------------------------------
 
 /// Applies config layering (global → language → error) to produce resolved options and merged codly options.
-fn resolve_options(
+pub(crate) fn resolve_options(
     chunk: &Chunk,
     config: &Config,
     state: &ChunkExecutionState,
@@ -258,7 +258,7 @@ fn resolve_options(
 }
 
 /// Computes the chunk hash, incorporating deps and constant-object hashes.
-fn compute_hash(
+pub(crate) fn compute_hash(
     code: &str,
     chunk_options: &ChunkOptions,
     previous_hash: &str,
@@ -283,7 +283,7 @@ fn compute_hash(
 }
 
 /// Clones the chunk with merged codly options and delegates to the backend formatter.
-fn format_output(
+pub(crate) fn format_output(
     backend: &TypstBackend,
     chunk: &Chunk,
     merged_codly_options: &HashMap<String, String>,
