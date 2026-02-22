@@ -10,10 +10,11 @@
 
 use crate::backend::{Backend, TypstBackend};
 use crate::cache::{Cache, hash_dependencies, hashing};
+use crate::compiler::inline_processor;
 use crate::compiler::snapshot_manager::SnapshotManager;
 use crate::config::Config;
 use crate::executors::{ExecutionOutput, ExecutionResult, ExecutorManager, GraphicsOptions};
-use crate::parser::{Chunk, ChunkOptions, ResolvedChunkOptions};
+use crate::parser::{Chunk, ChunkOptions, InlineExpr, ResolvedChunkOptions};
 use anyhow::Result;
 use log::info;
 use sha2::{Digest, Sha256};
@@ -33,87 +34,198 @@ pub enum ChunkExecutionState {
     Pending,
 }
 
-/// Immutable context shared across chunk processing calls.
-pub struct ChunkContext<'a> {
-    pub previous_hash: &'a str,
-    pub config: &'a Config,
-    pub state: ChunkExecutionState,
-    pub backend: &'a TypstBackend,
-    pub project_root: &'a Path,
+/// Per-chunk immutable data forwarded to `try_execute`.
+struct ExecutionRequest<'a> {
+    chunk: &'a Chunk,
+    chunk_hash: &'a str,
+    chunk_name: &'a str,
+    previous_hash: &'a str,
+    resolved_options: &'a ResolvedChunkOptions,
+    chunk_options: &'a ChunkOptions,
+    state: &'a ChunkExecutionState,
 }
 
-pub fn process_chunk(
-    chunk: &Chunk,
-    executor_manager: &mut ExecutorManager,
-    cache: &mut Cache,
-    snapshot_manager: &mut SnapshotManager,
-    ctx: &ChunkContext<'_>,
-) -> Result<(String, String)> {
-    let (chunk_options, resolved_options, merged_codly_options) =
-        resolve_options(chunk, ctx.config, &ctx.state);
+/// Stateful processor that handles chunk and inline expression execution for one compilation pass.
+///
+/// Holds mutable references to the three resources that change during compilation
+/// (`executor_manager`, `cache`, `snapshot_manager`) and immutable references to the
+/// configuration that stays fixed (`config`, `backend`, `project_root`).
+pub struct ChunkProcessor<'a> {
+    executor_manager: &'a mut ExecutorManager,
+    cache: &'a mut Cache,
+    snapshot_manager: &'a mut SnapshotManager,
+    config: &'a Config,
+    backend: &'a TypstBackend,
+    project_root: &'a Path,
+}
 
-    let chunk_name = chunk
-        .name
-        .as_deref()
-        .map(String::from)
-        .unwrap_or_else(|| format!("chunk-{}", chunk.index));
+impl<'a> ChunkProcessor<'a> {
+    pub fn new(
+        executor_manager: &'a mut ExecutorManager,
+        cache: &'a mut Cache,
+        snapshot_manager: &'a mut SnapshotManager,
+        config: &'a Config,
+        backend: &'a TypstBackend,
+        project_root: &'a Path,
+    ) -> Self {
+        Self {
+            executor_manager,
+            cache,
+            snapshot_manager,
+            config,
+            backend,
+            project_root,
+        }
+    }
 
-    let chunk_hash = compute_hash(
-        &chunk.code,
-        &chunk_options,
-        ctx.previous_hash,
-        executor_manager,
-        &chunk.language,
-    )?;
+    /// Processes a code chunk: resolves options, checks cache, executes if needed, formats output.
+    ///
+    /// Returns `(typst_output, chunk_hash)`.
+    pub fn process_chunk(
+        &mut self,
+        chunk: &Chunk,
+        state: ChunkExecutionState,
+        previous_hash: &str,
+    ) -> Result<(String, String)> {
+        let (chunk_options, resolved_options, merged_codly_options) =
+            resolve_options(chunk, self.config, &state);
 
-    if resolved_options.cache && cache.has_cached_result(&chunk_hash) {
-        info!("  ✓ {} [cached]", chunk_name);
-        let execution_output = cache.get_cached_result(&chunk_hash)?;
+        let chunk_name = chunk
+            .name
+            .as_deref()
+            .map(String::from)
+            .unwrap_or_else(|| format!("chunk-{}", chunk.index));
+
+        let chunk_hash = compute_hash(
+            &chunk.code,
+            &chunk_options,
+            previous_hash,
+            self.executor_manager,
+            &chunk.language,
+        )?;
+
+        if resolved_options.cache && self.cache.has_cached_result(&chunk_hash) {
+            info!("  ✓ {} [cached]", chunk_name);
+            let execution_output = self.cache.get_cached_result(&chunk_hash)?;
+            if let Some(error) = &execution_output.error {
+                return Err(anyhow::anyhow!("{}", error));
+            }
+            let output = format_output(
+                self.backend,
+                chunk,
+                &merged_codly_options,
+                &resolved_options,
+                &execution_output,
+                &state,
+            );
+            return Ok((output, chunk_hash));
+        }
+
+        let req = ExecutionRequest {
+            chunk,
+            chunk_hash: &chunk_hash,
+            chunk_name: &chunk_name,
+            previous_hash,
+            resolved_options: &resolved_options,
+            chunk_options: &chunk_options,
+            state: &state,
+        };
+        let execution_output = self.try_execute(&req)?;
+
         if let Some(error) = &execution_output.error {
             return Err(anyhow::anyhow!("{}", error));
         }
+
         let output = format_output(
-            ctx.backend,
+            self.backend,
             chunk,
             &merged_codly_options,
             &resolved_options,
             &execution_output,
-            &ctx.state,
+            &state,
         );
-        return Ok((output, chunk_hash));
+        Ok((output, chunk_hash))
     }
 
-    let execution_output = try_execute(
-        chunk,
-        executor_manager,
-        cache,
-        snapshot_manager,
-        &resolved_options,
-        &chunk_options,
-        &chunk_hash,
-        ctx.previous_hash,
-        ctx.project_root,
-        &ctx.state,
-        &chunk_name,
-    )?;
-
-    if let Some(error) = &execution_output.error {
-        return Err(anyhow::anyhow!("{}", error));
+    /// Processes an inline expression, delegating to the inline processor.
+    ///
+    /// Returns `(typst_output, inline_hash)`.
+    pub fn process_inline(
+        &mut self,
+        inline_expr: &InlineExpr,
+        previous_hash: &str,
+    ) -> Result<(String, String)> {
+        inline_processor::process_inline_expr(
+            inline_expr,
+            self.executor_manager,
+            self.cache,
+            previous_hash,
+        )
     }
 
-    let output = format_output(
-        ctx.backend,
-        chunk,
-        &merged_codly_options,
-        &resolved_options,
-        &execution_output,
-        &ctx.state,
-    );
-    Ok((output, chunk_hash))
+    /// Executes the chunk (or produces empty output if inert/eval=false), then caches the result.
+    fn try_execute(&mut self, req: &ExecutionRequest<'_>) -> Result<ExecutionOutput> {
+        if matches!(req.state, ChunkExecutionState::Inert) || !req.resolved_options.eval {
+            return Ok(ExecutionOutput {
+                result: ExecutionResult::Text(String::new()),
+                warnings: vec![],
+                error: None,
+            });
+        }
+
+        info!("  ⚙️ {} [executing]", req.chunk_name);
+
+        // Lazy state restoration: only restore when we actually need to execute.
+        // Explicit reborrows let the borrow checker split the struct's &mut fields.
+        {
+            let sm = &mut *self.snapshot_manager;
+            let em = &mut *self.executor_manager;
+            let c = &*self.cache;
+            let pr = self.project_root;
+            sm.restore_if_needed(&req.chunk.language, req.previous_hash, em, c, pr)?;
+        }
+
+        let graphics_opts = GraphicsOptions {
+            width: req.resolved_options.fig_width,
+            height: req.resolved_options.fig_height,
+            dpi: req.resolved_options.dpi,
+            format: req.resolved_options.fig_format.as_str().to_string(),
+        };
+
+        // Scope exec so its borrow on executor_manager ends before we touch cache.
+        let output = {
+            let exec = self.executor_manager.get_executor(&req.chunk.language)?;
+            exec.execute(&req.chunk.code, &graphics_opts)?
+        };
+
+        if req.resolved_options.cache {
+            if let Some(error) = &output.error {
+                self.cache.save_error(
+                    req.chunk.index,
+                    req.chunk.name.clone(),
+                    req.chunk.language.clone(),
+                    req.chunk_hash.to_string(),
+                    error.clone(),
+                    req.chunk_options.depends.clone(),
+                )?;
+            } else {
+                self.cache.save_result(
+                    req.chunk.index,
+                    req.chunk.name.clone(),
+                    req.chunk.language.clone(),
+                    req.chunk_hash.to_string(),
+                    &output,
+                    req.chunk_options.depends.clone(),
+                )?;
+            }
+        }
+
+        Ok(output)
+    }
 }
 
 // ---------------------------------------------------------------------------
-// Private helpers for process_chunk()
+// Free functions (pure computations, no mutable resource access)
 // ---------------------------------------------------------------------------
 
 /// Applies config layering (global → language → error) to produce resolved options and merged codly options.
@@ -168,75 +280,6 @@ fn compute_hash(
         &deps_hash,
         &constants_hash,
     ))
-}
-
-/// Executes the chunk (or produces an empty result if inert/eval=false), then caches the result.
-#[allow(clippy::too_many_arguments)]
-fn try_execute(
-    chunk: &Chunk,
-    executor_manager: &mut ExecutorManager,
-    cache: &mut Cache,
-    snapshot_manager: &mut SnapshotManager,
-    resolved_options: &ResolvedChunkOptions,
-    chunk_options: &ChunkOptions,
-    chunk_hash: &str,
-    previous_hash: &str,
-    project_root: &Path,
-    state: &ChunkExecutionState,
-    chunk_name: &str,
-) -> Result<ExecutionOutput> {
-    if matches!(state, ChunkExecutionState::Inert) || !resolved_options.eval {
-        return Ok(ExecutionOutput {
-            result: ExecutionResult::Text(String::new()),
-            warnings: vec![],
-            error: None,
-        });
-    }
-
-    info!("  ⚙️ {} [executing]", chunk_name);
-
-    // Lazy state restoration: only when we actually execute
-    snapshot_manager.restore_if_needed(
-        &chunk.language,
-        previous_hash,
-        executor_manager,
-        cache,
-        project_root,
-    )?;
-
-    let graphics_opts = GraphicsOptions {
-        width: resolved_options.fig_width,
-        height: resolved_options.fig_height,
-        dpi: resolved_options.dpi,
-        format: resolved_options.fig_format.as_str().to_string(),
-    };
-
-    let exec = executor_manager.get_executor(&chunk.language)?;
-    let output = exec.execute(&chunk.code, &graphics_opts)?;
-
-    if resolved_options.cache {
-        if let Some(error) = &output.error {
-            cache.save_error(
-                chunk.index,
-                chunk.name.clone(),
-                chunk.language.clone(),
-                chunk_hash.to_string(),
-                error.clone(),
-                chunk_options.depends.clone(),
-            )?;
-        } else {
-            cache.save_result(
-                chunk.index,
-                chunk.name.clone(),
-                chunk.language.clone(),
-                chunk_hash.to_string(),
-                &output,
-                chunk_options.depends.clone(),
-            )?;
-        }
-    }
-
-    Ok(output)
 }
 
 /// Clones the chunk with merged codly options and delegates to the backend formatter.
@@ -355,26 +398,29 @@ mod tests {
         crate::config::Config::default()
     }
 
+    /// Convenience helper: build a `ChunkProcessor` rooted at `.` for tests.
+    fn make_processor<'a>(
+        manager: &'a mut ExecutorManager,
+        cache: &'a mut Cache,
+        sm: &'a mut SnapshotManager,
+        config: &'a crate::config::Config,
+        backend: &'a TypstBackend,
+    ) -> ChunkProcessor<'a> {
+        ChunkProcessor::new(manager, cache, sm, config, backend, Path::new("."))
+    }
+
     #[test]
     fn test_process_chunk_eval_false() {
         let chunk = create_test_chunk("r", "x <- 1", None, false, true);
         let (_temp_dir_cache, mut cache) = setup_test_cache();
         let (_temp_dir_mgr, mut manager) = setup_test_manager();
+        let mut sm = SnapshotManager::new();
+        let config = setup_test_config();
+        let backend = crate::backend::TypstBackend::new();
 
-        let (output, _hash) = process_chunk(
-            &chunk,
-            &mut manager,
-            &mut cache,
-            &mut SnapshotManager::new(),
-            &ChunkContext {
-                previous_hash: "prev_hash",
-                config: &setup_test_config(),
-                state: ChunkExecutionState::Ready,
-                backend: &crate::backend::TypstBackend::new(),
-                project_root: Path::new("."),
-            },
-        )
-        .unwrap();
+        let (output, _hash) = make_processor(&mut manager, &mut cache, &mut sm, &config, &backend)
+            .process_chunk(&chunk, ChunkExecutionState::Ready, "prev_hash")
+            .unwrap();
 
         // With eval=false, should produce output but not execute
         assert!(output.contains("#code-chunk("));
@@ -386,21 +432,14 @@ mod tests {
         let chunk = create_test_chunk("r", "x <- 1", None, false, false);
         let (_temp_dir_cache, mut cache) = setup_test_cache();
         let (_temp_dir_mgr, mut manager) = setup_test_manager();
+        let mut sm = SnapshotManager::new();
+        let config = setup_test_config();
+        let backend = crate::backend::TypstBackend::new();
 
-        let (_output, _hash) = process_chunk(
-            &chunk,
-            &mut manager,
-            &mut cache,
-            &mut SnapshotManager::new(),
-            &ChunkContext {
-                previous_hash: "prev_hash",
-                config: &setup_test_config(),
-                state: ChunkExecutionState::Ready,
-                backend: &crate::backend::TypstBackend::new(),
-                project_root: Path::new("."),
-            },
-        )
-        .unwrap();
+        // Should not panic
+        make_processor(&mut manager, &mut cache, &mut sm, &config, &backend)
+            .process_chunk(&chunk, ChunkExecutionState::Ready, "prev_hash")
+            .unwrap();
     }
 
     #[test]
@@ -408,21 +447,13 @@ mod tests {
         let chunk = create_test_chunk("r", "x <- 1", Some("my-chunk".to_string()), false, false);
         let (_temp_dir_cache, mut cache) = setup_test_cache();
         let (_temp_dir_mgr, mut manager) = setup_test_manager();
+        let mut sm = SnapshotManager::new();
+        let config = setup_test_config();
+        let backend = crate::backend::TypstBackend::new();
 
-        let (output, _hash) = process_chunk(
-            &chunk,
-            &mut manager,
-            &mut cache,
-            &mut SnapshotManager::new(),
-            &ChunkContext {
-                previous_hash: "prev_hash",
-                config: &setup_test_config(),
-                state: ChunkExecutionState::Ready,
-                backend: &crate::backend::TypstBackend::new(),
-                project_root: Path::new("."),
-            },
-        )
-        .unwrap();
+        let (output, _hash) = make_processor(&mut manager, &mut cache, &mut sm, &config, &backend)
+            .process_chunk(&chunk, ChunkExecutionState::Ready, "prev_hash")
+            .unwrap();
 
         // With name, should include it in output
         assert!(output.contains("my-chunk"));
@@ -434,37 +465,21 @@ mod tests {
         let chunk = create_test_chunk("r", "x <- 1", None, false, false);
         let (_temp_dir_cache, mut cache) = setup_test_cache();
         let (_temp_dir_mgr, mut manager) = setup_test_manager();
+        let config = setup_test_config();
+        let backend = crate::backend::TypstBackend::new();
 
-        let (_output1, hash1) = process_chunk(
-            &chunk,
-            &mut manager,
-            &mut cache,
-            &mut SnapshotManager::new(),
-            &ChunkContext {
-                previous_hash: "prev_hash",
-                config: &setup_test_config(),
-                state: ChunkExecutionState::Ready,
-                backend: &crate::backend::TypstBackend::new(),
-                project_root: Path::new("."),
-            },
-        )
-        .unwrap();
+        let mut sm1 = SnapshotManager::new();
+        let (_output1, hash1) =
+            make_processor(&mut manager, &mut cache, &mut sm1, &config, &backend)
+                .process_chunk(&chunk, ChunkExecutionState::Ready, "prev_hash")
+                .unwrap();
 
         // Process same chunk again with same previous_hash
-        let (_output2, hash2) = process_chunk(
-            &chunk,
-            &mut manager,
-            &mut cache,
-            &mut SnapshotManager::new(),
-            &ChunkContext {
-                previous_hash: "prev_hash",
-                config: &setup_test_config(),
-                state: ChunkExecutionState::Ready,
-                backend: &crate::backend::TypstBackend::new(),
-                project_root: Path::new("."),
-            },
-        )
-        .unwrap();
+        let mut sm2 = SnapshotManager::new();
+        let (_output2, hash2) =
+            make_processor(&mut manager, &mut cache, &mut sm2, &config, &backend)
+                .process_chunk(&chunk, ChunkExecutionState::Ready, "prev_hash")
+                .unwrap();
 
         // Should produce same hash
         assert_eq!(hash1, hash2);
@@ -477,35 +492,20 @@ mod tests {
 
         let (_temp_dir_cache, mut cache) = setup_test_cache();
         let (_temp_dir_mgr, mut manager) = setup_test_manager();
+        let config = setup_test_config();
+        let backend = crate::backend::TypstBackend::new();
 
-        let (_output1, hash1) = process_chunk(
-            &chunk1,
-            &mut manager,
-            &mut cache,
-            &mut SnapshotManager::new(),
-            &ChunkContext {
-                previous_hash: "prev_hash",
-                config: &setup_test_config(),
-                state: ChunkExecutionState::Ready,
-                backend: &crate::backend::TypstBackend::new(),
-                project_root: Path::new("."),
-            },
-        )
-        .unwrap();
-        let (_output2, hash2) = process_chunk(
-            &chunk2,
-            &mut manager,
-            &mut cache,
-            &mut SnapshotManager::new(),
-            &ChunkContext {
-                previous_hash: "prev_hash",
-                config: &setup_test_config(),
-                state: ChunkExecutionState::Ready,
-                backend: &crate::backend::TypstBackend::new(),
-                project_root: Path::new("."),
-            },
-        )
-        .unwrap();
+        let mut sm1 = SnapshotManager::new();
+        let (_output1, hash1) =
+            make_processor(&mut manager, &mut cache, &mut sm1, &config, &backend)
+                .process_chunk(&chunk1, ChunkExecutionState::Ready, "prev_hash")
+                .unwrap();
+
+        let mut sm2 = SnapshotManager::new();
+        let (_output2, hash2) =
+            make_processor(&mut manager, &mut cache, &mut sm2, &config, &backend)
+                .process_chunk(&chunk2, ChunkExecutionState::Ready, "prev_hash")
+                .unwrap();
 
         // Different code should produce different hash
         assert_ne!(hash1, hash2);
@@ -516,35 +516,20 @@ mod tests {
         let chunk = create_test_chunk("r", "x <- 1", None, false, false);
         let (_temp_dir_cache, mut cache) = setup_test_cache();
         let (_temp_dir_mgr, mut manager) = setup_test_manager();
+        let config = setup_test_config();
+        let backend = crate::backend::TypstBackend::new();
 
-        let (_output1, hash1) = process_chunk(
-            &chunk,
-            &mut manager,
-            &mut cache,
-            &mut SnapshotManager::new(),
-            &ChunkContext {
-                previous_hash: "prev_hash_1",
-                config: &setup_test_config(),
-                state: ChunkExecutionState::Ready,
-                backend: &crate::backend::TypstBackend::new(),
-                project_root: Path::new("."),
-            },
-        )
-        .unwrap();
-        let (_output2, hash2) = process_chunk(
-            &chunk,
-            &mut manager,
-            &mut cache,
-            &mut SnapshotManager::new(),
-            &ChunkContext {
-                previous_hash: "prev_hash_2",
-                config: &setup_test_config(),
-                state: ChunkExecutionState::Ready,
-                backend: &crate::backend::TypstBackend::new(),
-                project_root: Path::new("."),
-            },
-        )
-        .unwrap();
+        let mut sm1 = SnapshotManager::new();
+        let (_output1, hash1) =
+            make_processor(&mut manager, &mut cache, &mut sm1, &config, &backend)
+                .process_chunk(&chunk, ChunkExecutionState::Ready, "prev_hash_1")
+                .unwrap();
+
+        let mut sm2 = SnapshotManager::new();
+        let (_output2, hash2) =
+            make_processor(&mut manager, &mut cache, &mut sm2, &config, &backend)
+                .process_chunk(&chunk, ChunkExecutionState::Ready, "prev_hash_2")
+                .unwrap();
 
         // Different previous_hash should produce different hash
         assert_ne!(hash1, hash2);
@@ -555,20 +540,12 @@ mod tests {
         let chunk = create_test_chunk("unsupported_lang", "print(42)", None, true, false);
         let (_temp_dir_cache, mut cache) = setup_test_cache();
         let (_temp_dir_mgr, mut manager) = setup_test_manager();
+        let mut sm = SnapshotManager::new();
+        let config = setup_test_config();
+        let backend = crate::backend::TypstBackend::new();
 
-        let result = process_chunk(
-            &chunk,
-            &mut manager,
-            &mut cache,
-            &mut SnapshotManager::new(),
-            &ChunkContext {
-                previous_hash: "prev_hash",
-                config: &setup_test_config(),
-                state: ChunkExecutionState::Ready,
-                backend: &crate::backend::TypstBackend::new(),
-                project_root: Path::new("."),
-            },
-        );
+        let result = make_processor(&mut manager, &mut cache, &mut sm, &config, &backend)
+            .process_chunk(&chunk, ChunkExecutionState::Ready, "prev_hash");
 
         // Should fail with unsupported language
         assert!(result.is_err());
@@ -600,41 +577,24 @@ mod tests {
 
         let (_temp_dir_cache, mut cache) = setup_test_cache();
         let (_temp_dir_mgr, mut manager) = setup_test_manager();
+        let config = setup_test_config();
+        let backend = crate::backend::TypstBackend::new();
 
-        let (_output, hash) = process_chunk(
-            &chunk,
-            &mut manager,
-            &mut cache,
-            &mut SnapshotManager::new(),
-            &ChunkContext {
-                previous_hash: "prev_hash",
-                config: &setup_test_config(),
-                state: ChunkExecutionState::Ready,
-                backend: &crate::backend::TypstBackend::new(),
-                project_root: Path::new("."),
-            },
-        )
-        .unwrap();
+        let mut sm1 = SnapshotManager::new();
+        let (_output, hash) = make_processor(&mut manager, &mut cache, &mut sm1, &config, &backend)
+            .process_chunk(&chunk, ChunkExecutionState::Ready, "prev_hash")
+            .unwrap();
 
         // Hash should incorporate dependencies
         assert!(!hash.is_empty());
 
         // Changing dependencies should change hash
         chunk.options.depends = vec![dep1.clone(), dep3.clone()];
-        let (_output2, hash2) = process_chunk(
-            &chunk,
-            &mut manager,
-            &mut cache,
-            &mut SnapshotManager::new(),
-            &ChunkContext {
-                previous_hash: "prev_hash",
-                config: &setup_test_config(),
-                state: ChunkExecutionState::Ready,
-                backend: &crate::backend::TypstBackend::new(),
-                project_root: Path::new("."),
-            },
-        )
-        .unwrap();
+        let mut sm2 = SnapshotManager::new();
+        let (_output2, hash2) =
+            make_processor(&mut manager, &mut cache, &mut sm2, &config, &backend)
+                .process_chunk(&chunk, ChunkExecutionState::Ready, "prev_hash")
+                .unwrap();
 
         assert_ne!(hash, hash2);
     }
@@ -644,21 +604,13 @@ mod tests {
         let chunk = create_test_chunk("r", "", None, false, false);
         let (_temp_dir_cache, mut cache) = setup_test_cache();
         let (_temp_dir_mgr, mut manager) = setup_test_manager();
+        let mut sm = SnapshotManager::new();
+        let config = setup_test_config();
+        let backend = crate::backend::TypstBackend::new();
 
-        let (output, _hash) = process_chunk(
-            &chunk,
-            &mut manager,
-            &mut cache,
-            &mut SnapshotManager::new(),
-            &ChunkContext {
-                previous_hash: "prev_hash",
-                config: &setup_test_config(),
-                state: ChunkExecutionState::Ready,
-                backend: &crate::backend::TypstBackend::new(),
-                project_root: Path::new("."),
-            },
-        )
-        .unwrap();
+        let (output, _hash) = make_processor(&mut manager, &mut cache, &mut sm, &config, &backend)
+            .process_chunk(&chunk, ChunkExecutionState::Ready, "prev_hash")
+            .unwrap();
 
         // Should handle empty code gracefully
         assert!(output.contains("#code-chunk("));
@@ -669,21 +621,13 @@ mod tests {
         let chunk = create_test_chunk("r", "x <- 1", None, false, true);
         let (_temp_dir_cache, mut cache) = setup_test_cache();
         let (_temp_dir_mgr, mut manager) = setup_test_manager();
+        let mut sm = SnapshotManager::new();
+        let config = setup_test_config();
+        let backend = crate::backend::TypstBackend::new();
 
-        let (output, _hash) = process_chunk(
-            &chunk,
-            &mut manager,
-            &mut cache,
-            &mut SnapshotManager::new(),
-            &ChunkContext {
-                previous_hash: "prev_hash",
-                config: &setup_test_config(),
-                state: ChunkExecutionState::Ready,
-                backend: &crate::backend::TypstBackend::new(),
-                project_root: Path::new("."),
-            },
-        )
-        .unwrap();
+        let (output, _hash) = make_processor(&mut manager, &mut cache, &mut sm, &config, &backend)
+            .process_chunk(&chunk, ChunkExecutionState::Ready, "prev_hash")
+            .unwrap();
 
         // Output should indicate language
         assert!(output.contains("lang: \"r\""));
@@ -738,21 +682,12 @@ mod tests {
             }),
             ..Default::default()
         };
+        let backend = crate::backend::TypstBackend::new();
+        let mut sm = SnapshotManager::new();
 
-        let (output, _hash) = process_chunk(
-            &chunk,
-            &mut manager,
-            &mut cache,
-            &mut SnapshotManager::new(),
-            &ChunkContext {
-                previous_hash: "prev_hash",
-                config: &config,
-                state: ChunkExecutionState::Ready,
-                backend: &crate::backend::TypstBackend::new(),
-                project_root: Path::new("."),
-            },
-        )
-        .unwrap();
+        let (output, _hash) = make_processor(&mut manager, &mut cache, &mut sm, &config, &backend)
+            .process_chunk(&chunk, ChunkExecutionState::Ready, "prev_hash")
+            .unwrap();
 
         // Verify that language-specific defaults were applied (show: output means code: none)
         assert!(output.contains("code: none"));
@@ -782,21 +717,12 @@ mod tests {
             }),
             ..Default::default()
         };
+        let backend = crate::backend::TypstBackend::new();
+        let mut sm = SnapshotManager::new();
 
-        let (output, _hash) = process_chunk(
-            &chunk,
-            &mut manager,
-            &mut cache,
-            &mut SnapshotManager::new(),
-            &ChunkContext {
-                previous_hash: "prev_hash",
-                config: &config,
-                state: ChunkExecutionState::Ready,
-                backend: &crate::backend::TypstBackend::new(),
-                project_root: Path::new("."),
-            },
-        )
-        .unwrap();
+        let (output, _hash) = make_processor(&mut manager, &mut cache, &mut sm, &config, &backend)
+            .process_chunk(&chunk, ChunkExecutionState::Ready, "prev_hash")
+            .unwrap();
 
         // Chunk-specific option should override everything (show: both means code is shown)
         assert!(output.contains("code: [```python"));
@@ -847,21 +773,12 @@ mod tests {
             // Note: python_chunks is None, so global defaults should be used
             ..Default::default()
         };
+        let backend = crate::backend::TypstBackend::new();
+        let mut sm = SnapshotManager::new();
 
-        let (output, _hash) = process_chunk(
-            &chunk,
-            &mut manager,
-            &mut cache,
-            &mut SnapshotManager::new(),
-            &ChunkContext {
-                previous_hash: "prev_hash",
-                config: &config,
-                state: ChunkExecutionState::Ready,
-                backend: &crate::backend::TypstBackend::new(),
-                project_root: Path::new("."),
-            },
-        )
-        .unwrap();
+        let (output, _hash) = make_processor(&mut manager, &mut cache, &mut sm, &config, &backend)
+            .process_chunk(&chunk, ChunkExecutionState::Ready, "prev_hash")
+            .unwrap();
 
         // Should use global defaults (show: output means code is not shown)
         assert!(output.contains("code: none"));

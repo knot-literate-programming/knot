@@ -11,7 +11,7 @@ pub mod formatters;
 pub mod inline_processor;
 pub mod sync;
 
-pub use chunk_processor::{ChunkContext, ChunkExecutionState};
+pub use chunk_processor::{ChunkExecutionState, ChunkProcessor};
 
 #[cfg(test)]
 pub(super) mod test_helpers {
@@ -119,47 +119,29 @@ impl Compiler {
                 typst_output.push_str(&doc.source[last_pos..node_start]);
             }
 
-            // --- Normal execution path ---
-            let ctx = ChunkContext {
-                previous_hash: &previous_hash,
-                config: &self.config,
-                state: ChunkExecutionState::Ready,
-                backend: &backend,
-                project_root: &self.project_root,
+            let state = if broken_languages.contains(lang) {
+                ChunkExecutionState::Inert
+            } else {
+                ChunkExecutionState::Ready
             };
 
-            // --- Inert path (language previously broken) ---
-            if broken_languages.contains(lang) {
-                let inert_ctx = ChunkContext {
-                    state: ChunkExecutionState::Inert,
-                    ..ctx
-                };
-                let result = render_inert_node(
-                    node,
+            let execution_result = {
+                let mut processor = ChunkProcessor::new(
                     &mut self.executor_manager,
                     &mut cache,
                     &mut snapshot_manager,
-                    &inert_ctx,
-                )?;
-                append_node_output(node, &result, source_file, &mut typst_output);
-                last_pos = advance_last_pos(node, &doc.source, node_end);
-                continue;
-            }
-
-            let execution_result = match node {
-                ExecutableNode::Chunk(chunk) => chunk_processor::process_chunk(
-                    chunk,
-                    &mut self.executor_manager,
-                    &mut cache,
-                    &mut snapshot_manager,
-                    &ctx,
-                ),
-                ExecutableNode::InlineExpr(inline_expr) => inline_processor::process_inline_expr(
-                    inline_expr,
-                    &mut self.executor_manager,
-                    &mut cache,
-                    &previous_hash,
-                ),
+                    &self.config,
+                    &backend,
+                    &self.project_root,
+                );
+                match node {
+                    ExecutableNode::Chunk(chunk) => {
+                        processor.process_chunk(chunk, state, &previous_hash)
+                    }
+                    ExecutableNode::InlineExpr(inline_expr) => {
+                        processor.process_inline(inline_expr, &previous_hash)
+                    }
+                }
             };
 
             let (result_str, node_hash) = match execution_result {
@@ -280,32 +262,6 @@ fn append_node_output(
         output.push_str("// END-KNOT-SYNC\n");
     } else {
         output.push_str(content);
-    }
-}
-
-/// Renders a node for a language that previously errored (inert / greyed-out mode).
-fn render_inert_node(
-    node: &ExecutableNode<'_>,
-    executor_manager: &mut ExecutorManager,
-    cache: &mut Cache,
-    snapshot_manager: &mut SnapshotManager,
-    ctx: &ChunkContext<'_>,
-) -> Result<String> {
-    match node {
-        ExecutableNode::Chunk(chunk) => {
-            let (res, _) = chunk_processor::process_chunk(
-                chunk,
-                executor_manager,
-                cache,
-                snapshot_manager,
-                ctx,
-            )?;
-            Ok(res)
-        }
-        ExecutableNode::InlineExpr(inline_expr) => Ok(format!(
-            "#text(fill: luma(150))[`{{{} {}}}`]",
-            inline_expr.language, inline_expr.code
-        )),
     }
 }
 
