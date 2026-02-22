@@ -265,6 +265,20 @@ impl Compiler {
                         match self.run_node(&pn, cache, snapshot_manager) {
                             Ok(output) => {
                                 if let Some(error) = &output.error {
+                                    // Runtime error: persist to cache, then cascade.
+                                    if let ExecutableNode::Chunk(chunk) = &pn.node {
+                                        let data = pn.chunk_data.as_ref().unwrap();
+                                        if data.resolved_options.cache {
+                                            cache.save_error(
+                                                chunk.index,
+                                                chunk.name.clone(),
+                                                chunk.language.clone(),
+                                                pn.hash.clone(),
+                                                error.clone(),
+                                                data.chunk_options.depends.clone(),
+                                            )?;
+                                        }
+                                    }
                                     broken_languages.insert(pn.lang.clone());
                                     (
                                         format_error_block_for_node(
@@ -287,6 +301,9 @@ impl Compiler {
                                         )?;
                                     }
                                     // Check freeze contract: cascade like a runtime error if violated.
+                                    // IMPORTANT: save_result is only called when the contract passes.
+                                    // A violating chunk must NOT be cached — if it were, the check
+                                    // would be bypassed (CacheHit path) on every subsequent run.
                                     if let Err(e) = check_freeze_contract(
                                         &pn,
                                         &mut self.executor_manager,
@@ -302,6 +319,20 @@ impl Compiler {
                                             true,
                                         )
                                     } else {
+                                        // Contract OK: persist result to cache.
+                                        if let ExecutableNode::Chunk(chunk) = &pn.node {
+                                            let data = pn.chunk_data.as_ref().unwrap();
+                                            if data.resolved_options.cache {
+                                                cache.save_result(
+                                                    chunk.index,
+                                                    chunk.name.clone(),
+                                                    chunk.language.clone(),
+                                                    pn.hash.clone(),
+                                                    &output,
+                                                    data.chunk_options.depends.clone(),
+                                                )?;
+                                            }
+                                        }
                                         snapshot_manager.update_after_node(
                                             &pn.lang,
                                             &pn.hash,
@@ -366,6 +397,12 @@ impl Compiler {
     ///
     /// Returns the raw `ExecutionOutput` without formatting.  Only called for
     /// `ExecutionNeed::MustExecute` nodes.
+    ///
+    /// **Does not persist to cache.** Caching is done by the caller (`execute_pass`)
+    /// so that chunk results are only saved after all post-execution checks (e.g.
+    /// freeze contract) have passed.  Saving before those checks would mark a
+    /// violating chunk as a cache hit, silently bypassing the check on every
+    /// subsequent run.
     fn run_node(
         &mut self,
         pn: &PlannedNode<'_>,
@@ -397,28 +434,6 @@ impl Compiler {
                     let exec = self.executor_manager.get_executor(&pn.lang)?;
                     exec.execute(&chunk.code, &graphics_opts)?
                 };
-
-                if data.resolved_options.cache {
-                    if let Some(error) = &output.error {
-                        cache.save_error(
-                            chunk.index,
-                            chunk.name.clone(),
-                            chunk.language.clone(),
-                            pn.hash.clone(),
-                            error.clone(),
-                            data.chunk_options.depends.clone(),
-                        )?;
-                    } else {
-                        cache.save_result(
-                            chunk.index,
-                            chunk.name.clone(),
-                            chunk.language.clone(),
-                            pn.hash.clone(),
-                            &output,
-                            data.chunk_options.depends.clone(),
-                        )?;
-                    }
-                }
 
                 Ok(output)
             }
