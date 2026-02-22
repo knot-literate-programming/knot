@@ -286,19 +286,34 @@ impl Compiler {
                                             &self.project_root,
                                         )?;
                                     }
-                                    // Check freeze contract: error if any freeze object was mutated.
-                                    check_freeze_contract(&pn, &mut self.executor_manager, cache)?;
-                                    snapshot_manager.update_after_node(
-                                        &pn.lang,
-                                        &pn.hash,
-                                        &pn.previous_hash,
+                                    // Check freeze contract: cascade like a runtime error if violated.
+                                    if let Err(e) = check_freeze_contract(
+                                        &pn,
                                         &mut self.executor_manager,
                                         cache,
-                                        &self.project_root,
-                                    )?;
-                                    let content =
-                                        format_executed_node(&pn, &output, backend, &state);
-                                    (content, false)
+                                    ) {
+                                        broken_languages.insert(pn.lang.clone());
+                                        (
+                                            format_error_block_for_node(
+                                                &pn.node,
+                                                &pn.lang,
+                                                &e.to_string(),
+                                            ),
+                                            true,
+                                        )
+                                    } else {
+                                        snapshot_manager.update_after_node(
+                                            &pn.lang,
+                                            &pn.hash,
+                                            &pn.previous_hash,
+                                            &mut self.executor_manager,
+                                            cache,
+                                            &self.project_root,
+                                        )?;
+                                        let content =
+                                            format_executed_node(&pn, &output, backend, &state);
+                                        (content, false)
+                                    }
                                 }
                             }
                             Err(e) => {
