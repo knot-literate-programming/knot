@@ -749,3 +749,168 @@ pub(super) mod test_helpers {
         (temp_dir, manager)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::ast::Document;
+    use tempfile::TempDir;
+
+    // -----------------------------------------------------------------------
+    // Test helpers
+    // -----------------------------------------------------------------------
+
+    fn make_test_compiler() -> (TempDir, Compiler) {
+        let temp_dir = TempDir::new().unwrap();
+        let knot_file = temp_dir.path().join("test.knot");
+        std::fs::write(&knot_file, "").unwrap();
+        let compiler = Compiler::new(&knot_file).unwrap();
+        (temp_dir, compiler)
+    }
+
+    fn make_executed_node(
+        source_start: usize,
+        source_end: usize,
+        typst_content: &str,
+        is_chunk: bool,
+        source_line: u32,
+    ) -> ExecutedNode {
+        ExecutedNode {
+            lang: "r".to_string(),
+            hash: "abc123".to_string(),
+            source_start,
+            source_end,
+            typst_content: typst_content.to_string(),
+            is_chunk,
+            source_line,
+            errored: false,
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // assemble_pass — pure function, no R/Python required
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_assemble_no_nodes_returns_source_unchanged() {
+        let source = "Hello, Typst!";
+        let result = assemble_pass(&[], source, "test.knot");
+        assert_eq!(result, source);
+    }
+
+    #[test]
+    fn test_assemble_inline_inserted_verbatim() {
+        // Source: "prefix INLINE suffix"
+        // The inline node occupies bytes 7..13 ("INLINE").
+        let source = "prefix INLINE suffix";
+        let node = make_executed_node(7, 13, "42", false, 0);
+        let result = assemble_pass(&[node], source, "test.knot");
+        assert_eq!(result, "prefix 42 suffix");
+    }
+
+    #[test]
+    fn test_assemble_chunk_has_sync_markers() {
+        // Source: a fenced code block. start_byte points to the opening fence,
+        // end_byte points just past the closing fence (not including the newline).
+        let source = "```{r}\nx <- 1\n```\nafter";
+        // Chunk spans the entire fenced block; trailing newline at byte 18 gets consumed.
+        let chunk_end = source.find("```\nafter").unwrap() + 3; // points to the `\n` after closing ```
+        let node = make_executed_node(0, chunk_end, "#code-chunk()", true, 1);
+        let result = assemble_pass(&[node], source, "test.knot");
+        assert!(
+            result.contains("// #KNOT-SYNC source=test.knot line=1\n"),
+            "Missing opening sync marker, got:\n{result}"
+        );
+        assert!(
+            result.contains("// END-KNOT-SYNC\n"),
+            "Missing closing sync marker, got:\n{result}"
+        );
+        assert!(
+            result.contains("#code-chunk()"),
+            "Missing chunk content, got:\n{result}"
+        );
+    }
+
+    #[test]
+    fn test_assemble_chunk_content_without_newline_gets_one() {
+        let source = "```{r}\ncode\n```\nrest";
+        let chunk_end = source.find("```\nrest").unwrap() + 3;
+        // typst_content does NOT end with '\n'
+        let node = make_executed_node(0, chunk_end, "no-newline", true, 1);
+        let result = assemble_pass(&[node], source, "test.knot");
+        assert!(
+            result.contains("no-newline\n// END-KNOT-SYNC"),
+            "Expected newline inserted before END marker, got:\n{result}"
+        );
+    }
+
+    #[test]
+    fn test_assemble_chunk_content_with_newline_not_doubled() {
+        let source = "```{r}\ncode\n```\nrest";
+        let chunk_end = source.find("```\nrest").unwrap() + 3;
+        // typst_content ends with '\n' — must NOT add another
+        let node = make_executed_node(0, chunk_end, "has-newline\n", true, 1);
+        let result = assemble_pass(&[node], source, "test.knot");
+        assert!(
+            result.contains("has-newline\n// END-KNOT-SYNC"),
+            "Newline should not be doubled before END marker, got:\n{result}"
+        );
+        assert!(
+            !result.contains("has-newline\n\n// END-KNOT-SYNC"),
+            "Newline was doubled, got:\n{result}"
+        );
+    }
+
+    #[test]
+    fn test_assemble_multiple_nodes_interleaved() {
+        // "AAA ```{r}\ncode\n``` BBB `r 1+1` CCC"
+        //   0   4         17  21   25       30
+        let source = "AAA ```{r}\ncode\n``` BBB `r 1+1` CCC";
+        // chunk: bytes 4..19 (```{r}\ncode\n```)
+        let chunk_end = source.find("``` BBB").unwrap() + 3;
+        // inline: bytes 24..32 (`r 1+1`)
+        let inline_start = source.find("`r 1+1`").unwrap();
+        let inline_end = inline_start + "`r 1+1`".len();
+
+        let chunk = make_executed_node(4, chunk_end, "#chunk()", true, 1);
+        let inline = make_executed_node(inline_start, inline_end, "2", false, 0);
+        let result = assemble_pass(&[chunk, inline], source, "test.knot");
+
+        assert!(result.starts_with("AAA "), "Prefix 'AAA ' missing");
+        assert!(
+            result.contains("// #KNOT-SYNC"),
+            "Chunk sync marker missing"
+        );
+        assert!(result.contains("BBB "), "Inter-node text 'BBB ' missing");
+        assert!(result.contains("2"), "Inline result missing");
+        assert!(result.ends_with(" CCC"), "Suffix ' CCC' missing");
+    }
+
+    // -----------------------------------------------------------------------
+    // Integration: Inert cascade — uses unsupported language (no R/Python)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_inert_cascade_on_unsupported_language() {
+        let source =
+            "```{unsupported_lang}\ncode1\n```\n\n```{unsupported_lang}\ncode2\n```\n".to_string();
+        let doc = Document::parse(source);
+        let (_temp_dir, mut compiler) = make_test_compiler();
+
+        let result = compiler
+            .compile(&doc, "test.knot")
+            .expect("compile() must succeed even when a language executor is unavailable");
+
+        // First chunk: produces an execution error block.
+        assert!(
+            result.contains("Execution Error"),
+            "Expected error block for first chunk, got:\n{result}"
+        );
+
+        // Second chunk: should be rendered as inert (cascade).
+        assert!(
+            result.contains("is-inert: true"),
+            "Expected inert marker for second chunk (cascade), got:\n{result}"
+        );
+    }
+}
