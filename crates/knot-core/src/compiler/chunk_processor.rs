@@ -13,183 +13,229 @@ use crate::cache::{Cache, hash_dependencies, hashing};
 use crate::compiler::snapshot_manager::SnapshotManager;
 use crate::config::Config;
 use crate::executors::{ExecutionOutput, ExecutionResult, ExecutorManager, GraphicsOptions};
-use crate::parser::Chunk;
+use crate::parser::{Chunk, ChunkOptions, ResolvedChunkOptions};
 use anyhow::Result;
 use log::info;
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::path::Path;
 
-#[allow(clippy::too_many_arguments)]
+/// Immutable context shared across chunk processing calls.
+pub struct ChunkContext<'a> {
+    pub previous_hash: &'a str,
+    pub config: &'a Config,
+    pub is_inert: bool,
+    pub backend: &'a TypstBackend,
+    pub project_root: &'a Path,
+}
+
 pub fn process_chunk(
     chunk: &Chunk,
     executor_manager: &mut ExecutorManager,
     cache: &mut Cache,
-    previous_hash: &str,
-    config: &Config,
-    is_inert: bool,
-    backend: &TypstBackend,
     snapshot_manager: &mut SnapshotManager,
-    project_root: &Path,
+    ctx: &ChunkContext<'_>,
 ) -> Result<(String, String)> {
-    // Apply config defaults to chunk options and resolve to concrete values
-    let mut chunk_options = chunk.options.clone();
+    let (chunk_options, resolved_options, merged_codly_options) =
+        resolve_options(chunk, ctx.config, ctx.is_inert);
 
-    // --- CONFIG LAYERING (Global < Language < Error) ---
-    // We build a single "effective" set of defaults following the priority chain.
-    let mut effective_defaults = config.chunk_defaults.clone();
-
-    // 1. Layer language-specific defaults ([r-chunks], [python-chunks])
-    if let Some(lang_defaults) = config.get_language_defaults(&chunk.language) {
-        effective_defaults.merge(lang_defaults);
-    }
-
-    // 2. Layer error-specific defaults ([r-error], [python-error]) if language is broken
-    if is_inert && let Some(error_defaults) = config.get_language_error_defaults(&chunk.language) {
-        effective_defaults.merge(error_defaults);
-    }
-
-    // 3. Apply the final layered defaults to fill Nones in the chunk's own options.
-    // Explicit options in the chunk header always have the final word.
-    chunk_options.apply_config_defaults(&effective_defaults);
-
-    // Codly options follow the same priority (already merged in effective_defaults)
-    let mut merged_codly_options = effective_defaults.codly_options.clone();
-    for (key, value) in &chunk.codly_options {
-        merged_codly_options.insert(key.clone(), value.clone());
-    }
-
-    let resolved_options = chunk_options.resolve(); // Convert Option<bool> to bool
     let chunk_name = chunk
         .name
         .as_deref()
         .map(String::from)
         .unwrap_or_else(|| format!("chunk-{}", chunk.index));
 
-    let deps_hash = hash_dependencies(&chunk_options.depends)?;
-
-    // 1. First, try to compute a hash WITHOUT constants to check cache
-    let partial_chunk_hash = hashing::get_chunk_hash(
+    let chunk_hash = compute_hash(
         &chunk.code,
         &chunk_options,
-        previous_hash,
-        &deps_hash,
-        "", // No constants yet
-    );
-
-    // If we have no constants, this is our final hash
-    let chunk_hash = if chunk_options.constant.is_empty() {
-        partial_chunk_hash
-    } else {
-        // If we have constants, we NEED the executor to get their hashes.
-        // This will start the engine if not already running.
-        let constants_hash =
-            get_constants_hash(executor_manager, &chunk.language, &chunk_options.constant)?;
-        hashing::get_chunk_hash(
-            &chunk.code,
-            &chunk_options,
-            previous_hash,
-            &deps_hash,
-            &constants_hash,
-        )
-    };
+        ctx.previous_hash,
+        executor_manager,
+        &chunk.language,
+    )?;
 
     if resolved_options.cache && cache.has_cached_result(&chunk_hash) {
         info!("  ✓ {} [cached]", chunk_name);
         let execution_output = cache.get_cached_result(&chunk_hash)?;
-
-        // Even on cache hit, we need to handle potential fatal errors stored in cache
         if let Some(error) = &execution_output.error {
             return Err(anyhow::anyhow!("{}", error));
         }
-
-        // Format and return
-        let mut chunk_with_codly = chunk.clone();
-        chunk_with_codly.codly_options = merged_codly_options;
-        let chunk_output_final = backend.format_chunk(
-            &chunk_with_codly,
+        let output = format_output(
+            ctx.backend,
+            chunk,
+            &merged_codly_options,
             &resolved_options,
             &execution_output,
-            is_inert,
+            ctx.is_inert,
         );
-        return Ok((chunk_output_final, chunk_hash));
+        return Ok((output, chunk_hash));
     }
 
-    let execution_output = if is_inert || !resolved_options.eval {
-        ExecutionOutput {
-            result: ExecutionResult::Text(String::new()),
-            warnings: vec![],
-            error: None,
-        }
-    } else {
-        info!("  ⚙️ {} [executing]", chunk_name);
+    let execution_output = try_execute(
+        chunk,
+        executor_manager,
+        cache,
+        snapshot_manager,
+        &resolved_options,
+        &chunk_options,
+        &chunk_hash,
+        ctx.previous_hash,
+        ctx.project_root,
+        ctx.is_inert,
+        &chunk_name,
+    )?;
 
-        // --- LAZY STATE RESTORATION ---
-        // We only restore state if we are actually going to execute code.
-        snapshot_manager.restore_if_needed(
-            &chunk.language,
-            previous_hash,
-            executor_manager,
-            cache,
-            project_root,
-        )?;
-
-        // Prepare graphics options for executor
-        let graphics_opts = GraphicsOptions {
-            width: resolved_options.fig_width,
-            height: resolved_options.fig_height,
-            dpi: resolved_options.dpi,
-            format: resolved_options.fig_format.as_str().to_string(),
-        };
-
-        let exec = executor_manager.get_executor(&chunk.language)?;
-        let output = exec.execute(&chunk.code, &graphics_opts)?;
-
-        if resolved_options.cache {
-            if let Some(error) = &output.error {
-                // Save execution error to cache
-                cache.save_error(
-                    chunk.index,
-                    chunk.name.clone(),
-                    chunk.language.clone(),
-                    chunk_hash.clone(),
-                    error.clone(),
-                    chunk_options.depends.clone(),
-                )?;
-            } else {
-                // Save successful result to cache
-                cache.save_result(
-                    chunk.index,
-                    chunk.name.clone(),
-                    chunk.language.clone(),
-                    chunk_hash.clone(),
-                    &output,
-                    chunk_options.depends.clone(),
-                )?;
-            }
-        }
-        output
-    };
-
-    // If there is a fatal error, we need to return it as an Err so the compiler knows to switch to inert mode
-    // (preserving the behavior expected by mod.rs)
     if let Some(error) = &execution_output.error {
-        // Return error with structured data (via anyhow)
-        // We'll wrap it in a way that mod.rs can still format it easily
         return Err(anyhow::anyhow!("{}", error));
     }
 
-    // Create a chunk with merged codly options for the backend
-    let mut chunk_with_codly = chunk.clone();
-    chunk_with_codly.codly_options = merged_codly_options;
-
-    let chunk_output_final = backend.format_chunk(
-        &chunk_with_codly,
+    let output = format_output(
+        ctx.backend,
+        chunk,
+        &merged_codly_options,
         &resolved_options,
         &execution_output,
-        is_inert,
+        ctx.is_inert,
     );
+    Ok((output, chunk_hash))
+}
 
-    Ok((chunk_output_final, chunk_hash))
+// ---------------------------------------------------------------------------
+// Private helpers for process_chunk()
+// ---------------------------------------------------------------------------
+
+/// Applies config layering (global → language → error) to produce resolved options and merged codly options.
+fn resolve_options(
+    chunk: &Chunk,
+    config: &Config,
+    is_inert: bool,
+) -> (ChunkOptions, ResolvedChunkOptions, HashMap<String, String>) {
+    let mut chunk_options = chunk.options.clone();
+
+    let mut effective_defaults = config.chunk_defaults.clone();
+    if let Some(lang_defaults) = config.get_language_defaults(&chunk.language) {
+        effective_defaults.merge(lang_defaults);
+    }
+    if is_inert && let Some(error_defaults) = config.get_language_error_defaults(&chunk.language) {
+        effective_defaults.merge(error_defaults);
+    }
+
+    chunk_options.apply_config_defaults(&effective_defaults);
+
+    let mut merged_codly_options = effective_defaults.codly_options.clone();
+    for (key, value) in &chunk.codly_options {
+        merged_codly_options.insert(key.clone(), value.clone());
+    }
+
+    let resolved_options = chunk_options.resolve();
+    (chunk_options, resolved_options, merged_codly_options)
+}
+
+/// Computes the chunk hash, incorporating deps and constant-object hashes.
+fn compute_hash(
+    code: &str,
+    chunk_options: &ChunkOptions,
+    previous_hash: &str,
+    executor_manager: &mut ExecutorManager,
+    language: &str,
+) -> Result<String> {
+    let deps_hash = hash_dependencies(&chunk_options.depends)?;
+    let partial = hashing::get_chunk_hash(code, chunk_options, previous_hash, &deps_hash, "");
+
+    if chunk_options.constant.is_empty() {
+        return Ok(partial);
+    }
+
+    let constants_hash = get_constants_hash(executor_manager, language, &chunk_options.constant)?;
+    Ok(hashing::get_chunk_hash(
+        code,
+        chunk_options,
+        previous_hash,
+        &deps_hash,
+        &constants_hash,
+    ))
+}
+
+/// Executes the chunk (or produces an empty result if inert/eval=false), then caches the result.
+#[allow(clippy::too_many_arguments)]
+fn try_execute(
+    chunk: &Chunk,
+    executor_manager: &mut ExecutorManager,
+    cache: &mut Cache,
+    snapshot_manager: &mut SnapshotManager,
+    resolved_options: &ResolvedChunkOptions,
+    chunk_options: &ChunkOptions,
+    chunk_hash: &str,
+    previous_hash: &str,
+    project_root: &Path,
+    is_inert: bool,
+    chunk_name: &str,
+) -> Result<ExecutionOutput> {
+    if is_inert || !resolved_options.eval {
+        return Ok(ExecutionOutput {
+            result: ExecutionResult::Text(String::new()),
+            warnings: vec![],
+            error: None,
+        });
+    }
+
+    info!("  ⚙️ {} [executing]", chunk_name);
+
+    // Lazy state restoration: only when we actually execute
+    snapshot_manager.restore_if_needed(
+        &chunk.language,
+        previous_hash,
+        executor_manager,
+        cache,
+        project_root,
+    )?;
+
+    let graphics_opts = GraphicsOptions {
+        width: resolved_options.fig_width,
+        height: resolved_options.fig_height,
+        dpi: resolved_options.dpi,
+        format: resolved_options.fig_format.as_str().to_string(),
+    };
+
+    let exec = executor_manager.get_executor(&chunk.language)?;
+    let output = exec.execute(&chunk.code, &graphics_opts)?;
+
+    if resolved_options.cache {
+        if let Some(error) = &output.error {
+            cache.save_error(
+                chunk.index,
+                chunk.name.clone(),
+                chunk.language.clone(),
+                chunk_hash.to_string(),
+                error.clone(),
+                chunk_options.depends.clone(),
+            )?;
+        } else {
+            cache.save_result(
+                chunk.index,
+                chunk.name.clone(),
+                chunk.language.clone(),
+                chunk_hash.to_string(),
+                &output,
+                chunk_options.depends.clone(),
+            )?;
+        }
+    }
+
+    Ok(output)
+}
+
+/// Clones the chunk with merged codly options and delegates to the backend formatter.
+fn format_output(
+    backend: &TypstBackend,
+    chunk: &Chunk,
+    merged_codly_options: &HashMap<String, String>,
+    resolved_options: &ResolvedChunkOptions,
+    output: &ExecutionOutput,
+    is_inert: bool,
+) -> String {
+    let mut chunk_with_codly = chunk.clone();
+    chunk_with_codly.codly_options = merged_codly_options.clone();
+    backend.format_chunk(&chunk_with_codly, resolved_options, output, is_inert)
 }
 
 fn get_constants_hash(
@@ -304,12 +350,14 @@ mod tests {
             &chunk,
             &mut manager,
             &mut cache,
-            "prev_hash",
-            &setup_test_config(),
-            false,
-            &crate::backend::TypstBackend::new(),
             &mut SnapshotManager::new(),
-            Path::new("."),
+            &ChunkContext {
+                previous_hash: "prev_hash",
+                config: &setup_test_config(),
+                is_inert: false,
+                backend: &crate::backend::TypstBackend::new(),
+                project_root: Path::new("."),
+            },
         )
         .unwrap();
 
@@ -328,12 +376,14 @@ mod tests {
             &chunk,
             &mut manager,
             &mut cache,
-            "prev_hash",
-            &setup_test_config(),
-            false,
-            &crate::backend::TypstBackend::new(),
             &mut SnapshotManager::new(),
-            Path::new("."),
+            &ChunkContext {
+                previous_hash: "prev_hash",
+                config: &setup_test_config(),
+                is_inert: false,
+                backend: &crate::backend::TypstBackend::new(),
+                project_root: Path::new("."),
+            },
         )
         .unwrap();
     }
@@ -348,12 +398,14 @@ mod tests {
             &chunk,
             &mut manager,
             &mut cache,
-            "prev_hash",
-            &setup_test_config(),
-            false,
-            &crate::backend::TypstBackend::new(),
             &mut SnapshotManager::new(),
-            Path::new("."),
+            &ChunkContext {
+                previous_hash: "prev_hash",
+                config: &setup_test_config(),
+                is_inert: false,
+                backend: &crate::backend::TypstBackend::new(),
+                project_root: Path::new("."),
+            },
         )
         .unwrap();
 
@@ -372,12 +424,14 @@ mod tests {
             &chunk,
             &mut manager,
             &mut cache,
-            "prev_hash",
-            &setup_test_config(),
-            false,
-            &crate::backend::TypstBackend::new(),
             &mut SnapshotManager::new(),
-            Path::new("."),
+            &ChunkContext {
+                previous_hash: "prev_hash",
+                config: &setup_test_config(),
+                is_inert: false,
+                backend: &crate::backend::TypstBackend::new(),
+                project_root: Path::new("."),
+            },
         )
         .unwrap();
 
@@ -386,12 +440,14 @@ mod tests {
             &chunk,
             &mut manager,
             &mut cache,
-            "prev_hash",
-            &setup_test_config(),
-            false,
-            &crate::backend::TypstBackend::new(),
             &mut SnapshotManager::new(),
-            Path::new("."),
+            &ChunkContext {
+                previous_hash: "prev_hash",
+                config: &setup_test_config(),
+                is_inert: false,
+                backend: &crate::backend::TypstBackend::new(),
+                project_root: Path::new("."),
+            },
         )
         .unwrap();
 
@@ -411,24 +467,28 @@ mod tests {
             &chunk1,
             &mut manager,
             &mut cache,
-            "prev_hash",
-            &setup_test_config(),
-            false,
-            &crate::backend::TypstBackend::new(),
             &mut SnapshotManager::new(),
-            Path::new("."),
+            &ChunkContext {
+                previous_hash: "prev_hash",
+                config: &setup_test_config(),
+                is_inert: false,
+                backend: &crate::backend::TypstBackend::new(),
+                project_root: Path::new("."),
+            },
         )
         .unwrap();
         let (_output2, hash2) = process_chunk(
             &chunk2,
             &mut manager,
             &mut cache,
-            "prev_hash",
-            &setup_test_config(),
-            false,
-            &crate::backend::TypstBackend::new(),
             &mut SnapshotManager::new(),
-            Path::new("."),
+            &ChunkContext {
+                previous_hash: "prev_hash",
+                config: &setup_test_config(),
+                is_inert: false,
+                backend: &crate::backend::TypstBackend::new(),
+                project_root: Path::new("."),
+            },
         )
         .unwrap();
 
@@ -446,24 +506,28 @@ mod tests {
             &chunk,
             &mut manager,
             &mut cache,
-            "prev_hash_1",
-            &setup_test_config(),
-            false,
-            &crate::backend::TypstBackend::new(),
             &mut SnapshotManager::new(),
-            Path::new("."),
+            &ChunkContext {
+                previous_hash: "prev_hash_1",
+                config: &setup_test_config(),
+                is_inert: false,
+                backend: &crate::backend::TypstBackend::new(),
+                project_root: Path::new("."),
+            },
         )
         .unwrap();
         let (_output2, hash2) = process_chunk(
             &chunk,
             &mut manager,
             &mut cache,
-            "prev_hash_2",
-            &setup_test_config(),
-            false,
-            &crate::backend::TypstBackend::new(),
             &mut SnapshotManager::new(),
-            Path::new("."),
+            &ChunkContext {
+                previous_hash: "prev_hash_2",
+                config: &setup_test_config(),
+                is_inert: false,
+                backend: &crate::backend::TypstBackend::new(),
+                project_root: Path::new("."),
+            },
         )
         .unwrap();
 
@@ -481,12 +545,14 @@ mod tests {
             &chunk,
             &mut manager,
             &mut cache,
-            "prev_hash",
-            &setup_test_config(),
-            false,
-            &crate::backend::TypstBackend::new(),
             &mut SnapshotManager::new(),
-            Path::new("."),
+            &ChunkContext {
+                previous_hash: "prev_hash",
+                config: &setup_test_config(),
+                is_inert: false,
+                backend: &crate::backend::TypstBackend::new(),
+                project_root: Path::new("."),
+            },
         );
 
         // Should fail with unsupported language
@@ -524,12 +590,14 @@ mod tests {
             &chunk,
             &mut manager,
             &mut cache,
-            "prev_hash",
-            &setup_test_config(),
-            false,
-            &crate::backend::TypstBackend::new(),
             &mut SnapshotManager::new(),
-            Path::new("."),
+            &ChunkContext {
+                previous_hash: "prev_hash",
+                config: &setup_test_config(),
+                is_inert: false,
+                backend: &crate::backend::TypstBackend::new(),
+                project_root: Path::new("."),
+            },
         )
         .unwrap();
 
@@ -542,12 +610,14 @@ mod tests {
             &chunk,
             &mut manager,
             &mut cache,
-            "prev_hash",
-            &setup_test_config(),
-            false,
-            &crate::backend::TypstBackend::new(),
             &mut SnapshotManager::new(),
-            Path::new("."),
+            &ChunkContext {
+                previous_hash: "prev_hash",
+                config: &setup_test_config(),
+                is_inert: false,
+                backend: &crate::backend::TypstBackend::new(),
+                project_root: Path::new("."),
+            },
         )
         .unwrap();
 
@@ -564,12 +634,14 @@ mod tests {
             &chunk,
             &mut manager,
             &mut cache,
-            "prev_hash",
-            &setup_test_config(),
-            false,
-            &crate::backend::TypstBackend::new(),
             &mut SnapshotManager::new(),
-            Path::new("."),
+            &ChunkContext {
+                previous_hash: "prev_hash",
+                config: &setup_test_config(),
+                is_inert: false,
+                backend: &crate::backend::TypstBackend::new(),
+                project_root: Path::new("."),
+            },
         )
         .unwrap();
 
@@ -587,12 +659,14 @@ mod tests {
             &chunk,
             &mut manager,
             &mut cache,
-            "prev_hash",
-            &setup_test_config(),
-            false,
-            &crate::backend::TypstBackend::new(),
             &mut SnapshotManager::new(),
-            Path::new("."),
+            &ChunkContext {
+                previous_hash: "prev_hash",
+                config: &setup_test_config(),
+                is_inert: false,
+                backend: &crate::backend::TypstBackend::new(),
+                project_root: Path::new("."),
+            },
         )
         .unwrap();
 
@@ -654,12 +728,14 @@ mod tests {
             &chunk,
             &mut manager,
             &mut cache,
-            "prev_hash",
-            &config,
-            false,
-            &crate::backend::TypstBackend::new(),
             &mut SnapshotManager::new(),
-            Path::new("."),
+            &ChunkContext {
+                previous_hash: "prev_hash",
+                config: &config,
+                is_inert: false,
+                backend: &crate::backend::TypstBackend::new(),
+                project_root: Path::new("."),
+            },
         )
         .unwrap();
 
@@ -696,12 +772,14 @@ mod tests {
             &chunk,
             &mut manager,
             &mut cache,
-            "prev_hash",
-            &config,
-            false,
-            &crate::backend::TypstBackend::new(),
             &mut SnapshotManager::new(),
-            Path::new("."),
+            &ChunkContext {
+                previous_hash: "prev_hash",
+                config: &config,
+                is_inert: false,
+                backend: &crate::backend::TypstBackend::new(),
+                project_root: Path::new("."),
+            },
         )
         .unwrap();
 
@@ -759,12 +837,14 @@ mod tests {
             &chunk,
             &mut manager,
             &mut cache,
-            "prev_hash",
-            &config,
-            false,
-            &crate::backend::TypstBackend::new(),
             &mut SnapshotManager::new(),
-            Path::new("."),
+            &ChunkContext {
+                previous_hash: "prev_hash",
+                config: &config,
+                is_inert: false,
+                backend: &crate::backend::TypstBackend::new(),
+                project_root: Path::new("."),
+            },
         )
         .unwrap();
 

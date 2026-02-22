@@ -40,24 +40,6 @@ impl RExecutor {
             cache_dir,
         })
     }
-
-    /// Execute an inline R expression and return formatted result
-    ///
-    /// Returns either:
-    /// - Plain text for scalar values (e.g., "150", "hello", "TRUE")
-    /// - Backtick-wrapped text for vectors (e.g., "`[1] 1 2 3 4 5`")
-    ///
-    /// Fails if the result is too complex (DataFrame, Matrix, etc.)
-    pub fn execute_inline(&mut self, code: &str) -> Result<String> {
-        execution::execute_inline(self, code)
-    }
-
-    /// Execute a lightweight R query and return raw stdout
-    ///
-    /// Useful for LSP features (completion, hover) where side-channel overhead is unnecessary.
-    pub fn query(&mut self, code: &str) -> Result<String> {
-        execution::query(&mut self.process, code)
-    }
 }
 
 impl LanguageExecutor for RExecutor {
@@ -162,8 +144,7 @@ impl ConstantObjectHandler for RExecutor {
     fn load_constant(&mut self, object_name: &str, hash: &str, cache_dir: &Path) -> Result<()> {
         let object_path = cache_dir.join("objects").join(format!("{}.rds", hash));
 
-        // Verify file integrity by hashing the file
-        let actual_hash = self.hash_file(&object_path)?;
+        let actual_hash = super::path_utils::hash_file(&object_path)?;
         if actual_hash != hash {
             anyhow::bail!(
                 "Cache corruption detected for constant object '{}'.\n\
@@ -198,21 +179,6 @@ impl ConstantObjectHandler for RExecutor {
 
     fn object_extension(&self) -> &'static str {
         "rds"
-    }
-}
-
-impl RExecutor {
-    /// Hash a file's content using xxHash64
-    fn hash_file(&self, file_path: &Path) -> Result<String> {
-        use std::fs::File;
-        use std::io::Read;
-
-        let mut file = File::open(file_path)?;
-        let mut buffer = Vec::new();
-        file.read_to_end(&mut buffer)?;
-
-        let hash = xxhash_rust::xxh64::xxh64(&buffer, 0);
-        Ok(format!("{:x}", hash))
     }
 }
 

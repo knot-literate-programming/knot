@@ -96,16 +96,20 @@ impl Cache {
         error: crate::executors::side_channel::RuntimeError,
         dependencies: Vec<PathBuf>,
     ) -> Result<()> {
-        let new_entry = storage::create_chunk_entry(
-            chunk_index,
-            chunk_name,
+        let new_entry = ChunkCacheEntry {
+            index: chunk_index,
+            name: chunk_name,
             language,
             hash,
-            Vec::new(), // No output files for error
-            Vec::new(), // Warnings are usually empty if error occurs, or included in RuntimeError
-            Some(error),
-            dependencies,
-        );
+            files: Vec::new(),
+            warnings: Vec::new(),
+            error: Some(error),
+            dependencies: dependencies
+                .iter()
+                .map(|p| p.to_string_lossy().to_string())
+                .collect(),
+            updated_at: Utc::now().to_rfc3339(),
+        };
 
         // Remove old entry if it exists
         self.metadata
@@ -148,16 +152,20 @@ impl Cache {
 
         // Cache all chunks, even those without output files
         // The cache entry records that the chunk was executed successfully
-        let new_entry = storage::create_chunk_entry(
-            chunk_index,
-            chunk_name,
+        let new_entry = ChunkCacheEntry {
+            index: chunk_index,
+            name: chunk_name,
             language,
             hash,
-            files_to_cache,
-            output.warnings.clone(),
-            None, // No error on success
-            dependencies,
-        );
+            files: files_to_cache,
+            warnings: output.warnings.clone(),
+            error: None,
+            dependencies: dependencies
+                .iter()
+                .map(|p| p.to_string_lossy().to_string())
+                .collect(),
+            updated_at: Utc::now().to_rfc3339(),
+        };
 
         // Remove old entry if it exists
         self.metadata

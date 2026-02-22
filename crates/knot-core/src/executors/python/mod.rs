@@ -180,8 +180,7 @@ impl ConstantObjectHandler for PythonExecutor {
     fn load_constant(&mut self, object_name: &str, hash: &str, cache_dir: &Path) -> Result<()> {
         let object_path = cache_dir.join("objects").join(format!("{}.pkl", hash));
 
-        // Verify file integrity by hashing the file (parity with R)
-        let actual_hash = self.hash_file(&object_path)?;
+        let actual_hash = super::path_utils::hash_file(&object_path)?;
         if actual_hash != hash {
             anyhow::bail!(
                 "Cache corruption detected for constant object '{}'.\n\
@@ -225,21 +224,6 @@ impl ConstantObjectHandler for PythonExecutor {
 
     fn object_extension(&self) -> &'static str {
         "pkl"
-    }
-}
-
-impl PythonExecutor {
-    /// Hash a file's content using xxHash64 (parity with R)
-    fn hash_file(&self, file_path: &Path) -> Result<String> {
-        use std::fs::File;
-        use std::io::Read;
-
-        let mut file = File::open(file_path)?;
-        let mut buffer = Vec::new();
-        file.read_to_end(&mut buffer)?;
-
-        let hash = xxhash_rust::xxh64::xxh64(&buffer, 0);
-        Ok(format!("{:x}", hash))
     }
 }
 

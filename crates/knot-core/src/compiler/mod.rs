@@ -11,6 +11,8 @@ pub mod formatters;
 pub mod inline_processor;
 pub mod sync;
 
+pub use chunk_processor::ChunkContext;
+
 #[cfg(test)]
 pub(super) mod test_helpers {
     use crate::cache::Cache;
@@ -45,8 +47,6 @@ use anyhow::{Context, Result};
 use log::info;
 use std::path::PathBuf;
 
-// From section 3.1 and 6.1 (Semaine 2) of the reference document
-
 pub struct Compiler {
     executor_manager: ExecutorManager,
     config: Config,
@@ -55,16 +55,10 @@ pub struct Compiler {
 }
 
 impl Compiler {
-    /// Create a new compiler, searching for knot.toml starting from the given file path
-    ///
-    /// # Arguments
-    /// * `knot_file_path` - Path to the .knot file being compiled (used to find project root)
+    /// Create a new compiler, searching for knot.toml starting from the given file path.
     pub fn new(knot_file_path: &Path) -> Result<Self> {
-        // Find project root by searching for knot.toml in parent directories
-        // find_project_root() handles both files and directories automatically
         let project_root = Config::find_project_root(knot_file_path)?;
 
-        // Load config from the project root
         let config_path = project_root.join("knot.toml");
         let config = if config_path.exists() {
             Config::load_from_path(&config_path)?
@@ -72,7 +66,6 @@ impl Compiler {
             Config::default()
         };
 
-        // Determine isolated cache directory for this file
         let file_stem = knot_file_path
             .file_stem()
             .and_then(|s| s.to_str())
@@ -95,122 +88,61 @@ impl Compiler {
     }
 
     /// Reset all active executors to a clean state.
-    /// Useful between multiple file compilations in a single build.
     pub fn reset_executors(&mut self) {
         self.executor_manager.shutdown_all();
     }
 
-    /// Compiles a document by executing its code chunks and generating a new Typst source file.
-    ///
-    /// `source_file` is the filename of the `.knot` source (e.g. `"chapter1.knot"`).
-    /// Compiles a document by executing its code chunks and generating a new Typst source file.
+    /// Compiles a document by executing its code chunks and generating a Typst source string.
     ///
     /// `source_file` is the filename of the `.knot` source (e.g. `"chapter1.knot"`).
     pub fn compile(&mut self, doc: &Document, source_file: &str) -> Result<String> {
         let mut cache = Cache::new(self.cache_dir.clone())?;
         let backend = crate::backend::TypstBackend::new();
-
-        // Tracks the hash of the last chunk for EACH language (for chaining)
         let mut last_hash_per_lang: HashMap<String, String> = HashMap::new();
-
-        // Manages snapshot loading/saving
         let mut snapshot_manager = SnapshotManager::new();
-
         let mut typst_output = String::new();
         let mut last_pos = 0;
-
-        // Track constant objects: name -> (hash, chunk_name)
         let mut constant_objects: HashMap<String, (String, String)> = HashMap::new();
+        let mut broken_languages = std::collections::HashSet::new();
 
-        // Phase 1: Build a sorted list of all executable nodes (chunks and inline expressions)
-        let mut executable_nodes: Vec<ExecutableNode> = Vec::new();
-        for chunk in &doc.chunks {
-            executable_nodes.push(ExecutableNode::Chunk(chunk));
-        }
-        for inline_expr in &doc.inline_exprs {
-            executable_nodes.push(ExecutableNode::InlineExpr(inline_expr));
-        }
-        executable_nodes.sort_by_key(|node| match node {
-            ExecutableNode::Chunk(chunk) => chunk.start_byte,
-            ExecutableNode::InlineExpr(inline_expr) => inline_expr.start,
-        });
-
+        let executable_nodes = build_executable_nodes(doc);
         info!(
             "🔧 Processing {} executable nodes...",
             executable_nodes.len()
         );
 
-        let mut broken_languages = std::collections::HashSet::new();
-
-        // Phase 2: Iterate through sorted nodes, execute, and build output
-        for node in executable_nodes {
-            let (node_start, node_end, lang) = match node {
-                ExecutableNode::Chunk(chunk) => {
-                    (chunk.start_byte, chunk.end_byte, chunk.language.as_str())
-                }
-                ExecutableNode::InlineExpr(inline_expr) => (
-                    inline_expr.start,
-                    inline_expr.end,
-                    inline_expr.language.as_str(),
-                ),
-            };
-
-            // Get previous hash for this language (or empty string if first chunk)
+        for node in &executable_nodes {
+            let (node_start, node_end, lang) = node_bounds(node);
             let previous_hash = last_hash_per_lang.get(lang).cloned().unwrap_or_default();
 
-            // Append raw text before the current node
             if node_start > last_pos {
                 typst_output.push_str(&doc.source[last_pos..node_start]);
             }
 
+            // --- Normal execution path ---
+            let ctx = ChunkContext {
+                previous_hash: &previous_hash,
+                config: &self.config,
+                is_inert: false,
+                backend: &backend,
+                project_root: &self.project_root,
+            };
+
+            // --- Inert path (language previously broken) ---
             if broken_languages.contains(lang) {
-                // This language is broken: render as inert.
-                // Chunks still receive KNOT-SYNC markers so sync mapping stays correct.
-                let result_str = match node {
-                    ExecutableNode::Chunk(chunk) => {
-                        let (res, _) = chunk_processor::process_chunk(
-                            chunk,
-                            &mut self.executor_manager,
-                            &mut cache,
-                            &previous_hash,
-                            &self.config,
-                            true, // is_inert
-                            &backend,
-                            &mut snapshot_manager,
-                            &self.project_root,
-                        )?;
-                        res
-                    }
-                    ExecutableNode::InlineExpr(inline_expr) => {
-                        format!(
-                            "#text(fill: luma(150))[`{{{} {}}}`]",
-                            inline_expr.language, inline_expr.code
-                        )
-                    }
+                let inert_ctx = ChunkContext {
+                    is_inert: true,
+                    ..ctx
                 };
-                if let ExecutableNode::Chunk(chunk) = node {
-                    typst_output.push_str(&format!(
-                        "// #KNOT-SYNC source={} line={}\n",
-                        source_file,
-                        chunk.range.start.line + 1,
-                    ));
-                    typst_output.push_str(&result_str);
-                    if !result_str.is_empty() && !result_str.ends_with('\n') {
-                        typst_output.push('\n');
-                    }
-                    typst_output.push_str("// END-KNOT-SYNC\n");
-                } else {
-                    typst_output.push_str(&result_str);
-                }
-                last_pos = node_end;
-                // chunk.end_byte stops just before the closing fence's trailing \n;
-                // advance past it so the next verbatim slice doesn't gain an extra blank line.
-                if matches!(node, ExecutableNode::Chunk(_))
-                    && last_pos < doc.source.len()
-                    && doc.source.as_bytes()[last_pos] == b'\n'
-                {
-                    last_pos += 1;
-                }
+                let result = render_inert_node(
+                    node,
+                    &mut self.executor_manager,
+                    &mut cache,
+                    &mut snapshot_manager,
+                    &inert_ctx,
+                )?;
+                append_node_output(node, &result, source_file, &mut typst_output);
+                last_pos = advance_last_pos(node, &doc.source, node_end);
                 continue;
             }
 
@@ -219,12 +151,8 @@ impl Compiler {
                     chunk,
                     &mut self.executor_manager,
                     &mut cache,
-                    &previous_hash,
-                    &self.config,
-                    false, // is_inert
-                    &backend,
                     &mut snapshot_manager,
-                    &self.project_root,
+                    &ctx,
                 ),
                 ExecutableNode::InlineExpr(inline_expr) => inline_processor::process_inline_expr(
                     inline_expr,
@@ -237,105 +165,28 @@ impl Compiler {
             let (result_str, node_hash) = match execution_result {
                 Ok(res) => res,
                 Err(e) => {
-                    // Fatal execution error: insert red error block and mark language as broken.
-                    // The block is wrapped with KNOT-SYNC markers like any other chunk output.
-                    let error_msg = format!("{}", e).replace('"', "\\\"");
-                    let error_block = format!(
-                        "#code-chunk(
-    lang: \"{}\",
-    is-inert: false,
-    errors: ([#local(zebra-fill: none)[\n=== Execution Error ({})\nIn {} `{}`\n\n```\n{}\n```\n\n_Execution of subsequent `{}` blocks has been suspended._]],)
-)\n",
-                        lang,
-                        lang,
-                        match node {
-                            ExecutableNode::Chunk(_) => "chunk",
-                            ExecutableNode::InlineExpr(_) => "inline expression",
-                        },
-                        match node {
-                            ExecutableNode::Chunk(c) => c.name.as_deref().unwrap_or("unnamed"),
-                            ExecutableNode::InlineExpr(_) => "inline",
-                        },
-                        error_msg,
-                        lang
-                    );
-                    if let ExecutableNode::Chunk(chunk) = node {
-                        typst_output.push_str(&format!(
-                            "// #KNOT-SYNC source={} line={}\n",
-                            source_file,
-                            chunk.range.start.line + 1,
-                        ));
-                        typst_output.push_str(&error_block);
-                        typst_output.push_str("// END-KNOT-SYNC\n");
-                    } else {
-                        typst_output.push_str(&error_block);
-                    }
-                    last_pos = node_end;
-                    if matches!(node, ExecutableNode::Chunk(_))
-                        && last_pos < doc.source.len()
-                        && doc.source.as_bytes()[last_pos] == b'\n'
-                    {
-                        last_pos += 1;
-                    }
+                    let error_block = format_error_block(node, lang, &e.to_string());
+                    append_node_output(node, &error_block, source_file, &mut typst_output);
+                    last_pos = advance_last_pos(node, &doc.source, node_end);
                     broken_languages.insert(lang.to_string());
                     continue;
                 }
             };
 
-            // Handle constant objects declared in this chunk (only if execution succeeded)
+            // Register constant objects declared by this chunk
             if let ExecutableNode::Chunk(chunk) = node
                 && !chunk.options.constant.is_empty()
             {
-                let chunk_name = chunk.name.as_deref().unwrap_or("unnamed").to_string();
-                let exec = self.executor_manager.get_executor(&chunk.language)?;
-                let cache_dir = self.project_root.join(Defaults::CACHE_DIR_NAME);
-
-                for obj_name in &chunk.options.constant {
-                    // 1. Hash the object
-                    let obj_hash = exec
-                        .hash_object(obj_name)
-                        .context(format!("Failed to hash constant object '{}'", obj_name))?;
-
-                    // 2. Save to content-addressed storage
-                    exec.save_constant(obj_name, &obj_hash, &cache_dir)
-                        .context(format!("Failed to save constant object '{}'", obj_name))?;
-
-                    // 3. Get file size for metadata
-                    let ext = exec.object_extension();
-                    let object_path = cache_dir
-                        .join("objects")
-                        .join(format!("{}.{}", obj_hash, ext));
-                    let size_bytes = std::fs::metadata(&object_path)?.len();
-
-                    // 4. Track for later verification
-                    constant_objects
-                        .insert(obj_name.to_string(), (obj_hash.clone(), chunk_name.clone()));
-
-                    // 5. Add to cache metadata
-                    cache.metadata.constant_objects.insert(
-                        obj_name.to_string(),
-                        ConstantObjectInfo {
-                            hash: obj_hash,
-                            size_bytes,
-                            language: chunk.language.clone(),
-                            created_in_chunk: chunk_name.clone(),
-                            created_at: chrono::Utc::now().to_rfc3339(),
-                        },
-                    );
-
-                    log::info!(
-                        "🔒 Constant object '{}' ({}) declared in chunk '{}'",
-                        obj_name,
-                        chunk.language,
-                        chunk_name
-                    );
-                }
+                register_constant_objects(
+                    chunk,
+                    &mut self.executor_manager,
+                    &mut cache,
+                    &self.project_root,
+                    &mut constant_objects,
+                )?;
             }
 
-            // Update hash chain for this language
             last_hash_per_lang.insert(lang.to_string(), node_hash.clone());
-
-            // After execution (or cache hit), we update the snapshot state
             snapshot_manager.update_after_node(
                 lang,
                 &node_hash,
@@ -345,88 +196,236 @@ impl Compiler {
                 &self.project_root,
             )?;
 
-            // Wrap the compiled chunk with sync markers so the CLI and editors can
-            // map any position in the compiled .typ back to the originating .knot file.
-            if let ExecutableNode::Chunk(chunk) = node {
-                typst_output.push_str(&format!(
-                    "// #KNOT-SYNC source={} line={}\n",
-                    source_file,
-                    chunk.range.start.line + 1,
-                ));
-                typst_output.push_str(&result_str);
-                // Ensure END-KNOT-SYNC is always on its own line.
-                if !result_str.is_empty() && !result_str.ends_with('\n') {
-                    typst_output.push('\n');
-                }
-                typst_output.push_str("// END-KNOT-SYNC\n");
-            } else {
-                typst_output.push_str(&result_str);
-            }
-
-            last_pos = node_end;
-            // chunk.end_byte stops just before the closing fence's trailing \n;
-            // advance past it so the next verbatim slice doesn't gain an extra blank line.
-            if matches!(node, ExecutableNode::Chunk(_))
-                && last_pos < doc.source.len()
-                && doc.source.as_bytes()[last_pos] == b'\n'
-            {
-                last_pos += 1;
-            }
+            append_node_output(node, &result_str, source_file, &mut typst_output);
+            last_pos = advance_last_pos(node, &doc.source, node_end);
         }
 
-        // Append any remaining raw text after the last node
         if last_pos < doc.source.len() {
             typst_output.push_str(&doc.source[last_pos..]);
         }
-
         info!("✓ All nodes processed.");
 
-        // Final verification: Check that constant objects were not modified
-        if !constant_objects.is_empty() {
-            info!(
-                "🔍 Verifying {} constant objects...",
-                constant_objects.len()
-            );
-
-            for (obj_name, (initial_hash, chunk_name)) in &constant_objects {
-                let info = cache.metadata.constant_objects.get(obj_name).unwrap();
-                let exec = self.executor_manager.get_executor(&info.language)?;
-                let cache_dir = self.project_root.join(Defaults::CACHE_DIR_NAME);
-
-                // Try to load the constant object just for verification (idempotent)
-                exec.load_constant(obj_name, &info.hash, &cache_dir)
-                    .context(format!(
-                        "Failed to load constant '{}' for verification",
-                        obj_name
-                    ))?;
-
-                let final_hash = exec
-                    .hash_object(obj_name)
-                    .context(format!("Failed to verify constant object '{}'", obj_name))?;
-
-                if &final_hash != initial_hash {
-                    anyhow::bail!(
-                        "❌ Constant object verification failed!\n\n\
-                         Object '{}' ({}) was declared as constant in chunk '{}' but was modified during execution.\n\n\
-                         Initial hash: {}\n\n\
-                         Final hash:   {}\n\n\
-                         This violates the constant object contract. The object must remain immutable after creation.\n\
-                         Output file NOT generated to preserve reproducibility.",
-                        obj_name,
-                        info.language,
-                        chunk_name,
-                        initial_hash,
-                        final_hash
-                    );
-                }
-            }
-
-            info!("✓ All constant objects verified successfully.");
-        }
-
-        // Save metadata (includes constant_objects info)
+        verify_constant_objects(
+            &constant_objects,
+            &mut self.executor_manager,
+            &cache,
+            &self.project_root,
+        )?;
         cache.save_metadata()?;
 
         Ok(typst_output)
     }
+}
+
+// ---------------------------------------------------------------------------
+// Private helpers for compile()
+// ---------------------------------------------------------------------------
+
+/// Collects all executable nodes from the document and sorts them by source position.
+fn build_executable_nodes(doc: &Document) -> Vec<ExecutableNode<'_>> {
+    let mut nodes: Vec<ExecutableNode<'_>> = doc
+        .chunks
+        .iter()
+        .map(ExecutableNode::Chunk)
+        .chain(doc.inline_exprs.iter().map(ExecutableNode::InlineExpr))
+        .collect();
+    nodes.sort_by_key(|node| match node {
+        ExecutableNode::Chunk(c) => c.start_byte,
+        ExecutableNode::InlineExpr(e) => e.start,
+    });
+    nodes
+}
+
+/// Returns `(start_byte, end_byte, language)` for a node.
+fn node_bounds<'a>(node: &'a ExecutableNode<'a>) -> (usize, usize, &'a str) {
+    match node {
+        ExecutableNode::Chunk(c) => (c.start_byte, c.end_byte, c.language.as_str()),
+        ExecutableNode::InlineExpr(e) => (e.start, e.end, e.language.as_str()),
+    }
+}
+
+/// Advances `node_end` past a trailing `\n` for chunk nodes.
+///
+/// `chunk.end_byte` stops just before the closing fence's trailing newline.
+/// Skipping it prevents an extra blank line in the output.
+fn advance_last_pos(node: &ExecutableNode<'_>, source: &str, node_end: usize) -> usize {
+    if matches!(node, ExecutableNode::Chunk(_))
+        && node_end < source.len()
+        && source.as_bytes()[node_end] == b'\n'
+    {
+        node_end + 1
+    } else {
+        node_end
+    }
+}
+
+/// Appends `content` to `output`, wrapped with KNOT-SYNC markers for chunks.
+/// Inline expressions are appended verbatim (no markers).
+fn append_node_output(
+    node: &ExecutableNode<'_>,
+    content: &str,
+    source_file: &str,
+    output: &mut String,
+) {
+    if let ExecutableNode::Chunk(chunk) = node {
+        output.push_str(&format!(
+            "// #KNOT-SYNC source={} line={}\n",
+            source_file,
+            chunk.range.start.line + 1,
+        ));
+        output.push_str(content);
+        if !content.is_empty() && !content.ends_with('\n') {
+            output.push('\n');
+        }
+        output.push_str("// END-KNOT-SYNC\n");
+    } else {
+        output.push_str(content);
+    }
+}
+
+/// Renders a node for a language that previously errored (inert / greyed-out mode).
+fn render_inert_node(
+    node: &ExecutableNode<'_>,
+    executor_manager: &mut ExecutorManager,
+    cache: &mut Cache,
+    snapshot_manager: &mut SnapshotManager,
+    ctx: &ChunkContext<'_>,
+) -> Result<String> {
+    match node {
+        ExecutableNode::Chunk(chunk) => {
+            let (res, _) = chunk_processor::process_chunk(
+                chunk,
+                executor_manager,
+                cache,
+                snapshot_manager,
+                ctx,
+            )?;
+            Ok(res)
+        }
+        ExecutableNode::InlineExpr(inline_expr) => Ok(format!(
+            "#text(fill: luma(150))[`{{{} {}}}`]",
+            inline_expr.language, inline_expr.code
+        )),
+    }
+}
+
+/// Formats the Typst error block shown when a node fails to execute.
+fn format_error_block(node: &ExecutableNode<'_>, lang: &str, error_msg: &str) -> String {
+    let error_msg = error_msg.replace('"', "\\\"");
+    let node_kind = match node {
+        ExecutableNode::Chunk(_) => "chunk",
+        ExecutableNode::InlineExpr(_) => "inline expression",
+    };
+    let node_name = match node {
+        ExecutableNode::Chunk(c) => c.name.as_deref().unwrap_or("unnamed"),
+        ExecutableNode::InlineExpr(_) => "inline",
+    };
+    format!(
+        "#code-chunk(
+    lang: \"{lang}\",
+    is-inert: false,
+    errors: ([#local(zebra-fill: none)[\n=== Execution Error ({lang})\nIn {node_kind} `{node_name}`\n\n```\n{error_msg}\n```\n\n_Execution of subsequent `{lang}` blocks has been suspended._]],)
+)\n"
+    )
+}
+
+/// Saves all constant objects declared by a chunk and records them in the tracking map.
+fn register_constant_objects(
+    chunk: &Chunk,
+    executor_manager: &mut ExecutorManager,
+    cache: &mut Cache,
+    project_root: &Path,
+    constant_objects: &mut HashMap<String, (String, String)>,
+) -> Result<()> {
+    let chunk_name = chunk.name.as_deref().unwrap_or("unnamed").to_string();
+    let exec = executor_manager.get_executor(&chunk.language)?;
+    let cache_dir = project_root.join(Defaults::CACHE_DIR_NAME);
+
+    for obj_name in &chunk.options.constant {
+        let obj_hash = exec
+            .hash_object(obj_name)
+            .context(format!("Failed to hash constant object '{}'", obj_name))?;
+
+        exec.save_constant(obj_name, &obj_hash, &cache_dir)
+            .context(format!("Failed to save constant object '{}'", obj_name))?;
+
+        let ext = exec.object_extension();
+        let object_path = cache_dir
+            .join("objects")
+            .join(format!("{}.{}", obj_hash, ext));
+        let size_bytes = std::fs::metadata(&object_path)?.len();
+
+        constant_objects.insert(obj_name.to_string(), (obj_hash.clone(), chunk_name.clone()));
+
+        cache.metadata.constant_objects.insert(
+            obj_name.to_string(),
+            ConstantObjectInfo {
+                hash: obj_hash,
+                size_bytes,
+                language: chunk.language.clone(),
+                created_in_chunk: chunk_name.clone(),
+                created_at: chrono::Utc::now().to_rfc3339(),
+            },
+        );
+
+        log::info!(
+            "🔒 Constant object '{}' ({}) declared in chunk '{}'",
+            obj_name,
+            chunk.language,
+            chunk_name
+        );
+    }
+    Ok(())
+}
+
+/// Verifies that no constant object was mutated after its initial declaration.
+fn verify_constant_objects(
+    constant_objects: &HashMap<String, (String, String)>,
+    executor_manager: &mut ExecutorManager,
+    cache: &Cache,
+    project_root: &Path,
+) -> Result<()> {
+    if constant_objects.is_empty() {
+        return Ok(());
+    }
+
+    info!(
+        "🔍 Verifying {} constant objects...",
+        constant_objects.len()
+    );
+
+    for (obj_name, (initial_hash, chunk_name)) in constant_objects {
+        let info = cache.metadata.constant_objects.get(obj_name).unwrap();
+        let exec = executor_manager.get_executor(&info.language)?;
+        let cache_dir = project_root.join(Defaults::CACHE_DIR_NAME);
+
+        exec.load_constant(obj_name, &info.hash, &cache_dir)
+            .context(format!(
+                "Failed to load constant '{}' for verification",
+                obj_name
+            ))?;
+
+        let final_hash = exec
+            .hash_object(obj_name)
+            .context(format!("Failed to verify constant object '{}'", obj_name))?;
+
+        if &final_hash != initial_hash {
+            anyhow::bail!(
+                "❌ Constant object verification failed!\n\n\
+                 Object '{}' ({}) was declared as constant in chunk '{}' but was modified during execution.\n\n\
+                 Initial hash: {}\n\n\
+                 Final hash:   {}\n\n\
+                 This violates the constant object contract. The object must remain immutable after creation.\n\
+                 Output file NOT generated to preserve reproducibility.",
+                obj_name,
+                info.language,
+                chunk_name,
+                initial_hash,
+                final_hash
+            );
+        }
+    }
+
+    info!("✓ All constant objects verified successfully.");
+    Ok(())
 }

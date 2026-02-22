@@ -58,7 +58,6 @@ impl PositionMapper {
 
     /// Convert a byte offset to a LSP Position (line, character).
     /// Used to map Core errors (byte offsets) back to LSP positions.
-    #[allow(dead_code)]
     pub fn position_at_offset(&self, offset: usize) -> Position {
         let mut line = 0;
         let mut column_utf16 = 0;

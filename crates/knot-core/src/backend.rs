@@ -54,225 +54,236 @@ impl Backend for TypstBackend {
         output: &ExecutionOutput,
         is_inert: bool,
     ) -> String {
-        // If show is none, return empty string immediately
         if matches!(resolved_options.show, Show::None) {
             return String::new();
         }
 
         let mut args = vec![];
-        // For inert chunks, we keep the original language for syntax highlighting
-        args.push(format!("lang: \"{}\"", chunk.language));
-        if let Some(name) = &chunk.name {
-            args.push(format!("name: \"{}\"", name));
-        } else {
-            // Only pass caption to code-chunk if there is no name wrapper (no figure)
-            if let Some(caption) = &chunk.options.caption {
-                args.push(format!("caption: [{}]", caption));
-            }
-        }
-
-        if is_inert {
-            args.push("is-inert: true".to_string());
-        }
-
-        // Include errors as a special argument to code-chunk (if any)
-        if !chunk.errors.is_empty() {
-            let mut error_list = chunk
-                .errors
-                .iter()
-                .map(|e| format!("[{}]", e.message))
-                .collect::<Vec<_>>()
-                .join(", ");
-
-            // In Typst, (item,) is a single-element array.
-            if chunk.errors.len() == 1 {
-                error_list.push(',');
-            }
-            args.push(format!("errors: ({})", error_list));
-        }
-
-        // Include runtime warnings based on visibility setting
-        if !output.warnings.is_empty() {
-            match resolved_options.warnings_visibility {
-                crate::parser::WarningsVisibility::None => {
-                    // Suppress warnings entirely — don't add to args
-                }
-                visibility => {
-                    let mut warning_list = output
-                        .warnings
-                        .iter()
-                        .map(|w| format!("[{}]", w.message))
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    if output.warnings.len() == 1 {
-                        warning_list.push(',');
-                    }
-                    args.push(format!("warnings: ({})", warning_list));
-                    if matches!(visibility, crate::parser::WarningsVisibility::Inline) {
-                        args.push("warnings-position: \"inline\"".to_string());
-                    }
-                }
-            }
-        }
-
-        // Generate code based on show option
-        let should_show_code = matches!(resolved_options.show, Show::Both | Show::Code);
-
-        if should_show_code {
-            // Use #local() for chunk-specific codly options (local scope)
-            let code_str = if !chunk.codly_options.is_empty() {
-                let local_call = format_local_call(&chunk.codly_options);
-                format!(
-                    "[{}[```{}\n{}```]]",
-                    local_call,
-                    chunk.language,
-                    chunk.code.trim()
-                )
-            } else {
-                format!("[```{}\n{}```]", chunk.language, chunk.code.trim())
-            };
-            args.push(format!("code: {}", code_str));
-        } else {
-            args.push("code: none".to_string());
-        }
-
-        // Generate output based on show option
-        let should_show_output = matches!(resolved_options.show, Show::Both | Show::Output);
-
-        if should_show_output {
-            let output_str = match &output.result {
-                ExecutionResult::Text(text) if !text.trim().is_empty() => {
-                    format!("[```output\n{}```]", text.trim())
-                }
-                ExecutionResult::Plot(path) => {
-                    let abs_plot = path.canonicalize().unwrap_or_else(|_| path.clone());
-                    format!("[#image(\"{}\")]", abs_plot.to_string_lossy())
-                }
-                ExecutionResult::DataFrame(csv_path) => {
-                    let abs_csv = csv_path.canonicalize().unwrap_or_else(|_| csv_path.clone());
-                    format!(
-                        "[#{{ let data = csv(\"{}\"); table(columns: data.first().len(), ..data.flatten()) }}]",
-                        abs_csv.to_string_lossy()
-                    )
-                }
-                ExecutionResult::TextAndPlot { text, plot } => {
-                    let abs_plot = plot.canonicalize().unwrap_or_else(|_| plot.clone());
-                    format!(
-                        "[#image(\"{}\")\n```output\n{}```]",
-                        abs_plot.to_string_lossy(),
-                        text.trim()
-                    )
-                }
-                ExecutionResult::DataFrameAndPlot { dataframe, plot } => {
-                    let abs_csv = dataframe
-                        .canonicalize()
-                        .unwrap_or_else(|_| dataframe.clone());
-                    let abs_plot = plot.canonicalize().unwrap_or_else(|_| plot.clone());
-                    format!(
-                        "[#{{ let data = csv(\"{}\"); table(columns: data.first().len(), ..data.flatten()) }}\n#image(\"{}\")]",
-                        abs_csv.to_string_lossy(),
-                        abs_plot.to_string_lossy()
-                    )
-                }
-                _ => "none".to_string(),
-            };
-            args.push(format!("output: {}", output_str));
-        } else {
-            args.push("output: none".to_string());
-        }
-
-        // Add presentation options
-        // Only add layout when showing both code and output
-        if matches!(resolved_options.show, Show::Both) {
-            let layout_str = match resolved_options.layout {
-                Layout::Horizontal => "horizontal",
-                Layout::Vertical => "vertical",
-            };
-            args.push(format!("layout: \"{}\"", layout_str));
-        }
-
-        if let Some(gutter) = &resolved_options.gutter {
-            args.push(format!("gutter: {}", gutter));
-        }
-
-        if let Some(code_bg) = &resolved_options.code_background {
-            args.push(format!("code-background: {}", code_bg));
-        }
-        if let Some(code_stroke) = &resolved_options.code_stroke {
-            args.push(format!("code-stroke: {}", code_stroke));
-        }
-        if let Some(code_radius) = &resolved_options.code_radius {
-            args.push(format!("code-radius: {}", code_radius));
-        }
-        if let Some(code_inset) = &resolved_options.code_inset {
-            args.push(format!("code-inset: {}", code_inset));
-        }
-
-        if let Some(output_bg) = &resolved_options.output_background {
-            args.push(format!("output-background: {}", output_bg));
-        }
-        if let Some(output_stroke) = &resolved_options.output_stroke {
-            args.push(format!("output-stroke: {}", output_stroke));
-        }
-        if let Some(output_radius) = &resolved_options.output_radius {
-            args.push(format!("output-radius: {}", output_radius));
-        }
-        if let Some(output_inset) = &resolved_options.output_inset {
-            args.push(format!("output-inset: {}", output_inset));
-        }
-
-        if let Some(warning_bg) = &resolved_options.warning_background {
-            args.push(format!("warning-background: {}", warning_bg));
-        }
-        if let Some(warning_stroke) = &resolved_options.warning_stroke {
-            args.push(format!("warning-stroke: {}", warning_stroke));
-        }
-        if let Some(warning_radius) = &resolved_options.warning_radius {
-            args.push(format!("warning-radius: {}", warning_radius));
-        }
-        if let Some(warning_inset) = &resolved_options.warning_inset {
-            args.push(format!("warning-inset: {}", warning_inset));
-        }
-
-        if let Some(width_ratio) = &resolved_options.width_ratio {
-            args.push(format!("width-ratio: \"{}\"", width_ratio));
-        }
-        if let Some(align) = &resolved_options.align {
-            args.push(format!("align: \"{}\"", align));
-        }
+        push_base_args(chunk, is_inert, &mut args);
+        push_warnings_arg(output, resolved_options, &mut args);
+        push_code_arg(chunk, resolved_options, &mut args);
+        push_output_arg(output, resolved_options, &mut args);
+        push_presentation_args(resolved_options, &mut args);
 
         let code_chunk_call = format!("#code-chunk({})", args.join(", "));
-        let mut chunk_output_final = String::new();
-
-        if let Some(name) = &chunk.name {
-            if !name.trim().is_empty() {
-                let mut figure_named_args = vec![];
-                figure_named_args.push("kind: raw".to_string());
-                figure_named_args.push("supplement: \"Chunk\"".to_string());
-
-                if let Some(caption) = &chunk.options.caption {
-                    figure_named_args.push(format!("caption: [{}]", caption));
-                }
-
-                let figure_call_start = format!("#figure({})", figure_named_args.join(", "));
-
-                chunk_output_final.push_str(&figure_call_start);
-                chunk_output_final.push_str(&format!(
-                    "[{}]
-",
-                    code_chunk_call
-                ));
-                // Add label
-                chunk_output_final.push_str(&format!(" <{}>", name.trim()));
-            } else {
-                chunk_output_final.push_str(&code_chunk_call);
-            }
-        } else {
-            chunk_output_final.push_str(&code_chunk_call);
-        }
-
-        chunk_output_final
+        wrap_with_figure(chunk, &code_chunk_call)
     }
+}
+
+// ---------------------------------------------------------------------------
+// Private helpers for format_chunk()
+// ---------------------------------------------------------------------------
+
+/// Pushes lang, name/caption, is-inert, and parse errors into `args`.
+fn push_base_args(chunk: &Chunk, is_inert: bool, args: &mut Vec<String>) {
+    args.push(format!("lang: \"{}\"", chunk.language));
+
+    if let Some(name) = &chunk.name {
+        args.push(format!("name: \"{}\"", name));
+    } else if let Some(caption) = &chunk.options.caption {
+        // Only pass caption to code-chunk if there is no name wrapper (no figure)
+        args.push(format!("caption: [{}]", caption));
+    }
+
+    if is_inert {
+        args.push("is-inert: true".to_string());
+    }
+
+    if !chunk.errors.is_empty() {
+        let mut error_list = chunk
+            .errors
+            .iter()
+            .map(|e| format!("[{}]", e.message))
+            .collect::<Vec<_>>()
+            .join(", ");
+        // In Typst, (item,) is a single-element array.
+        if chunk.errors.len() == 1 {
+            error_list.push(',');
+        }
+        args.push(format!("errors: ({})", error_list));
+    }
+}
+
+/// Pushes the `warnings:` argument based on visibility setting.
+fn push_warnings_arg(
+    output: &ExecutionOutput,
+    resolved_options: &ResolvedChunkOptions,
+    args: &mut Vec<String>,
+) {
+    if output.warnings.is_empty() {
+        return;
+    }
+    match resolved_options.warnings_visibility {
+        crate::parser::WarningsVisibility::None => {
+            // Suppress warnings entirely
+        }
+        visibility => {
+            let mut warning_list = output
+                .warnings
+                .iter()
+                .map(|w| format!("[{}]", w.message))
+                .collect::<Vec<_>>()
+                .join(", ");
+            if output.warnings.len() == 1 {
+                warning_list.push(',');
+            }
+            args.push(format!("warnings: ({})", warning_list));
+            if matches!(visibility, crate::parser::WarningsVisibility::Inline) {
+                args.push("warnings-position: \"inline\"".to_string());
+            }
+        }
+    }
+}
+
+/// Pushes the `code:` argument (with optional #local() wrapper for per-chunk codly options).
+fn push_code_arg(chunk: &Chunk, resolved_options: &ResolvedChunkOptions, args: &mut Vec<String>) {
+    if matches!(resolved_options.show, Show::Both | Show::Code) {
+        let code_str = if !chunk.codly_options.is_empty() {
+            let local_call = format_local_call(&chunk.codly_options);
+            format!(
+                "[{}[```{}\n{}```]]",
+                local_call,
+                chunk.language,
+                chunk.code.trim()
+            )
+        } else {
+            format!("[```{}\n{}```]", chunk.language, chunk.code.trim())
+        };
+        args.push(format!("code: {}", code_str));
+    } else {
+        args.push("code: none".to_string());
+    }
+}
+
+/// Pushes the `output:` argument from the execution result.
+fn push_output_arg(
+    output: &ExecutionOutput,
+    resolved_options: &ResolvedChunkOptions,
+    args: &mut Vec<String>,
+) {
+    if !matches!(resolved_options.show, Show::Both | Show::Output) {
+        args.push("output: none".to_string());
+        return;
+    }
+
+    let output_str = match &output.result {
+        ExecutionResult::Text(text) if !text.trim().is_empty() => {
+            format!("[```output\n{}```]", text.trim())
+        }
+        ExecutionResult::Plot(path) => {
+            let abs_plot = path.canonicalize().unwrap_or_else(|_| path.clone());
+            format!("[#image(\"{}\")]", abs_plot.to_string_lossy())
+        }
+        ExecutionResult::DataFrame(csv_path) => {
+            let abs_csv = csv_path.canonicalize().unwrap_or_else(|_| csv_path.clone());
+            format!(
+                "[#{{ let data = csv(\"{}\"); table(columns: data.first().len(), ..data.flatten()) }}]",
+                abs_csv.to_string_lossy()
+            )
+        }
+        ExecutionResult::TextAndPlot { text, plot } => {
+            let abs_plot = plot.canonicalize().unwrap_or_else(|_| plot.clone());
+            format!(
+                "[#image(\"{}\")\n```output\n{}```]",
+                abs_plot.to_string_lossy(),
+                text.trim()
+            )
+        }
+        ExecutionResult::DataFrameAndPlot { dataframe, plot } => {
+            let abs_csv = dataframe
+                .canonicalize()
+                .unwrap_or_else(|_| dataframe.clone());
+            let abs_plot = plot.canonicalize().unwrap_or_else(|_| plot.clone());
+            format!(
+                "[#{{ let data = csv(\"{}\"); table(columns: data.first().len(), ..data.flatten()) }}\n#image(\"{}\")]",
+                abs_csv.to_string_lossy(),
+                abs_plot.to_string_lossy()
+            )
+        }
+        _ => "none".to_string(),
+    };
+    args.push(format!("output: {}", output_str));
+}
+
+/// Pushes layout and all styling (code/output/warning box) arguments.
+fn push_presentation_args(resolved_options: &ResolvedChunkOptions, args: &mut Vec<String>) {
+    // Only add layout when showing both code and output
+    if matches!(resolved_options.show, Show::Both) {
+        let layout_str = match resolved_options.layout {
+            Layout::Horizontal => "horizontal",
+            Layout::Vertical => "vertical",
+        };
+        args.push(format!("layout: \"{}\"", layout_str));
+    }
+
+    if let Some(gutter) = &resolved_options.gutter {
+        args.push(format!("gutter: {}", gutter));
+    }
+
+    if let Some(v) = &resolved_options.code_background {
+        args.push(format!("code-background: {}", v));
+    }
+    if let Some(v) = &resolved_options.code_stroke {
+        args.push(format!("code-stroke: {}", v));
+    }
+    if let Some(v) = &resolved_options.code_radius {
+        args.push(format!("code-radius: {}", v));
+    }
+    if let Some(v) = &resolved_options.code_inset {
+        args.push(format!("code-inset: {}", v));
+    }
+
+    if let Some(v) = &resolved_options.output_background {
+        args.push(format!("output-background: {}", v));
+    }
+    if let Some(v) = &resolved_options.output_stroke {
+        args.push(format!("output-stroke: {}", v));
+    }
+    if let Some(v) = &resolved_options.output_radius {
+        args.push(format!("output-radius: {}", v));
+    }
+    if let Some(v) = &resolved_options.output_inset {
+        args.push(format!("output-inset: {}", v));
+    }
+
+    if let Some(v) = &resolved_options.warning_background {
+        args.push(format!("warning-background: {}", v));
+    }
+    if let Some(v) = &resolved_options.warning_stroke {
+        args.push(format!("warning-stroke: {}", v));
+    }
+    if let Some(v) = &resolved_options.warning_radius {
+        args.push(format!("warning-radius: {}", v));
+    }
+    if let Some(v) = &resolved_options.warning_inset {
+        args.push(format!("warning-inset: {}", v));
+    }
+
+    if let Some(v) = &resolved_options.width_ratio {
+        args.push(format!("width-ratio: \"{}\"", v));
+    }
+    if let Some(v) = &resolved_options.align {
+        args.push(format!("align: \"{}\"", v));
+    }
+}
+
+/// Wraps `code_chunk_call` in a #figure() with label when the chunk has a non-empty name.
+fn wrap_with_figure(chunk: &Chunk, code_chunk_call: &str) -> String {
+    if let Some(name) = &chunk.name
+        && !name.trim().is_empty()
+    {
+        let mut figure_args = vec!["kind: raw".to_string(), "supplement: \"Chunk\"".to_string()];
+        if let Some(caption) = &chunk.options.caption {
+            figure_args.push(format!("caption: [{}]", caption));
+        }
+        return format!(
+            "#figure({})[{}]\n <{}>",
+            figure_args.join(", "),
+            code_chunk_call,
+            name.trim()
+        );
+    }
+    code_chunk_call.to_string()
 }
 
 #[cfg(test)]

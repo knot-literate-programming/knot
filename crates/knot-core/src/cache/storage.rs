@@ -5,11 +5,9 @@
 // - Saving chunk execution results to cache files
 // - Loading cached results from files
 
-use super::metadata::{CacheMetadata, ChunkCacheEntry};
-use crate::executors::side_channel::RuntimeWarning;
+use super::metadata::CacheMetadata;
 use crate::executors::{ExecutionOutput, ExecutionResult};
 use anyhow::{Result, anyhow};
-use chrono::Utc;
 use log::warn;
 use std::fs;
 use std::io::Write;
@@ -218,32 +216,4 @@ pub fn save_result(
     };
 
     Ok(files_to_cache)
-}
-
-/// Creates a new ChunkCacheEntry
-#[allow(clippy::too_many_arguments)]
-pub fn create_chunk_entry(
-    chunk_index: usize,
-    chunk_name: Option<String>,
-    language: String,
-    hash: String,
-    files: Vec<String>,
-    warnings: Vec<RuntimeWarning>,
-    error: Option<crate::executors::side_channel::RuntimeError>,
-    dependencies: Vec<PathBuf>,
-) -> ChunkCacheEntry {
-    ChunkCacheEntry {
-        index: chunk_index,
-        name: chunk_name,
-        language,
-        hash,
-        files,
-        warnings,
-        error,
-        dependencies: dependencies
-            .iter()
-            .map(|p| p.to_string_lossy().to_string())
-            .collect(),
-        updated_at: Utc::now().to_rfc3339(),
-    }
 }

@@ -1,6 +1,7 @@
 use crate::lsp_methods::text_document as lsp;
 use crate::state::ServerState;
 use knot_core::Document;
+use std::collections::HashMap;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 
@@ -12,10 +13,10 @@ pub async fn handle_formatting(
     let uri = &params.text_document.uri;
 
     // 1. Get current document state
-    let (text, _version) = {
+    let text = {
         let docs = state.documents.read().await;
         match docs.get(uri) {
-            Some(doc) => (doc.text.clone(), doc.version),
+            Some(doc) => doc.text.clone(),
             _ => return Ok(None),
         }
     };
@@ -23,161 +24,20 @@ pub async fn handle_formatting(
     // 2. Parse document (always succeeds; errors stored in doc.errors)
     let doc = Document::parse(text.clone());
 
-    // --- PHASE A: Internal Chunk Formatting (Air/Ruff) ---
-    // Perform code formatting for each chunk asynchronously before document-wide normalization.
-    let mut formatted_chunks = std::collections::HashMap::new();
-    let fmt = state.formatter.read().await.clone();
+    // Phase A: Internal chunk formatting (Air/Ruff)
+    let formatted_chunks = run_chunk_formatting(&doc, state, uri, client).await;
 
-    if let Some(f) = fmt {
-        // Collect all chunks that need formatting
-        let mut tasks = Vec::new();
-        for (i, chunk) in doc.chunks.iter().enumerate() {
-            let f_inner = f.clone();
-            let code = chunk.code.clone();
-            let lang = chunk.language.clone();
-            tasks.push(tokio::task::spawn_blocking(move || {
-                (i, lang.clone(), f_inner.format_code(&code, &lang))
-            }));
-        }
-
-        // Wait for all formatting tasks to complete
-        for task in tasks {
-            if let Ok((index, lang, result)) = task.await {
-                match result {
-                    Ok(formatted) => {
-                        formatted_chunks.insert(index, formatted);
-                    }
-                    Err(e) => {
-                        log::debug!(
-                            "External formatter failed for chunk {} ({}): {:?}",
-                            index,
-                            lang,
-                            e
-                        );
-                        // Notify user once per session for this document
-                        let mut docs = state.documents.write().await;
-                        if let Some(doc_state) = docs.get_mut(uri)
-                            && !doc_state.formatting_error_notified
-                        {
-                            doc_state.formatting_error_notified = true;
-                            let msg = format!(
-                                "Formatting failed for {} chunk: {}. Structural normalization will still be applied.",
-                                lang.to_uppercase(),
-                                e
-                            );
-                            let client_inner = client.clone();
-                            tokio::spawn(async move {
-                                let _ = client_inner.show_message(MessageType::WARNING, msg).await;
-                            });
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Now perform structural normalization using the pre-formatted results (pure synchronous logic)
     let clean_knot_text = doc.format(|index, _code, _lang| formatted_chunks.get(&index).cloned());
 
-    // --- PHASE B: Global Typst Formatting (Tinymist) ---
-    // Generate the structured mask for Tinymist
-    let typst_mask = crate::transform::transform_to_typst(&clean_knot_text);
-    let virtual_uri = crate::transform::to_virtual_uri(uri);
+    // Phase B: Global Typst formatting (Tinymist)
+    let formatted_typst = run_typst_formatting(state, uri, &params, clean_knot_text.clone()).await;
 
-    let formatted_typst = {
-        let mut tinymist_guard = state.tinymist.write().await;
-        if let Some(proxy) = tinymist_guard.as_mut() {
-            // Get and increment virtual version
-            let (v_version, already_opened) = {
-                let mut docs = state.documents.write().await;
-                if let Some(doc) = docs.get_mut(uri) {
-                    doc.virtual_version += 1;
-                    (doc.virtual_version, doc.virtual_version > 1)
-                } else {
-                    (1, false)
-                }
-            };
-
-            // Sync with Tinymist using proper method
-            let sync_result = if !already_opened {
-                proxy
-                    .send_notification(
-                        lsp::DID_OPEN,
-                        serde_json::json!({
-                            "textDocument": {
-                                "uri": virtual_uri,
-                                "languageId": "typst",
-                                "version": v_version,
-                                "text": typst_mask
-                            }
-                        }),
-                    )
-                    .await
-            } else {
-                proxy
-                    .send_notification(
-                        lsp::DID_CHANGE,
-                        serde_json::json!({
-                            "textDocument": {
-                                "uri": virtual_uri,
-                                "version": v_version
-                            },
-                            "contentChanges": [{ "text": typst_mask }]
-                        }),
-                    )
-                    .await
-            };
-
-            if let Err(e) = sync_result {
-                log::warn!("formatting: failed to sync virtual document with Tinymist: {e}");
-            }
-
-            // Request formatting
-            let resp = proxy
-                .send_request(
-                    lsp::FORMATTING,
-                    serde_json::json!({
-                        "textDocument": { "uri": virtual_uri },
-                        "options": params.options
-                    }),
-                )
-                .await;
-
-            match resp {
-                Ok(res) => {
-                    if let Some(edits_val) = res.get("result") {
-                        match serde_json::from_value::<Vec<TextEdit>>(edits_val.clone()) {
-                            Ok(edits) => apply_edits(&typst_mask, edits),
-                            Err(e) => {
-                                log::warn!("formatting: failed to deserialize Tinymist edits: {e}");
-                                typst_mask
-                            }
-                        }
-                    } else {
-                        log::debug!("formatting: Tinymist returned no edits");
-                        typst_mask
-                    }
-                }
-                Err(e) => {
-                    log::warn!("formatting: Tinymist formatting request failed: {e}");
-                    typst_mask
-                }
-            }
-        } else {
-            log::debug!("formatting: Tinymist unavailable, skipping Typst formatting");
-            typst_mask
-        }
-    };
-
-    // --- PHASE C: Final Document Reconstruction ---
-    // We need to extract the clean Knot chunks from the masked document
-    // and re-insert them into the formatted Typst structure.
+    // Phase C: Final document reconstruction
     let final_text = reconstruct_knot_document(&formatted_typst, &clean_knot_text);
 
     if final_text == text {
         Ok(None)
     } else {
-        // Return a single full-document replacement for simplicity and robustness
         Ok(Some(vec![TextEdit {
             range: Range {
                 start: Position {
@@ -188,6 +48,162 @@ pub async fn handle_formatting(
             },
             new_text: final_text,
         }]))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Private helpers for handle_formatting()
+// ---------------------------------------------------------------------------
+
+/// Phase A: run Air/Ruff on each chunk in parallel, collecting successful results.
+///
+/// Failures are logged and a one-time user warning is shown per document.
+async fn run_chunk_formatting(
+    doc: &Document,
+    state: &ServerState,
+    uri: &Url,
+    client: &tower_lsp::Client,
+) -> HashMap<usize, String> {
+    let mut formatted_chunks = HashMap::new();
+    let fmt = state.formatter.read().await.clone();
+
+    let Some(f) = fmt else {
+        return formatted_chunks;
+    };
+
+    let mut tasks = Vec::new();
+    for (i, chunk) in doc.chunks.iter().enumerate() {
+        let f_inner = f.clone();
+        let code = chunk.code.clone();
+        let lang = chunk.language.clone();
+        tasks.push(tokio::task::spawn_blocking(move || {
+            (i, lang.clone(), f_inner.format_code(&code, &lang))
+        }));
+    }
+
+    for task in tasks {
+        if let Ok((index, lang, result)) = task.await {
+            match result {
+                Ok(formatted) => {
+                    formatted_chunks.insert(index, formatted);
+                }
+                Err(e) => {
+                    log::debug!(
+                        "External formatter failed for chunk {} ({}): {:?}",
+                        index,
+                        lang,
+                        e
+                    );
+                    let mut docs = state.documents.write().await;
+                    if let Some(doc_state) = docs.get_mut(uri)
+                        && !doc_state.formatting_error_notified
+                    {
+                        doc_state.formatting_error_notified = true;
+                        let msg = format!(
+                            "Formatting failed for {} chunk: {}. Structural normalization will still be applied.",
+                            lang.to_uppercase(),
+                            e
+                        );
+                        let client_inner = client.clone();
+                        tokio::spawn(async move {
+                            let _ = client_inner.show_message(MessageType::WARNING, msg).await;
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    formatted_chunks
+}
+
+/// Phase B: sync the Typst mask to Tinymist and request formatting.
+///
+/// Returns the formatted Typst string, or the original mask if Tinymist is
+/// unavailable or returns no edits.
+async fn run_typst_formatting(
+    state: &ServerState,
+    uri: &Url,
+    params: &DocumentFormattingParams,
+    typst_mask: String,
+) -> String {
+    let virtual_uri = crate::transform::to_virtual_uri(uri);
+
+    let mut tinymist_guard = state.tinymist.write().await;
+    let Some(proxy) = tinymist_guard.as_mut() else {
+        log::debug!("formatting: Tinymist unavailable, skipping Typst formatting");
+        return typst_mask;
+    };
+
+    let (v_version, already_opened) = {
+        let mut docs = state.documents.write().await;
+        if let Some(doc) = docs.get_mut(uri) {
+            doc.virtual_version += 1;
+            (doc.virtual_version, doc.virtual_version > 1)
+        } else {
+            (1, false)
+        }
+    };
+
+    let sync_result = if !already_opened {
+        proxy
+            .send_notification(
+                lsp::DID_OPEN,
+                serde_json::json!({
+                    "textDocument": {
+                        "uri": virtual_uri,
+                        "languageId": "typst",
+                        "version": v_version,
+                        "text": typst_mask
+                    }
+                }),
+            )
+            .await
+    } else {
+        proxy
+            .send_notification(
+                lsp::DID_CHANGE,
+                serde_json::json!({
+                    "textDocument": { "uri": virtual_uri, "version": v_version },
+                    "contentChanges": [{ "text": typst_mask }]
+                }),
+            )
+            .await
+    };
+
+    if let Err(e) = sync_result {
+        log::warn!("formatting: failed to sync virtual document with Tinymist: {e}");
+    }
+
+    let resp = proxy
+        .send_request(
+            lsp::FORMATTING,
+            serde_json::json!({
+                "textDocument": { "uri": virtual_uri },
+                "options": params.options
+            }),
+        )
+        .await;
+
+    match resp {
+        Ok(res) => {
+            if let Some(edits_val) = res.get("result") {
+                match serde_json::from_value::<Vec<TextEdit>>(edits_val.clone()) {
+                    Ok(edits) => apply_edits(&typst_mask, edits),
+                    Err(e) => {
+                        log::warn!("formatting: failed to deserialize Tinymist edits: {e}");
+                        typst_mask
+                    }
+                }
+            } else {
+                log::debug!("formatting: Tinymist returned no edits");
+                typst_mask
+            }
+        }
+        Err(e) => {
+            log::warn!("formatting: Tinymist formatting request failed: {e}");
+            typst_mask
+        }
     }
 }
 
@@ -297,23 +313,50 @@ enum ElementKind {
 
 /// Reconstructs the Knot document by finding Knot elements in the formatted Typst.
 fn reconstruct_knot_document(formatted_typst: &str, clean_knot: &str) -> String {
-    // 1. Parse both documents (always succeeds; errors stored in doc.errors)
     let original_doc = knot_core::Document::parse(clean_knot.to_string());
     let formatted_doc = knot_core::Document::parse(formatted_typst.to_string());
 
-    // 2. Element count check
+    if let Some(fallback) = validate_reconstruction(&original_doc, &formatted_doc, clean_knot) {
+        return fallback;
+    }
+
+    let mut elements = build_element_list(&formatted_doc);
+    elements.sort_by_key(|e| e.start);
+
+    // Overlap guard: catch corrupt positions before the substitution loop panics.
+    let mut prev_end = 0usize;
+    for elem in &elements {
+        if elem.start < prev_end || elem.end < elem.start {
+            log::warn!(
+                "Formatting mismatch: overlapping element positions. Falling back to clean Knot."
+            );
+            return clean_knot.to_string();
+        }
+        prev_end = elem.end;
+    }
+
+    substitute_elements(formatted_typst, &original_doc, elements)
+}
+
+// ---------------------------------------------------------------------------
+// Private helpers for reconstruct_knot_document()
+// ---------------------------------------------------------------------------
+
+/// Validates that the formatted doc has the same element counts and languages.
+///
+/// Returns `Some(fallback)` if validation fails, `None` if reconstruction can proceed.
+fn validate_reconstruction(
+    original_doc: &knot_core::Document,
+    formatted_doc: &knot_core::Document,
+    clean_knot: &str,
+) -> Option<String> {
     if original_doc.chunks.len() != formatted_doc.chunks.len()
         || original_doc.inline_exprs.len() != formatted_doc.inline_exprs.len()
     {
         log::warn!("Formatting mismatch: element count changed. Falling back to clean Knot.");
-        return clean_knot.to_string();
+        return Some(clean_knot.to_string());
     }
 
-    // 2b. Language correspondence (pairwise).
-    // The mirror mask preserves fence tags verbatim, so a mismatch means
-    // Tinymist altered a raw-block header in an unexpected way.  The index-based
-    // substitution below would silently assign the wrong code to the wrong chunk
-    // without this guard.
     if !original_doc
         .chunks
         .iter()
@@ -321,14 +364,15 @@ fn reconstruct_knot_document(formatted_typst: &str, clean_knot: &str) -> String 
         .all(|(o, f)| o.language == f.language)
     {
         log::warn!("Formatting mismatch: chunk language changed. Falling back to clean Knot.");
-        return clean_knot.to_string();
+        return Some(clean_knot.to_string());
     }
 
-    let mut final_text = String::with_capacity(formatted_typst.len());
-    let mut last_pos = 0;
+    None
+}
 
-    // 3. Build elements list
-    let mut elements: Vec<Element> = Vec::new();
+/// Builds a flat, unsorted list of chunk and inline positions from the formatted doc.
+fn build_element_list(formatted_doc: &knot_core::Document) -> Vec<Element> {
+    let mut elements = Vec::new();
     for (i, chunk) in formatted_doc.chunks.iter().enumerate() {
         elements.push(Element {
             start: chunk.start_byte,
@@ -343,35 +387,24 @@ fn reconstruct_knot_document(formatted_typst: &str, clean_knot: &str) -> String 
             kind: ElementKind::Inline(i),
         });
     }
-    elements.sort_by_key(|e| e.start);
+    elements
+}
 
-    // 2c. Overlap guard.
-    // After sorting by start, each element must begin at or after the previous
-    // one ends.  The well-formed parser should never produce overlapping ranges,
-    // but if Tinymist returns unexpected content the substitution loop would
-    // attempt a backwards string slice and panic.  Catch it here and fall back
-    // gracefully instead.
-    {
-        let mut prev_end = 0usize;
-        for elem in &elements {
-            if elem.start < prev_end || elem.end < elem.start {
-                log::warn!(
-                    "Formatting mismatch: overlapping element positions. Falling back to clean Knot."
-                );
-                return clean_knot.to_string();
-            }
-            prev_end = elem.end;
-        }
-    }
+/// Walks through `formatted_typst`, replacing each masked element with its
+/// original Knot source (code chunks or inline expressions).
+fn substitute_elements(
+    formatted_typst: &str,
+    original_doc: &knot_core::Document,
+    elements: Vec<Element>,
+) -> String {
+    let mut final_text = String::with_capacity(formatted_typst.len());
+    let mut last_pos = 0;
 
-    // 4. Substitution
     for elem in elements {
-        // Append Typst text before the element
         final_text.push_str(&formatted_typst[last_pos..elem.start]);
 
         match elem.kind {
             ElementKind::Chunk(i) => {
-                // A. Detect indentation provided by Typst (Tinymist)
                 let line_start = formatted_typst[..elem.start]
                     .rfind('\n')
                     .map(|p| p + 1)
@@ -382,9 +415,6 @@ fn reconstruct_knot_document(formatted_typst: &str, clean_knot: &str) -> String 
                 } else {
                     ""
                 };
-
-                // B. Format with the indentation detected by Typst, without
-                // cloning or mutating the AST node.
                 final_text.push_str(&original_doc.chunks[i].format(None, Some(indent_str)));
             }
             ElementKind::Inline(i) => {

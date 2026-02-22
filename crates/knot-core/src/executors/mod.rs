@@ -1,5 +1,10 @@
 use anyhow::Result;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+use std::process::{ChildStderr, ChildStdout};
+use std::sync::mpsc;
+use std::thread;
+use std::time::{Duration, Instant};
 
 pub mod error_utils;
 pub mod manager;
@@ -7,6 +12,67 @@ pub mod path_utils;
 pub mod python;
 pub mod r;
 pub mod side_channel;
+
+/// Concurrently read stdout and stderr until boundary markers are reached.
+///
+/// Spawns two threads, one per stream, and waits for both with the given timeout.
+/// Returns `Some((stdout, stderr, reader_out, reader_err))` on success,
+/// or `None` if either stream does not produce a boundary within `timeout`.
+pub(crate) fn read_streams_until_boundary(
+    stdout: BufReader<ChildStdout>,
+    stderr: BufReader<ChildStderr>,
+    timeout: Duration,
+    boundary: &'static str,
+) -> Option<(
+    String,
+    String,
+    BufReader<ChildStdout>,
+    BufReader<ChildStderr>,
+)> {
+    let (tx_out, rx_out) = mpsc::channel::<(String, BufReader<ChildStdout>)>();
+    let (tx_err, rx_err) = mpsc::channel::<(String, BufReader<ChildStderr>)>();
+
+    thread::spawn(move || {
+        let _ = tx_out.send(read_stream(stdout, boundary));
+    });
+    thread::spawn(move || {
+        let _ = tx_err.send(read_stream(stderr, boundary));
+    });
+
+    let deadline = Instant::now() + timeout;
+
+    let (stdout_output, reader_out) = rx_out.recv_timeout(timeout).ok()?;
+    let remaining = deadline
+        .saturating_duration_since(Instant::now())
+        .max(Duration::from_millis(500));
+    let (stderr_output, reader_err) = rx_err.recv_timeout(remaining).ok()?;
+
+    Some((stdout_output, stderr_output, reader_out, reader_err))
+}
+
+/// Read lines from `reader` until a line containing `boundary` is found.
+/// Returns the accumulated output (before the boundary) and the reader.
+pub(crate) fn read_stream<R: BufRead + Send + 'static>(
+    mut reader: R,
+    boundary: &'static str,
+) -> (String, R) {
+    let mut output = String::new();
+    let mut line_buffer = String::new();
+    loop {
+        line_buffer.clear();
+        let bytes_read = reader.read_line(&mut line_buffer).unwrap_or(0);
+        if bytes_read == 0 {
+            break;
+        }
+        if line_buffer.contains(boundary) {
+            let parts: Vec<&str> = line_buffer.split(boundary).collect();
+            output.push_str(parts[0]);
+            break;
+        }
+        output.push_str(&line_buffer);
+    }
+    (output, reader)
+}
 
 pub use manager::ExecutorManager;
 pub use side_channel::{KnotMetadata, OutputMetadata, RuntimeError, RuntimeWarning, SideChannel};
@@ -111,7 +177,7 @@ pub fn metadata_to_execution_result(
                 if !text_content.is_empty() {
                     text_content.push('\n');
                 }
-                text_content.push_str(&content.to_string());
+                text_content.push_str(&content);
             }
             OutputMetadata::Plot { path, .. } => {
                 plot_count += 1;

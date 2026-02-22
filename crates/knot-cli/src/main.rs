@@ -4,7 +4,7 @@ use include_dir::{Dir, include_dir};
 use knot_cli::{build_project, compile_file};
 use log::info;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 // Embed the minimal template and helper packages
 static MINIMAL_TEMPLATE: Dir = include_dir!("$CARGO_MANIFEST_DIR/../../templates/minimal");
@@ -245,19 +245,59 @@ fn init(project_name: &PathBuf) -> Result<()> {
 /// - Watches .knot files for changes and rebuilds automatically
 /// - Launches 'typst watch' or 'tinymist preview' in parallel for live PDF preview
 fn watch(preview: bool) -> Result<()> {
-    use knot_core::config::Config;
     use notify::{Config as NotifyConfig, RecommendedWatcher, RecursiveMode, Watcher};
     use std::sync::mpsc::channel;
     use std::time::Duration;
 
     info!("👀 Starting watch mode...");
 
-    // Step 1: Find project root and load config
+    let (project_root, watched_files, typ_output_path) = watch_setup()?;
+
+    println!("🔨 Initial build...");
+    if let Err(e) = build_project(Some(&project_root)) {
+        eprintln!("❌ Initial build failed: {}", e);
+        eprintln!("⚠️  Continuing in watch mode...");
+    } else {
+        println!("✅ Initial build succeeded");
+    }
+
+    let _preview_process = spawn_preview(preview, &project_root, &typ_output_path)?;
+
+    let (tx, rx) = channel();
+    let mut watcher = RecommendedWatcher::new(
+        tx,
+        NotifyConfig::default().with_poll_interval(Duration::from_millis(100)),
+    )
+    .context("Failed to create file watcher")?;
+    watcher
+        .watch(&project_root, RecursiveMode::Recursive)
+        .with_context(|| format!("Failed to watch project directory: {:?}", project_root))?;
+
+    println!("\n👀 Watching for changes. Press Ctrl+C to stop.");
+    println!("💡 Edit any .knot file to trigger rebuild.\n");
+
+    run_event_loop(
+        rx,
+        &watched_files,
+        &project_root,
+        Duration::from_millis(150),
+    );
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Private helpers for watch()
+// ---------------------------------------------------------------------------
+
+/// Resolves the project root, main file, and list of files to watch.
+fn watch_setup() -> Result<(PathBuf, Vec<PathBuf>, PathBuf)> {
+    use knot_core::config::Config;
+
     let current_dir = std::env::current_dir().context("Failed to get current directory")?;
     let (config, project_root) = Config::find_and_load(&current_dir)?;
 
-    // Step 2: Get main file from knot.toml
-    let main_file_name = config.document.main.ok_or_else(|| {
+    let main_file_name = config.document.main.clone().ok_or_else(|| {
         anyhow::anyhow!(
             "No 'main' file specified in knot.toml.\n\
              Add: [document]\n     main = \"main.knot\""
@@ -265,7 +305,6 @@ fn watch(preview: bool) -> Result<()> {
     })?;
 
     let main_file = project_root.join(&main_file_name);
-
     if !main_file.exists() {
         anyhow::bail!(
             "Main file not found: {:?}\n\
@@ -278,41 +317,13 @@ fn watch(preview: bool) -> Result<()> {
     info!("📄 Main file: {}", main_file.display());
     info!("📁 Project root: {}", project_root.display());
 
-    // Step 3: Collect all files to watch
-    let mut watched_files = vec![main_file.clone()];
-
-    // Add knot.toml
-    let knot_toml = project_root.join("knot.toml");
-    if knot_toml.exists() {
-        watched_files.push(knot_toml);
-    }
-
-    // Add all included files
-    if let Some(includes) = &config.document.includes {
-        for include_name in includes {
-            let include_path = project_root.join(include_name);
-            if include_path.exists() {
-                watched_files.push(include_path);
-            }
-        }
-    }
+    let watched_files = collect_watched_files(&project_root, &config, &main_file);
 
     info!("👁️  Watching {} file(s)", watched_files.len());
     for file in &watched_files {
         info!("   - {}", file.display());
     }
 
-    // Step 4: Initial build
-    println!("🔨 Initial build...");
-
-    if let Err(e) = build_project(Some(&project_root)) {
-        eprintln!("❌ Initial build failed: {}", e);
-        eprintln!("⚠️  Continuing in watch mode...");
-    } else {
-        println!("✅ Initial build succeeded");
-    }
-
-    // Step 5: Determine .typ output path for typst watch (without dot prefix)
     let typ_output_path = {
         let stem = main_file
             .file_stem()
@@ -320,108 +331,115 @@ fn watch(preview: bool) -> Result<()> {
         project_root.join(format!("{}.typ", stem.to_string_lossy()))
     };
 
-    // Step 6: Launch preview in background
-    let _preview_process = if preview {
+    Ok((project_root, watched_files, typ_output_path))
+}
+
+/// Collects the list of files that should trigger a rebuild when changed.
+fn collect_watched_files(
+    project_root: &Path,
+    config: &knot_core::config::Config,
+    main_file: &Path,
+) -> Vec<PathBuf> {
+    let mut files = vec![main_file.to_path_buf()];
+
+    let knot_toml = project_root.join("knot.toml");
+    if knot_toml.exists() {
+        files.push(knot_toml);
+    }
+
+    if let Some(includes) = &config.document.includes {
+        for include_name in includes {
+            let include_path = project_root.join(include_name);
+            if include_path.exists() {
+                files.push(include_path);
+            }
+        }
+    }
+
+    files
+}
+
+/// Spawns the background PDF preview process (typst watch or tinymist preview).
+fn spawn_preview(
+    preview: bool,
+    project_root: &Path,
+    typ_output_path: &Path,
+) -> Result<std::process::Child> {
+    if preview {
         info!("🔍 Launching tinymist preview for live PDF preview...");
-        let abs_root = project_root.canonicalize().unwrap_or(project_root.clone());
+        let abs_root = project_root
+            .canonicalize()
+            .unwrap_or(project_root.to_path_buf());
         let abs_typ = typ_output_path
             .canonicalize()
-            .unwrap_or(typ_output_path.clone());
-
-        let mut cmd = std::process::Command::new("tinymist");
-        cmd.arg("preview")
+            .unwrap_or(typ_output_path.to_path_buf());
+        std::process::Command::new("tinymist")
+            .arg("preview")
             .arg("--root")
             .arg(&abs_root)
-            .arg(&abs_typ);
-
-        cmd.spawn()
-            .context("Failed to launch 'tinymist preview'. Is Tinymist installed?")?
+            .arg(&abs_typ)
+            .spawn()
+            .context("Failed to launch 'tinymist preview'. Is Tinymist installed?")
     } else {
         info!("🔍 Launching typst watch for live PDF preview...");
         std::process::Command::new("typst")
             .arg("watch")
             .arg("--root")
-            .arg(&project_root)
-            .arg(&typ_output_path)
+            .arg(project_root)
+            .arg(typ_output_path)
             .spawn()
-            .context("Failed to launch 'typst watch'. Is Typst installed?")?
-    };
+            .context("Failed to launch 'typst watch'. Is Typst installed?")
+    }
+}
 
-    // Step 7: Setup file watcher
-    let (tx, rx) = channel();
+/// Runs the file-change event loop until the channel is closed.
+fn run_event_loop(
+    rx: std::sync::mpsc::Receiver<notify::Result<notify::Event>>,
+    watched_files: &[PathBuf],
+    project_root: &Path,
+    debounce: std::time::Duration,
+) {
+    use notify::EventKind;
 
-    let mut watcher = RecommendedWatcher::new(
-        tx,
-        NotifyConfig::default().with_poll_interval(Duration::from_millis(100)),
-    )
-    .context("Failed to create file watcher")?;
-
-    // Watch the project root directory (simpler and more robust)
-    // We'll filter events in the loop to only act on watched files
-    watcher
-        .watch(&project_root, RecursiveMode::Recursive)
-        .with_context(|| format!("Failed to watch project directory: {:?}", project_root))?;
-
-    log::info!("🔍 Watching directory: {}", project_root.display());
-
-    println!("\n👀 Watching for changes. Press Ctrl+C to stop.");
-    println!("💡 Edit any .knot file to trigger rebuild.\n");
-
-    // Step 8: Event loop
     let mut last_rebuild = std::time::Instant::now();
-    let debounce_duration = Duration::from_millis(150);
 
     loop {
         match rx.recv() {
             Ok(Ok(event)) => {
-                use notify::EventKind;
-
-                // Debug: log all events
                 log::debug!("📡 Event: {:?} on {:?}", event.kind, event.paths);
 
-                // Accept modify, create, and remove events
-                // (editors like VSCode use temp files: create + remove instead of modify)
                 let is_relevant = matches!(
                     event.kind,
                     EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_)
                 );
-
                 if !is_relevant {
                     continue;
                 }
 
-                // Check if any watched file is affected
-                let affects_watched_file = event.paths.iter().any(|p| {
-                    watched_files
-                        .iter()
-                        .any(|watched| p.file_name() == watched.file_name())
-                });
-
-                if !affects_watched_file {
+                let affects_watched = event
+                    .paths
+                    .iter()
+                    .any(|p| watched_files.iter().any(|w| p.file_name() == w.file_name()));
+                if !affects_watched {
                     log::debug!("   → Ignoring (not a watched file)");
                     continue;
                 }
 
-                // Debouncing: ignore events too close together
                 let now = std::time::Instant::now();
-                if now.duration_since(last_rebuild) < debounce_duration {
+                if now.duration_since(last_rebuild) < debounce {
                     log::debug!("   → Debounced");
                     continue;
                 }
                 last_rebuild = now;
 
-                // Find which file changed
                 if let Some(path) = event.paths.first() {
-                    let changed_file = path
+                    let changed = path
                         .file_name()
                         .and_then(|n| n.to_str())
                         .unwrap_or("unknown");
-
-                    println!("\n📝 Change detected in: {}", changed_file);
+                    println!("\n📝 Change detected in: {}", changed);
                     println!("🔨 Rebuilding...");
-
-                    // Rebuild the project
-                    match build_project(Some(&project_root)) {
+                    match build_project(Some(project_root)) {
                         Ok(_) => println!("✅ Build succeeded\n"),
                         Err(e) => {
                             eprintln!("❌ Build failed: {}\n", e);
@@ -437,122 +455,60 @@ fn watch(preview: bool) -> Result<()> {
             }
         }
     }
-
-    Ok(())
 }
 
 /// Install the VSCode extension
 fn install_vscode() -> Result<()> {
-    use std::env;
-    use std::process::Command;
-
     info!("🔧 Installing VSCode extension...");
 
-    // Find the editors/vscode directory
-    // Start from current directory and go up to find the knot repo root
-    let mut current_dir = env::current_dir()?;
-    let vscode_dir = loop {
-        let candidate = current_dir.join("editors").join("vscode");
-        if candidate.exists() && candidate.is_dir() {
-            break candidate;
-        }
-
-        // Try going up one level
-        match current_dir.parent() {
-            Some(parent) => current_dir = parent.to_path_buf(),
-            None => anyhow::bail!(
-                "Could not find editors/vscode directory. \
-                 Please run this command from within the knot repository."
-            ),
-        }
-    };
-
+    let vscode_dir = find_vscode_extension_dir()?;
     println!("📂 Found extension at: {:?}", vscode_dir);
 
-    // Step 1: npm install
     println!("\n📦 Installing npm dependencies...");
-    let npm_install = Command::new("npm")
-        .arg("install")
-        .current_dir(&vscode_dir)
-        .status()
-        .context("Failed to run 'npm install'. Is npm installed?")?;
-
-    if !npm_install.success() {
-        anyhow::bail!("npm install failed");
-    }
+    run_npm_command(
+        &["install"],
+        &vscode_dir,
+        "Failed to run 'npm install'. Is npm installed?",
+    )?;
     println!("  ✓ Dependencies installed");
 
-    // Step 2: npm run compile
     println!("\n🔨 Compiling TypeScript...");
-    let npm_compile = Command::new("npm")
-        .arg("run")
-        .arg("compile")
-        .current_dir(&vscode_dir)
-        .status()
-        .context("Failed to run 'npm run compile'")?;
-
-    if !npm_compile.success() {
-        anyhow::bail!("npm run compile failed");
-    }
+    run_npm_command(
+        &["run", "compile"],
+        &vscode_dir,
+        "Failed to run 'npm run compile'",
+    )?;
     println!("  ✓ TypeScript compiled");
 
-    // Step 3: Clean up old .vsix files to avoid confusion
     println!("\n🧹 Cleaning up old .vsix files...");
-    let old_vsix_files: Vec<_> = fs::read_dir(&vscode_dir)?
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| {
-            entry
-                .path()
+    for entry in fs::read_dir(&vscode_dir)?
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.path()
                 .extension()
                 .and_then(|ext| ext.to_str())
                 .map(|ext| ext == "vsix")
                 .unwrap_or(false)
         })
-        .collect();
-
-    for entry in old_vsix_files {
+    {
         let path = entry.path();
         fs::remove_file(&path)?;
         println!("  ✓ Removed old package: {:?}", path.file_name().unwrap());
     }
 
-    // Step 4: npm run package (creates .vsix)
     println!("\n📦 Packaging extension...");
-    let npm_package = Command::new("npm")
-        .arg("run")
-        .arg("package")
-        .current_dir(&vscode_dir)
-        .status()
-        .context("Failed to run 'npm run package'. Is @vscode/vsce installed?")?;
-
-    if !npm_package.success() {
-        anyhow::bail!("npm run package failed");
-    }
+    run_npm_command(
+        &["run", "package"],
+        &vscode_dir,
+        "Failed to run 'npm run package'. Is @vscode/vsce installed?",
+    )?;
     println!("  ✓ Extension packaged");
 
-    // Step 5: Find the .vsix file (should be only one after cleanup)
-    let vsix_files: Vec<_> = fs::read_dir(&vscode_dir)?
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| {
-            entry
-                .path()
-                .extension()
-                .and_then(|ext| ext.to_str())
-                .map(|ext| ext == "vsix")
-                .unwrap_or(false)
-        })
-        .collect();
-
-    if vsix_files.is_empty() {
-        anyhow::bail!("No .vsix file found after packaging");
-    }
-
-    let vsix_path = vsix_files[0].path();
+    let vsix_path = find_vsix_file(&vscode_dir)?;
     println!("\n📦 Found package: {:?}", vsix_path.file_name().unwrap());
 
-    // Step 6: Install with code --install-extension
     println!("\n🚀 Installing extension in VSCode...");
-    let install_output = Command::new("code")
+    let install_output = std::process::Command::new("code")
         .arg("--install-extension")
         .arg(&vsix_path)
         .current_dir(&vscode_dir)
@@ -569,4 +525,57 @@ fn install_vscode() -> Result<()> {
     println!("\n💡 Tip: Open a .knot file to see syntax highlighting and LSP features.");
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Private helpers for install_vscode()
+// ---------------------------------------------------------------------------
+
+/// Walks up from cwd until it finds an `editors/vscode` subdirectory.
+fn find_vscode_extension_dir() -> Result<PathBuf> {
+    let mut current_dir = std::env::current_dir()?;
+    loop {
+        let candidate = current_dir.join("editors").join("vscode");
+        if candidate.exists() && candidate.is_dir() {
+            return Ok(candidate);
+        }
+        match current_dir.parent() {
+            Some(parent) => current_dir = parent.to_path_buf(),
+            None => anyhow::bail!(
+                "Could not find editors/vscode directory. \
+                 Please run this command from within the knot repository."
+            ),
+        }
+    }
+}
+
+/// Runs `npm <args>` in `dir`, returning an error if the command fails.
+fn run_npm_command(args: &[&str], dir: &Path, spawn_context: &str) -> Result<()> {
+    let status = std::process::Command::new("npm")
+        .args(args)
+        .current_dir(dir)
+        .status()
+        .context(spawn_context.to_string())?;
+    if !status.success() {
+        anyhow::bail!("npm {} failed", args.join(" "));
+    }
+    Ok(())
+}
+
+/// Returns the path of the first `.vsix` file found in `dir`.
+fn find_vsix_file(dir: &Path) -> Result<PathBuf> {
+    let vsix: Vec<_> = fs::read_dir(dir)?
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.path()
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| ext == "vsix")
+                .unwrap_or(false)
+        })
+        .collect();
+    if vsix.is_empty() {
+        anyhow::bail!("No .vsix file found after packaging");
+    }
+    Ok(vsix[0].path())
 }

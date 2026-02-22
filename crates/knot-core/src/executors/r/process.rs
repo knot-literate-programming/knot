@@ -6,12 +6,11 @@
 // - Managing stdin/stdout/stderr streams
 // - Terminating the process
 
+use crate::executors::read_streams_until_boundary;
 use anyhow::{Context, Result, anyhow};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufReader, Write};
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::mpsc;
-use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use super::BOUNDARY;
 
@@ -97,39 +96,13 @@ impl RProcess {
             .take()
             .context("R process stderr is not available")?;
 
-        let (tx_out, rx_out) = mpsc::channel::<(String, BufReader<ChildStdout>)>();
-        let (tx_err, rx_err) = mpsc::channel::<(String, BufReader<ChildStderr>)>();
-
-        thread::spawn(move || {
-            let _ = tx_out.send(read_stream(stdout, BOUNDARY));
-        });
-        thread::spawn(move || {
-            let _ = tx_err.send(read_stream(stderr, BOUNDARY));
-        });
-
-        let deadline = Instant::now() + self.timeout;
-
-        match rx_out.recv_timeout(self.timeout) {
-            Ok((stdout_output, reader_out)) => {
-                let remaining = deadline
-                    .saturating_duration_since(Instant::now())
-                    .max(Duration::from_millis(500));
-                match rx_err.recv_timeout(remaining) {
-                    Ok((stderr_output, reader_err)) => {
-                        self.stdout = Some(reader_out);
-                        self.stderr = Some(reader_err);
-                        Ok((stdout_output, stderr_output))
-                    }
-                    Err(_) => {
-                        self.terminate();
-                        Err(anyhow!(
-                            "R execution timed out after {} seconds",
-                            self.timeout.as_secs()
-                        ))
-                    }
-                }
+        match read_streams_until_boundary(stdout, stderr, self.timeout, BOUNDARY) {
+            Some((out, err, reader_out, reader_err)) => {
+                self.stdout = Some(reader_out);
+                self.stderr = Some(reader_err);
+                Ok((out, err))
             }
-            Err(_) => {
+            None => {
                 self.terminate();
                 Err(anyhow!(
                     "R execution timed out after {} seconds",
@@ -145,25 +118,4 @@ impl RProcess {
             let _ = child.kill();
         }
     }
-}
-
-/// Read lines from `reader` until a line containing `boundary` is found.
-/// Returns the accumulated output (before the boundary) and the reader.
-fn read_stream<R: BufRead + Send + 'static>(mut reader: R, boundary: &'static str) -> (String, R) {
-    let mut output = String::new();
-    let mut line_buffer = String::new();
-    loop {
-        line_buffer.clear();
-        let bytes_read = reader.read_line(&mut line_buffer).unwrap_or(0);
-        if bytes_read == 0 {
-            break;
-        }
-        if line_buffer.contains(boundary) {
-            let parts: Vec<&str> = line_buffer.split(boundary).collect();
-            output.push_str(parts[0]);
-            break;
-        }
-        output.push_str(&line_buffer);
-    }
-    (output, reader)
 }
