@@ -7,6 +7,14 @@ In this chapter, we explore temperature data using R and ggplot2.
 
 ```{python}
 x = 1
+```
+
+
+```{python}
+x = 2
+```
+
+```{python}
 typst(x)
 ```
 

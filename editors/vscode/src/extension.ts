@@ -15,6 +15,8 @@ import {
     Position,
     ViewColumn,
     UriHandler,
+    Selection,
+    TextEditorRevealType,
 } from 'vscode';
 import { ChildProcess, spawn } from 'child_process';
 import {
@@ -49,7 +51,6 @@ class KnotUriHandler implements UriHandler {
                 this.outputChannel.appendLine(`[URI Handler] Jump request for ${file}:${line}`);
                 try {
                     const knotBinary = resolveBinaryPath('knot', this.outputChannel);
-                    // Use jump-to-source to find the .knot position
                     const result = await runKnotCommand(knotBinary, ['jump-to-source', file, line], this.outputChannel);
                     
                     if (result && result.includes(':')) {
@@ -87,22 +88,17 @@ export async function activate(context: ExtensionContext) {
     context.subscriptions.push(
         window.onDidChangeTextEditorSelection(async (event) => {
             const doc = event.textEditor.document;
-            // Only act on .typ files that are knot-compiled
             if (!doc.fileName.endsWith('.typ') || doc.fileName.endsWith('.knot.typ')) return;
             if (event.selections.length !== 1 || !event.selections[0].isEmpty) return;
             if (suppressAutoSync) return;
-            
-            // Check if it has Knot markers (isKnotCompiledTyp is fast)
             if (!isKnotCompiledTyp(doc.fileName)) return;
 
             const typFileName = doc.fileName;
             const typLine = event.selections[0].active.line;
 
-            // Debounce slightly to handle Tinymist's double-events
             if (syncDebounceTimer) clearTimeout(syncDebounceTimer);
             syncDebounceTimer = setTimeout(async () => {
                 syncDebounceTimer = undefined;
-                
                 try {
                     const knotBinary = resolveBinaryPath('knot', outputChannel);
                     const result = await runKnotCommand(knotBinary, ['jump-to-source', typFileName, (typLine + 1).toString()], outputChannel);
@@ -111,9 +107,6 @@ export async function activate(context: ExtensionContext) {
                         const [knotFile, lineStr] = result.split(':');
                         const knotLine = parseInt(lineStr, 10) - 1;
                         
-                        // MAGIC: Close the .typ editor immediately before showing .knot
-                        // to give the illusion of a direct jump.
-                        // We only do this if the .typ file is currently active.
                         if (window.activeTextEditor?.document.fileName === typFileName) {
                             await commands.executeCommand('workbench.action.closeActiveEditor');
                         }
@@ -133,11 +126,11 @@ export async function activate(context: ExtensionContext) {
                 } catch (e) {
                     outputChannel.appendLine(`[auto-sync] Error: ${e}`);
                 }
-            }, 50); // Very fast debounce
+            }, 50);
         })
     );
 
-    // Manual jump commands for testing
+    // Manual jump commands
     context.subscriptions.push(
         commands.registerCommand('knot.jumpToKnot', async () => {
             const editor = window.activeTextEditor;
@@ -206,18 +199,10 @@ export async function activate(context: ExtensionContext) {
             lspPath = resolveBinaryPath('knot-lsp', outputChannel);
         }
 
-        const serverOptions: ServerOptions = {
-            command: lspPath,
-            args: [],
-            transport: TransportKind.stdio,
-        };
-
+        const serverOptions: ServerOptions = { command: lspPath, args: [], transport: TransportKind.stdio };
         const clientOptions: LanguageClientOptions = {
             documentSelector: [{ scheme: 'file', language: 'knot' }],
-            synchronize: {
-                configurationSection: 'knot',
-                fileEvents: workspace.createFileSystemWatcher('**/*.knot'),
-            },
+            synchronize: { configurationSection: 'knot', fileEvents: workspace.createFileSystemWatcher('**/*.knot') },
             outputChannel: outputChannel,
         };
 
@@ -296,12 +281,10 @@ async function openPreview(outputChannel: any): Promise<void> {
         await window.withProgress({ location: ProgressLocation.Notification, title: 'Knot Preview', cancellable: false }, async (progress) => {
             if (!watchProcesses.has(projectRoot)) {
                 const knotBinary = resolveBinaryPath('knot', outputChannel);
-                // Launch watch without --preview to keep it internal to VS Code
                 const watchProcess = spawn(knotBinary, ['watch'], { cwd: projectRoot, stdio: ['ignore', 'pipe', 'pipe'] });
                 watchProcess.on('exit', () => watchProcesses.delete(projectRoot));
                 watchProcesses.set(projectRoot, watchProcess);
                 
-                // Wait for the first compilation
                 progress.report({ message: 'Waiting for Typst output...' });
                 let attempts = 0;
                 while (!fs.existsSync(mainTypPath) && attempts < 20) {
@@ -317,20 +300,13 @@ async function openPreview(outputChannel: any): Promise<void> {
 
             suppressAutoSync = true;
             try {
-                // 1. Open main.typ to focus Tinymist on it
                 const mainTypDoc = await workspace.openTextDocument(mainTypUri);
                 await window.showTextDocument(mainTypDoc, { viewColumn: ViewColumn.One, preserveFocus: false });
-                
-                // 2. Trigger Tinymist Preview
                 await commands.executeCommand('typst-preview.preview');
-                
-                // 3. Return to the .knot file
                 const knotDoc = await workspace.openTextDocument(knotUri);
                 await window.showTextDocument(knotDoc, { viewColumn: ViewColumn.One, preserveFocus: false });
-                
-                outputChannel.appendLine(`[preview] Internal preview started for ${mainStem}.typ`);
             } catch (e) {
-                outputChannel.appendLine(`[preview] Failed to trigger Tinymist: ${e}`);
+                outputChannel.appendLine(`[preview] Failed: ${e}`);
             } finally {
                 setTimeout(() => { suppressAutoSync = false; }, 1000);
             }
