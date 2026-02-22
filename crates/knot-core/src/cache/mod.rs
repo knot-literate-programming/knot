@@ -11,7 +11,7 @@ mod metadata;
 mod storage;
 
 pub use hashing::hash_dependencies;
-pub use metadata::{CacheMetadata, ChunkCacheEntry, ConstantObjectInfo, InlineCacheEntry};
+pub use metadata::{CacheMetadata, ChunkCacheEntry, FreezeObjectInfo, InlineCacheEntry};
 
 use crate::executors::ExecutionOutput;
 use anyhow::{Result, anyhow};

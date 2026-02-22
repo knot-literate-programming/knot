@@ -324,8 +324,8 @@ define_options! {
     #[serde(rename = "fig-format")]
     [val] fig_format: FigFormat, FigFormat::Svg,
 
-    /// Names of objects to treat as immutable constants
-    [col] constant: Vec<String>, Vec::new(),
+    /// Names of objects declared as freeze (immutable across chunks, stored outside snapshots)
+    [col] freeze: Vec<String>, Vec::new(),
 
     // === Presentation Options ===
 

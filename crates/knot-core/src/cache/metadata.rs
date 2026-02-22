@@ -14,7 +14,7 @@ pub struct CacheMetadata {
     pub chunks: Vec<ChunkCacheEntry>,
     pub inline_expressions: Vec<InlineCacheEntry>,
     #[serde(default)]
-    pub constant_objects: HashMap<String, ConstantObjectInfo>,
+    pub freeze_objects: HashMap<String, FreezeObjectInfo>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -40,7 +40,7 @@ pub struct InlineCacheEntry {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ConstantObjectInfo {
+pub struct FreezeObjectInfo {
     pub name: String,             // Variable name in the language environment
     pub hash: String,             // xxHash64 of the object content
     pub size_bytes: u64,          // Size in bytes

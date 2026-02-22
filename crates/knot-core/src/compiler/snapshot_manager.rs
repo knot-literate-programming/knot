@@ -70,7 +70,7 @@ impl SnapshotManager {
 
                 // Also restore constant objects for this language
                 let cache_dir = project_root.join(Defaults::CACHE_DIR_NAME);
-                for info in cache.metadata.constant_objects.values() {
+                for info in cache.metadata.freeze_objects.values() {
                     if info.language == lang {
                         exec.load_constant(&info.name, &info.hash, &cache_dir)
                             .context(format!(
@@ -109,7 +109,7 @@ impl SnapshotManager {
             // The executor has just run the code. It is in state `node_hash`.
 
             // Temporarily remove constant objects to keep the snapshot lightweight
-            for info in cache.metadata.constant_objects.values() {
+            for info in cache.metadata.freeze_objects.values() {
                 if info.language == lang {
                     exec.remove_from_env(&info.name).context(format!(
                         "Failed to remove constant object '{}' from environment",
@@ -126,7 +126,7 @@ impl SnapshotManager {
             ))?;
 
             // Restore constant objects to environment
-            for info in cache.metadata.constant_objects.values() {
+            for info in cache.metadata.freeze_objects.values() {
                 if info.language == lang {
                     exec.load_constant(&info.name, &info.hash, &cache_dir)
                         .context(format!(

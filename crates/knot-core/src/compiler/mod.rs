@@ -1,4 +1,4 @@
-use crate::cache::ConstantObjectInfo;
+use crate::cache::FreezeObjectInfo;
 use crate::config::Config;
 use crate::executors::{ExecutionOutput, ExecutionResult, ExecutorManager, GraphicsOptions};
 use crate::parser::ast::{Chunk, Document, InlineExpr};
@@ -32,9 +32,6 @@ use anyhow::{Context, Result};
 use log::info;
 use std::collections::HashSet;
 use std::path::PathBuf;
-
-/// Return type of `execute_pass`: executed nodes + constant objects registered during execution.
-type ExecutePassResult = (Vec<ExecutedNode>, HashMap<String, (String, String)>);
 
 pub struct Compiler {
     executor_manager: ExecutorManager,
@@ -96,15 +93,12 @@ impl Compiler {
         let planned = self.plan_pass(nodes, &mut cache)?;
 
         // Pass 2: execute pending nodes, format output, handle error cascade.
-        let (executed, constant_objects) =
-            self.execute_pass(planned, &mut cache, &mut snapshot_manager, &backend)?;
+        let executed = self.execute_pass(planned, &mut cache, &mut snapshot_manager, &backend)?;
 
         // Pass 3: interleave node outputs with source text.
         let typst_output = assemble_pass(&executed, &doc.source, source_file);
 
         info!("✓ All nodes processed.");
-
-        verify_constant_objects(&constant_objects, &mut self.executor_manager, &cache)?;
         cache.save_metadata()?;
 
         Ok(typst_output)
@@ -198,21 +192,17 @@ impl Compiler {
     // -----------------------------------------------------------------------
 
     /// Execute pending nodes, format all outputs, propagate the Inert cascade on error.
-    ///
-    /// Returns the list of executed nodes (one per planned node) and any constant
-    /// objects registered during this pass (for post-pass verification).
     fn execute_pass<'a>(
         &mut self,
         planned: Vec<PlannedNode<'a>>,
         cache: &mut Cache,
         snapshot_manager: &mut SnapshotManager,
         backend: &TypstBackend,
-    ) -> Result<ExecutePassResult> {
+    ) -> Result<Vec<ExecutedNode>> {
         use chunk_processor::format_output;
 
         let mut executed = Vec::with_capacity(planned.len());
         let mut broken_languages: HashSet<String> = HashSet::new();
-        let mut constant_objects: HashMap<String, (String, String)> = HashMap::new();
 
         for pn in planned {
             let is_chunk = matches!(&pn.node, ExecutableNode::Chunk(_));
@@ -285,18 +275,19 @@ impl Compiler {
                                         true,
                                     )
                                 } else {
-                                    // Register constants if declared.
+                                    // Register freeze objects if declared.
                                     if let ExecutableNode::Chunk(chunk) = &pn.node
-                                        && !chunk.options.constant.is_empty()
+                                        && !chunk.options.freeze.is_empty()
                                     {
-                                        register_constant_objects(
+                                        register_freeze_objects(
                                             chunk,
                                             &mut self.executor_manager,
                                             cache,
                                             &self.project_root,
-                                            &mut constant_objects,
                                         )?;
                                     }
+                                    // Check freeze contract: error if any freeze object was mutated.
+                                    check_freeze_contract(&pn, &mut self.executor_manager, cache)?;
                                     snapshot_manager.update_after_node(
                                         &pn.lang,
                                         &pn.hash,
@@ -353,7 +344,7 @@ impl Compiler {
             });
         }
 
-        Ok((executed, constant_objects))
+        Ok(executed)
     }
 
     /// Restore session snapshot if needed, then execute the node's code.
@@ -616,36 +607,35 @@ fn build_executable_nodes(doc: &Document) -> Vec<ExecutableNode<'_>> {
 }
 
 // ---------------------------------------------------------------------------
-// Constant object helpers (unchanged logic, moved here from old compile loop)
+// Freeze object helpers
 // ---------------------------------------------------------------------------
 
-/// Returns the composite cache key for a constant object: `"lang::varname"`.
+/// Returns the composite cache key for a freeze object: `"lang::varname"`.
 ///
 /// Using a composite key prevents name collisions when R and Python both
-/// declare a constant with the same variable name.
-fn constant_key(lang: &str, name: &str) -> String {
+/// declare a freeze object with the same variable name.
+fn freeze_key(lang: &str, name: &str) -> String {
     format!("{}::{}", lang, name)
 }
 
-/// Saves all constant objects declared by a chunk and records them in the tracking map.
-fn register_constant_objects(
+/// Saves all freeze objects declared by a chunk to the object cache.
+fn register_freeze_objects(
     chunk: &Chunk,
     executor_manager: &mut ExecutorManager,
     cache: &mut Cache,
     project_root: &Path,
-    constant_objects: &mut HashMap<String, (String, String)>,
 ) -> Result<()> {
     let chunk_name = chunk.name.as_deref().unwrap_or("unnamed").to_string();
     let exec = executor_manager.get_executor(&chunk.language)?;
     let cache_dir = project_root.join(Defaults::CACHE_DIR_NAME);
 
-    for obj_name in &chunk.options.constant {
+    for obj_name in &chunk.options.freeze {
         let obj_hash = exec
             .hash_object(obj_name)
-            .context(format!("Failed to hash constant object '{}'", obj_name))?;
+            .context(format!("Failed to hash freeze object '{}'", obj_name))?;
 
         exec.save_constant(obj_name, &obj_hash, &cache_dir)
-            .context(format!("Failed to save constant object '{}'", obj_name))?;
+            .context(format!("Failed to save freeze object '{}'", obj_name))?;
 
         let ext = exec.object_extension();
         let object_path = cache_dir
@@ -653,12 +643,10 @@ fn register_constant_objects(
             .join(format!("{}.{}", obj_hash, ext));
         let size_bytes = std::fs::metadata(&object_path)?.len();
 
-        let key = constant_key(&chunk.language, obj_name);
-        constant_objects.insert(key.clone(), (obj_hash.clone(), chunk_name.clone()));
-
-        cache.metadata.constant_objects.insert(
+        let key = freeze_key(&chunk.language, obj_name);
+        cache.metadata.freeze_objects.insert(
             key,
-            ConstantObjectInfo {
+            FreezeObjectInfo {
                 name: obj_name.clone(),
                 hash: obj_hash,
                 size_bytes,
@@ -669,7 +657,7 @@ fn register_constant_objects(
         );
 
         log::info!(
-            "🔒 Constant object '{}' ({}) declared in chunk '{}'",
+            "🔒 Freeze object '{}' ({}) declared in chunk '{}'",
             obj_name,
             chunk.language,
             chunk_name
@@ -678,51 +666,55 @@ fn register_constant_objects(
     Ok(())
 }
 
-/// Verifies that no constant object was mutated after its initial declaration.
-fn verify_constant_objects(
-    constant_objects: &HashMap<String, (String, String)>,
+/// Checks that no freeze object for `pn`'s language was mutated during chunk execution.
+///
+/// Called after each successful MustExecute node, before saving the snapshot.
+/// Errors immediately if any freeze object's current hash differs from its registered hash.
+fn check_freeze_contract(
+    pn: &PlannedNode<'_>,
     executor_manager: &mut ExecutorManager,
     cache: &Cache,
 ) -> Result<()> {
-    if constant_objects.is_empty() {
+    let freeze_entries: Vec<_> = cache
+        .metadata
+        .freeze_objects
+        .values()
+        .filter(|info| info.language == pn.lang)
+        .collect();
+
+    if freeze_entries.is_empty() {
         return Ok(());
     }
 
-    info!(
-        "🔍 Verifying {} constant objects...",
-        constant_objects.len()
-    );
+    let exec = executor_manager.get_executor(&pn.lang)?;
+    let chunk_name = match &pn.node {
+        ExecutableNode::Chunk(c) => c.name.as_deref().unwrap_or("unnamed"),
+        ExecutableNode::InlineExpr(_) => "inline",
+    };
 
-    for (key, (initial_hash, chunk_name)) in constant_objects {
-        let info = cache.metadata.constant_objects.get(key).unwrap();
-        let exec = executor_manager.get_executor(&info.language)?;
-
-        // Hash the object as it currently stands in the executor environment.
-        // The snapshot mechanism restores constants after every chunk, so any
-        // mutation by a downstream chunk does not persist — this check catches
-        // violations within the declaring chunk's own execution.
-        let final_hash = exec
+    for info in freeze_entries {
+        let current_hash = exec
             .hash_object(&info.name)
-            .context(format!("Failed to verify constant object '{}'", info.name))?;
+            .context(format!("Failed to hash freeze object '{}'", info.name))?;
 
-        if &final_hash != initial_hash {
+        if current_hash != info.hash {
             anyhow::bail!(
-                "❌ Constant object verification failed!\n\n\
-                 Object '{}' ({}) was declared as constant in chunk '{}' but was modified during execution.\n\n\
-                 Initial hash: {}\n\n\
-                 Final hash:   {}\n\n\
-                 This violates the constant object contract. The object must remain immutable after creation.\n\
+                "❌ Freeze contract violated!\n\n\
+                 Object '{}' ({}) was declared as frozen in chunk '{}' but was modified in chunk '{}'.\n\n\
+                 Expected hash: {}\n\
+                 Current hash:  {}\n\n\
+                 Frozen objects must not be mutated after declaration.\n\
                  Output file NOT generated to preserve reproducibility.",
                 info.name,
                 info.language,
+                info.created_in_chunk,
                 chunk_name,
-                initial_hash,
-                final_hash
+                info.hash,
+                current_hash
             );
         }
     }
 
-    info!("✓ All constant objects verified successfully.");
     Ok(())
 }
 
