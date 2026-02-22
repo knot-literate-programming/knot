@@ -11,7 +11,7 @@ pub mod formatters;
 pub mod inline_processor;
 pub mod sync;
 
-pub use chunk_processor::ChunkContext;
+pub use chunk_processor::{ChunkContext, ChunkExecutionState};
 
 #[cfg(test)]
 pub(super) mod test_helpers {
@@ -123,7 +123,7 @@ impl Compiler {
             let ctx = ChunkContext {
                 previous_hash: &previous_hash,
                 config: &self.config,
-                is_inert: false,
+                state: ChunkExecutionState::Ready,
                 backend: &backend,
                 project_root: &self.project_root,
             };
@@ -131,7 +131,7 @@ impl Compiler {
             // --- Inert path (language previously broken) ---
             if broken_languages.contains(lang) {
                 let inert_ctx = ChunkContext {
-                    is_inert: true,
+                    state: ChunkExecutionState::Inert,
                     ..ctx
                 };
                 let result = render_inert_node(

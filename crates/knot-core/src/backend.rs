@@ -1,3 +1,4 @@
+use crate::compiler::ChunkExecutionState;
 use crate::executors::{ExecutionOutput, ExecutionResult};
 use crate::parser::{Chunk, Layout, ResolvedChunkOptions, Show};
 use std::collections::HashMap;
@@ -28,7 +29,7 @@ pub trait Backend {
         chunk: &Chunk,
         resolved_options: &ResolvedChunkOptions,
         output: &ExecutionOutput,
-        is_inert: bool,
+        state: &ChunkExecutionState,
     ) -> String;
 }
 
@@ -52,14 +53,14 @@ impl Backend for TypstBackend {
         chunk: &Chunk,
         resolved_options: &ResolvedChunkOptions,
         output: &ExecutionOutput,
-        is_inert: bool,
+        state: &ChunkExecutionState,
     ) -> String {
         if matches!(resolved_options.show, Show::None) {
             return String::new();
         }
 
         let mut args = vec![];
-        push_base_args(chunk, is_inert, &mut args);
+        push_base_args(chunk, state, &mut args);
         push_warnings_arg(output, resolved_options, &mut args);
         push_code_arg(chunk, resolved_options, &mut args);
         push_output_arg(output, resolved_options, &mut args);
@@ -75,7 +76,7 @@ impl Backend for TypstBackend {
 // ---------------------------------------------------------------------------
 
 /// Pushes lang, name/caption, is-inert, and parse errors into `args`.
-fn push_base_args(chunk: &Chunk, is_inert: bool, args: &mut Vec<String>) {
+fn push_base_args(chunk: &Chunk, state: &ChunkExecutionState, args: &mut Vec<String>) {
     args.push(format!("lang: \"{}\"", chunk.language));
 
     if let Some(name) = &chunk.name {
@@ -85,7 +86,7 @@ fn push_base_args(chunk: &Chunk, is_inert: bool, args: &mut Vec<String>) {
         args.push(format!("caption: [{}]", caption));
     }
 
-    if is_inert {
+    if matches!(state, ChunkExecutionState::Inert) {
         args.push("is-inert: true".to_string());
     }
 
@@ -395,7 +396,8 @@ mod tests {
         };
         let resolved = chunk.options.resolve();
 
-        let output = backend.format_chunk(&chunk, &resolved, &output_data, false);
+        let output =
+            backend.format_chunk(&chunk, &resolved, &output_data, &ChunkExecutionState::Ready);
 
         assert!(output.contains("errors: ([Unknown option: 'foo'], [Invalid value for 'eval'])"));
     }
@@ -411,7 +413,8 @@ mod tests {
         };
         let resolved = chunk.options.resolve();
 
-        let output = backend.format_chunk(&chunk, &resolved, &output_data, false);
+        let output =
+            backend.format_chunk(&chunk, &resolved, &output_data, &ChunkExecutionState::Ready);
 
         assert!(output.contains("lang: \"r\""));
         assert!(output.contains("code: [```r\nx <- 1:10\nmean(x)```]"));
@@ -430,7 +433,8 @@ mod tests {
         };
         let resolved = chunk.options.resolve();
 
-        let output = backend.format_chunk(&chunk, &resolved, &output_data, false);
+        let output =
+            backend.format_chunk(&chunk, &resolved, &output_data, &ChunkExecutionState::Ready);
 
         assert!(output.contains("code: none"));
         assert!(output.contains("output: [```output\n[1] 5.5```]"));
@@ -447,7 +451,8 @@ mod tests {
         };
         let resolved = chunk.options.resolve();
 
-        let output = backend.format_chunk(&chunk, &resolved, &output_data, false);
+        let output =
+            backend.format_chunk(&chunk, &resolved, &output_data, &ChunkExecutionState::Ready);
 
         assert!(output.contains("output: none"));
     }
@@ -469,7 +474,8 @@ mod tests {
         };
         let resolved = chunk.options.resolve();
 
-        let output = backend.format_chunk(&chunk, &resolved, &output_data, false);
+        let output =
+            backend.format_chunk(&chunk, &resolved, &output_data, &ChunkExecutionState::Ready);
 
         assert!(output.contains("#figure("));
         assert!(output.contains("kind: raw"));
@@ -495,7 +501,8 @@ mod tests {
         };
         let resolved = chunk.options.resolve();
 
-        let output = backend.format_chunk(&chunk, &resolved, &output_data, false);
+        let output =
+            backend.format_chunk(&chunk, &resolved, &output_data, &ChunkExecutionState::Ready);
 
         // Caption should be passed directly to code-chunk when no name
         assert!(output.contains("caption: [[My Caption]]"));
@@ -514,7 +521,8 @@ mod tests {
         };
         let resolved = chunk.options.resolve();
 
-        let output = backend.format_chunk(&chunk, &resolved, &output_data, false);
+        let output =
+            backend.format_chunk(&chunk, &resolved, &output_data, &ChunkExecutionState::Ready);
 
         assert!(output.contains("output: [#image("));
         assert!(output.contains("plot.svg"));
@@ -532,7 +540,8 @@ mod tests {
         };
         let resolved = chunk.options.resolve();
 
-        let output = backend.format_chunk(&chunk, &resolved, &output_data, false);
+        let output =
+            backend.format_chunk(&chunk, &resolved, &output_data, &ChunkExecutionState::Ready);
 
         assert!(output.contains("output: [#{ let data = csv("));
         assert!(output.contains("data.csv"));
@@ -554,7 +563,8 @@ mod tests {
         };
         let resolved = chunk.options.resolve();
 
-        let output = backend.format_chunk(&chunk, &resolved, &output_data, false);
+        let output =
+            backend.format_chunk(&chunk, &resolved, &output_data, &ChunkExecutionState::Ready);
 
         assert!(output.contains("#image("));
         assert!(output.contains("plot.svg"));
@@ -578,7 +588,8 @@ mod tests {
         };
         let resolved = chunk.options.resolve();
 
-        let output = backend.format_chunk(&chunk, &resolved, &output_data, false);
+        let output =
+            backend.format_chunk(&chunk, &resolved, &output_data, &ChunkExecutionState::Ready);
 
         assert!(output.contains("let data = csv("));
         assert!(output.contains("data.csv"));
@@ -597,7 +608,8 @@ mod tests {
         };
         let resolved = chunk.options.resolve();
 
-        let output = backend.format_chunk(&chunk, &resolved, &output_data, false);
+        let output =
+            backend.format_chunk(&chunk, &resolved, &output_data, &ChunkExecutionState::Ready);
 
         // Empty name should not create figure wrapper
         assert!(!output.contains("#figure("));
@@ -615,7 +627,8 @@ mod tests {
         };
         let resolved = chunk.options.resolve();
 
-        let output = backend.format_chunk(&chunk, &resolved, &output_data, false);
+        let output =
+            backend.format_chunk(&chunk, &resolved, &output_data, &ChunkExecutionState::Ready);
 
         // Empty text should result in output: none
         assert!(output.contains("output: none"));
@@ -641,7 +654,8 @@ mod tests {
         };
         let resolved = chunk.options.resolve();
 
-        let output = backend.format_chunk(&chunk, &resolved, &output_data, false);
+        let output =
+            backend.format_chunk(&chunk, &resolved, &output_data, &ChunkExecutionState::Ready);
 
         // Should use #local() for chunk-specific codly options
         assert!(output.contains("#local("));
@@ -664,7 +678,8 @@ mod tests {
         };
         let resolved = chunk.options.resolve();
 
-        let output = backend.format_chunk(&chunk, &resolved, &output_data, false);
+        let output =
+            backend.format_chunk(&chunk, &resolved, &output_data, &ChunkExecutionState::Ready);
 
         // Without codly options, should NOT have #local()
         assert!(!output.contains("#local("));

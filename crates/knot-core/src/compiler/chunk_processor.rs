@@ -20,11 +20,24 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::Path;
 
+/// Execution lifecycle state of a chunk within the compilation pipeline.
+///
+/// - `Ready`   : cache valid or execution just succeeded — full output available.
+/// - `Inert`   : follows an upstream error; rendered as raw code without execution.
+/// - `Pending` : cache invalidated, not yet executed (reserved for progressive
+///   compilation: first-pass placeholder before execution completes).
+#[derive(Debug, Clone, PartialEq)]
+pub enum ChunkExecutionState {
+    Ready,
+    Inert,
+    Pending,
+}
+
 /// Immutable context shared across chunk processing calls.
 pub struct ChunkContext<'a> {
     pub previous_hash: &'a str,
     pub config: &'a Config,
-    pub is_inert: bool,
+    pub state: ChunkExecutionState,
     pub backend: &'a TypstBackend,
     pub project_root: &'a Path,
 }
@@ -37,7 +50,7 @@ pub fn process_chunk(
     ctx: &ChunkContext<'_>,
 ) -> Result<(String, String)> {
     let (chunk_options, resolved_options, merged_codly_options) =
-        resolve_options(chunk, ctx.config, ctx.is_inert);
+        resolve_options(chunk, ctx.config, &ctx.state);
 
     let chunk_name = chunk
         .name
@@ -65,7 +78,7 @@ pub fn process_chunk(
             &merged_codly_options,
             &resolved_options,
             &execution_output,
-            ctx.is_inert,
+            &ctx.state,
         );
         return Ok((output, chunk_hash));
     }
@@ -80,7 +93,7 @@ pub fn process_chunk(
         &chunk_hash,
         ctx.previous_hash,
         ctx.project_root,
-        ctx.is_inert,
+        &ctx.state,
         &chunk_name,
     )?;
 
@@ -94,7 +107,7 @@ pub fn process_chunk(
         &merged_codly_options,
         &resolved_options,
         &execution_output,
-        ctx.is_inert,
+        &ctx.state,
     );
     Ok((output, chunk_hash))
 }
@@ -107,7 +120,7 @@ pub fn process_chunk(
 fn resolve_options(
     chunk: &Chunk,
     config: &Config,
-    is_inert: bool,
+    state: &ChunkExecutionState,
 ) -> (ChunkOptions, ResolvedChunkOptions, HashMap<String, String>) {
     let mut chunk_options = chunk.options.clone();
 
@@ -115,7 +128,9 @@ fn resolve_options(
     if let Some(lang_defaults) = config.get_language_defaults(&chunk.language) {
         effective_defaults.merge(lang_defaults);
     }
-    if is_inert && let Some(error_defaults) = config.get_language_error_defaults(&chunk.language) {
+    if matches!(state, ChunkExecutionState::Inert)
+        && let Some(error_defaults) = config.get_language_error_defaults(&chunk.language)
+    {
         effective_defaults.merge(error_defaults);
     }
 
@@ -167,10 +182,10 @@ fn try_execute(
     chunk_hash: &str,
     previous_hash: &str,
     project_root: &Path,
-    is_inert: bool,
+    state: &ChunkExecutionState,
     chunk_name: &str,
 ) -> Result<ExecutionOutput> {
-    if is_inert || !resolved_options.eval {
+    if matches!(state, ChunkExecutionState::Inert) || !resolved_options.eval {
         return Ok(ExecutionOutput {
             result: ExecutionResult::Text(String::new()),
             warnings: vec![],
@@ -231,11 +246,11 @@ fn format_output(
     merged_codly_options: &HashMap<String, String>,
     resolved_options: &ResolvedChunkOptions,
     output: &ExecutionOutput,
-    is_inert: bool,
+    state: &ChunkExecutionState,
 ) -> String {
     let mut chunk_with_codly = chunk.clone();
     chunk_with_codly.codly_options = merged_codly_options.clone();
-    backend.format_chunk(&chunk_with_codly, resolved_options, output, is_inert)
+    backend.format_chunk(&chunk_with_codly, resolved_options, output, state)
 }
 
 fn get_constants_hash(
@@ -354,7 +369,7 @@ mod tests {
             &ChunkContext {
                 previous_hash: "prev_hash",
                 config: &setup_test_config(),
-                is_inert: false,
+                state: ChunkExecutionState::Ready,
                 backend: &crate::backend::TypstBackend::new(),
                 project_root: Path::new("."),
             },
@@ -380,7 +395,7 @@ mod tests {
             &ChunkContext {
                 previous_hash: "prev_hash",
                 config: &setup_test_config(),
-                is_inert: false,
+                state: ChunkExecutionState::Ready,
                 backend: &crate::backend::TypstBackend::new(),
                 project_root: Path::new("."),
             },
@@ -402,7 +417,7 @@ mod tests {
             &ChunkContext {
                 previous_hash: "prev_hash",
                 config: &setup_test_config(),
-                is_inert: false,
+                state: ChunkExecutionState::Ready,
                 backend: &crate::backend::TypstBackend::new(),
                 project_root: Path::new("."),
             },
@@ -428,7 +443,7 @@ mod tests {
             &ChunkContext {
                 previous_hash: "prev_hash",
                 config: &setup_test_config(),
-                is_inert: false,
+                state: ChunkExecutionState::Ready,
                 backend: &crate::backend::TypstBackend::new(),
                 project_root: Path::new("."),
             },
@@ -444,7 +459,7 @@ mod tests {
             &ChunkContext {
                 previous_hash: "prev_hash",
                 config: &setup_test_config(),
-                is_inert: false,
+                state: ChunkExecutionState::Ready,
                 backend: &crate::backend::TypstBackend::new(),
                 project_root: Path::new("."),
             },
@@ -471,7 +486,7 @@ mod tests {
             &ChunkContext {
                 previous_hash: "prev_hash",
                 config: &setup_test_config(),
-                is_inert: false,
+                state: ChunkExecutionState::Ready,
                 backend: &crate::backend::TypstBackend::new(),
                 project_root: Path::new("."),
             },
@@ -485,7 +500,7 @@ mod tests {
             &ChunkContext {
                 previous_hash: "prev_hash",
                 config: &setup_test_config(),
-                is_inert: false,
+                state: ChunkExecutionState::Ready,
                 backend: &crate::backend::TypstBackend::new(),
                 project_root: Path::new("."),
             },
@@ -510,7 +525,7 @@ mod tests {
             &ChunkContext {
                 previous_hash: "prev_hash_1",
                 config: &setup_test_config(),
-                is_inert: false,
+                state: ChunkExecutionState::Ready,
                 backend: &crate::backend::TypstBackend::new(),
                 project_root: Path::new("."),
             },
@@ -524,7 +539,7 @@ mod tests {
             &ChunkContext {
                 previous_hash: "prev_hash_2",
                 config: &setup_test_config(),
-                is_inert: false,
+                state: ChunkExecutionState::Ready,
                 backend: &crate::backend::TypstBackend::new(),
                 project_root: Path::new("."),
             },
@@ -549,7 +564,7 @@ mod tests {
             &ChunkContext {
                 previous_hash: "prev_hash",
                 config: &setup_test_config(),
-                is_inert: false,
+                state: ChunkExecutionState::Ready,
                 backend: &crate::backend::TypstBackend::new(),
                 project_root: Path::new("."),
             },
@@ -594,7 +609,7 @@ mod tests {
             &ChunkContext {
                 previous_hash: "prev_hash",
                 config: &setup_test_config(),
-                is_inert: false,
+                state: ChunkExecutionState::Ready,
                 backend: &crate::backend::TypstBackend::new(),
                 project_root: Path::new("."),
             },
@@ -614,7 +629,7 @@ mod tests {
             &ChunkContext {
                 previous_hash: "prev_hash",
                 config: &setup_test_config(),
-                is_inert: false,
+                state: ChunkExecutionState::Ready,
                 backend: &crate::backend::TypstBackend::new(),
                 project_root: Path::new("."),
             },
@@ -638,7 +653,7 @@ mod tests {
             &ChunkContext {
                 previous_hash: "prev_hash",
                 config: &setup_test_config(),
-                is_inert: false,
+                state: ChunkExecutionState::Ready,
                 backend: &crate::backend::TypstBackend::new(),
                 project_root: Path::new("."),
             },
@@ -663,7 +678,7 @@ mod tests {
             &ChunkContext {
                 previous_hash: "prev_hash",
                 config: &setup_test_config(),
-                is_inert: false,
+                state: ChunkExecutionState::Ready,
                 backend: &crate::backend::TypstBackend::new(),
                 project_root: Path::new("."),
             },
@@ -732,7 +747,7 @@ mod tests {
             &ChunkContext {
                 previous_hash: "prev_hash",
                 config: &config,
-                is_inert: false,
+                state: ChunkExecutionState::Ready,
                 backend: &crate::backend::TypstBackend::new(),
                 project_root: Path::new("."),
             },
@@ -776,7 +791,7 @@ mod tests {
             &ChunkContext {
                 previous_hash: "prev_hash",
                 config: &config,
-                is_inert: false,
+                state: ChunkExecutionState::Ready,
                 backend: &crate::backend::TypstBackend::new(),
                 project_root: Path::new("."),
             },
@@ -841,7 +856,7 @@ mod tests {
             &ChunkContext {
                 previous_hash: "prev_hash",
                 config: &config,
-                is_inert: false,
+                state: ChunkExecutionState::Ready,
                 backend: &crate::backend::TypstBackend::new(),
                 project_root: Path::new("."),
             },
