@@ -2,7 +2,7 @@
 //!
 //! This module orchestrates the lifecycle of a code chunk during compilation:
 //! 1. Resolve chunk options with global defaults.
-//! 2. Calculate chunk hash (including code, options, dependencies, and constants).
+//! 2. Calculate chunk hash (code, options, dependencies).
 //! 3. Check cache for previous results.
 //! 4. Execute code via the appropriate language executor if not cached.
 //! 5. Save results to cache if enabled.
@@ -17,7 +17,6 @@ use crate::executors::{ExecutionOutput, ExecutionResult, ExecutorManager, Graphi
 use crate::parser::{Chunk, ChunkOptions, InlineExpr, ResolvedChunkOptions};
 use anyhow::Result;
 use log::info;
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -96,13 +95,7 @@ impl<'a> ChunkProcessor<'a> {
             .map(String::from)
             .unwrap_or_else(|| format!("chunk-{}", chunk.index));
 
-        let chunk_hash = compute_hash(
-            &chunk.code,
-            &chunk_options,
-            previous_hash,
-            self.executor_manager,
-            &chunk.language,
-        )?;
+        let chunk_hash = compute_hash(&chunk.code, &chunk_options, previous_hash)?;
 
         if resolved_options.cache && self.cache.has_cached_result(&chunk_hash) {
             info!("  ✓ {} [cached]", chunk_name);
@@ -257,28 +250,22 @@ pub(crate) fn resolve_options(
     (chunk_options, resolved_options, merged_codly_options)
 }
 
-/// Computes the chunk hash, incorporating deps and constant-object hashes.
+/// Computes the chunk hash from code, options, previous hash, and file dependencies.
+///
+/// Constant objects are intentionally excluded from the hash: their immutability
+/// is enforced by the snapshot mechanism, and cache invalidation propagates
+/// correctly through hash chaining (`previous_hash`).
 pub(crate) fn compute_hash(
     code: &str,
     chunk_options: &ChunkOptions,
     previous_hash: &str,
-    executor_manager: &mut ExecutorManager,
-    language: &str,
 ) -> Result<String> {
     let deps_hash = hash_dependencies(&chunk_options.depends)?;
-    let partial = hashing::get_chunk_hash(code, chunk_options, previous_hash, &deps_hash, "");
-
-    if chunk_options.constant.is_empty() {
-        return Ok(partial);
-    }
-
-    let constants_hash = get_constants_hash(executor_manager, language, &chunk_options.constant)?;
     Ok(hashing::get_chunk_hash(
         code,
         chunk_options,
         previous_hash,
         &deps_hash,
-        &constants_hash,
     ))
 }
 
@@ -294,37 +281,6 @@ pub(crate) fn format_output(
     let mut chunk_with_codly = chunk.clone();
     chunk_with_codly.codly_options = merged_codly_options.clone();
     backend.format_chunk(&chunk_with_codly, resolved_options, output, state)
-}
-
-fn get_constants_hash(
-    executor_manager: &mut ExecutorManager,
-    lang: &str,
-    constants: &[String],
-) -> Result<String> {
-    if constants.is_empty() {
-        return Ok(String::new());
-    }
-
-    // Fetch all hashes in a single round-trip instead of N separate queries
-    let exec = executor_manager.get_executor(lang)?;
-    let hashes = exec.hash_objects(constants)?;
-
-    let mut combined_hash = Sha256::new();
-    for var in constants {
-        match hashes.get(var) {
-            Some(hash) if hash != "NONE" => {
-                combined_hash.update(var.as_bytes());
-                combined_hash.update(hash.as_bytes());
-            }
-            _ => {
-                // Object not found or invalid: use a stable marker to avoid invalidating
-                // the cache with random values (like UUIDs).
-                combined_hash.update(var.as_bytes());
-                combined_hash.update(b"NOT_FOUND");
-            }
-        }
-    }
-    Ok(format!("{:x}", combined_hash.finalize()))
 }
 
 #[cfg(test)]

@@ -41,6 +41,7 @@ pub struct InlineCacheEntry {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ConstantObjectInfo {
+    pub name: String,             // Variable name in the language environment
     pub hash: String,             // xxHash64 of the object content
     pub size_bytes: u64,          // Size in bytes
     pub language: String,         // "r", "python", "julia"

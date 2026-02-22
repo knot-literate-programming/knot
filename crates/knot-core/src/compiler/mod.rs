@@ -104,12 +104,7 @@ impl Compiler {
 
         info!("✓ All nodes processed.");
 
-        verify_constant_objects(
-            &constant_objects,
-            &mut self.executor_manager,
-            &cache,
-            &self.project_root,
-        )?;
+        verify_constant_objects(&constant_objects, &mut self.executor_manager, &cache)?;
         cache.save_metadata()?;
 
         Ok(typst_output)
@@ -151,13 +146,7 @@ impl Compiler {
                         .as_deref()
                         .map(String::from)
                         .unwrap_or_else(|| format!("chunk-{}", chunk.index));
-                    let hash = compute_hash(
-                        &chunk.code,
-                        &chunk_options,
-                        &previous_hash,
-                        &mut self.executor_manager,
-                        &chunk.language,
-                    )?;
+                    let hash = compute_hash(&chunk.code, &chunk_options, &previous_hash)?;
                     let need = if !resolved_options.eval {
                         ExecutionNeed::Skip
                     } else if resolved_options.cache && cache.has_cached_result(&hash) {
@@ -630,6 +619,14 @@ fn build_executable_nodes(doc: &Document) -> Vec<ExecutableNode<'_>> {
 // Constant object helpers (unchanged logic, moved here from old compile loop)
 // ---------------------------------------------------------------------------
 
+/// Returns the composite cache key for a constant object: `"lang::varname"`.
+///
+/// Using a composite key prevents name collisions when R and Python both
+/// declare a constant with the same variable name.
+fn constant_key(lang: &str, name: &str) -> String {
+    format!("{}::{}", lang, name)
+}
+
 /// Saves all constant objects declared by a chunk and records them in the tracking map.
 fn register_constant_objects(
     chunk: &Chunk,
@@ -656,11 +653,13 @@ fn register_constant_objects(
             .join(format!("{}.{}", obj_hash, ext));
         let size_bytes = std::fs::metadata(&object_path)?.len();
 
-        constant_objects.insert(obj_name.to_string(), (obj_hash.clone(), chunk_name.clone()));
+        let key = constant_key(&chunk.language, obj_name);
+        constant_objects.insert(key.clone(), (obj_hash.clone(), chunk_name.clone()));
 
         cache.metadata.constant_objects.insert(
-            obj_name.to_string(),
+            key,
             ConstantObjectInfo {
+                name: obj_name.clone(),
                 hash: obj_hash,
                 size_bytes,
                 language: chunk.language.clone(),
@@ -684,7 +683,6 @@ fn verify_constant_objects(
     constant_objects: &HashMap<String, (String, String)>,
     executor_manager: &mut ExecutorManager,
     cache: &Cache,
-    project_root: &Path,
 ) -> Result<()> {
     if constant_objects.is_empty() {
         return Ok(());
@@ -695,20 +693,17 @@ fn verify_constant_objects(
         constant_objects.len()
     );
 
-    for (obj_name, (initial_hash, chunk_name)) in constant_objects {
-        let info = cache.metadata.constant_objects.get(obj_name).unwrap();
+    for (key, (initial_hash, chunk_name)) in constant_objects {
+        let info = cache.metadata.constant_objects.get(key).unwrap();
         let exec = executor_manager.get_executor(&info.language)?;
-        let cache_dir = project_root.join(Defaults::CACHE_DIR_NAME);
 
-        exec.load_constant(obj_name, &info.hash, &cache_dir)
-            .context(format!(
-                "Failed to load constant '{}' for verification",
-                obj_name
-            ))?;
-
+        // Hash the object as it currently stands in the executor environment.
+        // The snapshot mechanism restores constants after every chunk, so any
+        // mutation by a downstream chunk does not persist — this check catches
+        // violations within the declaring chunk's own execution.
         let final_hash = exec
-            .hash_object(obj_name)
-            .context(format!("Failed to verify constant object '{}'", obj_name))?;
+            .hash_object(&info.name)
+            .context(format!("Failed to verify constant object '{}'", info.name))?;
 
         if &final_hash != initial_hash {
             anyhow::bail!(
@@ -718,7 +713,7 @@ fn verify_constant_objects(
                  Final hash:   {}\n\n\
                  This violates the constant object contract. The object must remain immutable after creation.\n\
                  Output file NOT generated to preserve reproducibility.",
-                obj_name,
+                info.name,
                 info.language,
                 chunk_name,
                 initial_hash,

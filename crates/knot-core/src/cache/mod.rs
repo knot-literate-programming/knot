@@ -215,14 +215,14 @@ mod tests {
         let _cache = Cache::new(cache_dir).unwrap();
         let opts = ChunkOptions::default();
 
-        let hash1 = hashing::get_chunk_hash("x <- 1", &opts, "", "", "");
-        let hash2 = hashing::get_chunk_hash("y <- x + 1", &opts, &hash1, "", "");
-        let hash3 = hashing::get_chunk_hash("z <- y * 2", &opts, &hash2, "", "");
+        let hash1 = hashing::get_chunk_hash("x <- 1", &opts, "", "");
+        let hash2 = hashing::get_chunk_hash("y <- x + 1", &opts, &hash1, "");
+        let hash3 = hashing::get_chunk_hash("z <- y * 2", &opts, &hash2, "");
 
         // Changer chunk 1 invalide tout
-        let hash1_mod = hashing::get_chunk_hash("x <- 2", &opts, "", "", "");
-        let hash2_after = hashing::get_chunk_hash("y <- x + 1", &opts, &hash1_mod, "", "");
-        let hash3_after = hashing::get_chunk_hash("z <- y * 2", &opts, &hash2_after, "", "");
+        let hash1_mod = hashing::get_chunk_hash("x <- 2", &opts, "", "");
+        let hash2_after = hashing::get_chunk_hash("y <- x + 1", &opts, &hash1_mod, "");
+        let hash3_after = hashing::get_chunk_hash("z <- y * 2", &opts, &hash2_after, "");
 
         assert_ne!(hash1, hash1_mod);
         assert_ne!(hash2, hash2_after);
@@ -243,13 +243,13 @@ mod tests {
         };
 
         let deps_hash1 = hash_dependencies(&opts.depends).unwrap();
-        let hash1 = hashing::get_chunk_hash("read.csv('data.csv')", &opts, "", &deps_hash1, "");
+        let hash1 = hashing::get_chunk_hash("read.csv('data.csv')", &opts, "", &deps_hash1);
 
         // Modify file — content hashing detects the change immediately
         fs::write(&tmp_file, "a,b\n3,4").unwrap();
 
         let deps_hash2 = hash_dependencies(&opts.depends).unwrap();
-        let hash2 = hashing::get_chunk_hash("read.csv('data.csv')", &opts, "", &deps_hash2, "");
+        let hash2 = hashing::get_chunk_hash("read.csv('data.csv')", &opts, "", &deps_hash2);
 
         assert_ne!(deps_hash1, deps_hash2);
         assert_ne!(hash1, hash2);
@@ -271,8 +271,8 @@ mod tests {
             ..Default::default()
         };
 
-        let hash1 = hashing::get_chunk_hash("x <- 1", &opts1, "", "", "");
-        let hash2 = hashing::get_chunk_hash("x <- 1", &opts2, "", "", "");
+        let hash1 = hashing::get_chunk_hash("x <- 1", &opts1, "", "");
+        let hash2 = hashing::get_chunk_hash("x <- 1", &opts2, "", "");
 
         assert_ne!(hash1, hash2);
     }
