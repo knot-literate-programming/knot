@@ -2,6 +2,9 @@
 
 **knot is not knitr** — A modern literate programming system for [Typst](https://typst.app/).
 
+> [!IMPORTANT]
+> **Work in Progress**: Knot is currently under intensive development. Many features are in a "preview" state and may change rapidly.
+
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.80+-orange.svg)](https://www.rust-lang.org)
 [![GitHub Release](https://img.shields.io/github/v/release/knot-literate-programming/knot)](https://github.com/knot-literate-programming/knot/releases)
@@ -19,7 +22,7 @@ Knot brings **executable R and Python code** directly into your Typst documents.
 - **Polyglot**: Seamlessly switch between R and Python in the same document.
 - **Rich Output**: Automatic conversion of DataFrames to Typst tables and plots (Matplotlib, ggplot2) to SVG/PNG.
 - **First-class IDE support**: A dedicated VS Code extension providing hover docs, completion, and live diagnostics.
-- **Sync Mapping**: Perfect bidirectional "Click-to-Source" (PDF ↔ Source) synchronization.
+- **Sync Mapping**: High-fidelity PDF ↔ Source synchronization (PDF to Source is line-perfect; Source to PDF is currently WIP).
 
 ---
 
