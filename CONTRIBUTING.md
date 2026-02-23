@@ -1,6 +1,6 @@
 # Contributing to Knot
 
-Thank you for your interest in contributing! 🧶
+Thank you for your interest in contributing.
 
 Knot is an open-source project, and we welcome contributions in many forms: reporting bugs, suggesting features, improving documentation, or contributing code.
 
@@ -76,4 +76,4 @@ For high-level roadmap and architectural details, see the documents in **[docs/d
 
 ---
 
-**Thank you for your help in making Knot the best literate programming system for Typst!** 🙏
+**Thank you for your help in making Knot the best literate programming system for Typst!**

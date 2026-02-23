@@ -14,12 +14,12 @@ Knot brings **executable R and Python code** directly into your Typst documents.
 
 ### Key Features
 
-- 🚀 **Blazing Fast**: Built with Rust, featuring a three-pass compilation pipeline for progressive updates.
-- 🔬 **Reproducible**: Intelligent SHA256-based caching with sequential invalidation.
-- 🐍🔵 **Polyglot**: Seamlessly switch between R and Python in the same document.
-- 🎨 **Rich Output**: Automatic conversion of DataFrames to Typst tables and plots (Matplotlib, ggplot2) to SVG/PNG.
-- 💻 **First-class IDE support**: A dedicated VS Code extension providing hover docs, completion, and live diagnostics.
-- 🔗 **Sync Mapping**: Perfect bidirectional "Click-to-Source" (PDF ↔ Source) synchronization.
+- **Blazing Fast**: Built with Rust, featuring a three-pass compilation pipeline for progressive updates.
+- **Reproducible**: Intelligent SHA256-based caching with sequential invalidation.
+- **Polyglot**: Seamlessly switch between R and Python in the same document.
+- **Rich Output**: Automatic conversion of DataFrames to Typst tables and plots (Matplotlib, ggplot2) to SVG/PNG.
+- **First-class IDE support**: A dedicated VS Code extension providing hover docs, completion, and live diagnostics.
+- **Sync Mapping**: Perfect bidirectional "Click-to-Source" (PDF ↔ Source) synchronization.
 
 ---
 
