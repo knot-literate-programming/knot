@@ -48,13 +48,13 @@ pub(super) fn group_by_language(
 pub(super) fn run_language_chain(
     lang: String,
     nodes: Vec<(usize, PlannedNode)>,
-    mut exec: Option<Box<dyn KnotExecutor>>,
+    exec: Option<Box<dyn KnotExecutor>>,
     cache: Arc<Mutex<Cache>>,
     backend: &TypstBackend,
     config: &Config,
     project_root: &Path,
 ) -> Result<ChainOutput> {
-    let mut snapshot_manager = SnapshotManager::new();
+    let mut sm = SnapshotManager::new(exec);
     let mut indexed = Vec::with_capacity(nodes.len());
     let mut broken = false;
 
@@ -101,11 +101,10 @@ pub(super) fn run_language_chain(
                         );
                         {
                             let cache_guard = cache.lock().unwrap();
-                            snapshot_manager.update_after_node(
+                            sm.update_after_node(
                                 &lang,
                                 &pn.hash,
                                 &pn.previous_hash,
-                                &mut exec,
                                 &cache_guard,
                                 project_root,
                             )?;
@@ -119,11 +118,10 @@ pub(super) fn run_language_chain(
                     let result_clone = result.clone();
                     {
                         let cache_guard = cache.lock().unwrap();
-                        snapshot_manager.update_after_node(
+                        sm.update_after_node(
                             &lang,
                             &pn.hash,
                             &pn.previous_hash,
-                            &mut exec,
                             &cache_guard,
                             project_root,
                         )?;
@@ -135,11 +133,10 @@ pub(super) fn run_language_chain(
                     let content = skip_output(&pn, backend, &state);
                     {
                         let cache_guard = cache.lock().unwrap();
-                        snapshot_manager.update_after_node(
+                        sm.update_after_node(
                             &lang,
                             &pn.hash,
                             &pn.previous_hash,
-                            &mut exec,
                             &cache_guard,
                             project_root,
                         )?;
@@ -152,15 +149,9 @@ pub(super) fn run_language_chain(
                     // Lock only for the read, release before executing.
                     {
                         let cache_guard = cache.lock().unwrap();
-                        snapshot_manager.restore_if_needed(
-                            &lang,
-                            &pn.previous_hash,
-                            &mut exec,
-                            &cache_guard,
-                            project_root,
-                        )?;
+                        sm.restore_if_needed(&lang, &pn.previous_hash, &cache_guard, project_root)?;
                     }
-                    match execute_for_node(&pn, &mut exec, &cache) {
+                    match execute_for_node(&pn, sm.executor_mut(), &cache) {
                         Ok(output) => {
                             if let Some(error) = &output.error {
                                 // Runtime error: persist to cache, then cascade.
@@ -193,7 +184,7 @@ pub(super) fn run_language_chain(
                                 {
                                     register_freeze_objects(
                                         chunk,
-                                        &mut exec,
+                                        sm.executor_mut(),
                                         &cache,
                                         project_root,
                                     )?;
@@ -202,7 +193,7 @@ pub(super) fn run_language_chain(
                                 // IMPORTANT: save_result is only called when the contract passes.
                                 // A violating chunk must NOT be cached as success — if it were,
                                 // the check would be bypassed (CacheHit path) on every subsequent run.
-                                match check_freeze_contract(&pn, &mut exec, &cache) {
+                                match check_freeze_contract(&pn, sm.executor_mut(), &cache) {
                                     Err(e) => {
                                         // Hash computation failed: cascade without caching.
                                         broken = true;
@@ -258,11 +249,10 @@ pub(super) fn run_language_chain(
                                         }
                                         {
                                             let cache_guard = cache.lock().unwrap();
-                                            snapshot_manager.update_after_node(
+                                            sm.update_after_node(
                                                 &lang,
                                                 &pn.hash,
                                                 &pn.previous_hash,
-                                                &mut exec,
                                                 &cache_guard,
                                                 project_root,
                                             )?;
@@ -301,7 +291,7 @@ pub(super) fn run_language_chain(
         ));
     }
 
-    Ok((lang, exec, indexed))
+    Ok((lang, sm.into_executor(), indexed))
 }
 
 /// Execute the node's code and return the raw output.
