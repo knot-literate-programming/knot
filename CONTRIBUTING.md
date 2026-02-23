@@ -1,283 +1,79 @@
 # Contributing to Knot
 
-Thank you for your interest in contributing to Knot! 🎉
+Thank you for your interest in contributing! 🧶
 
-Knot is in **early development** (v0.1.x), and we welcome testers, bug reporters, and code contributors.
+Knot is an open-source project, and we welcome contributions in many forms: reporting bugs, suggesting features, improving documentation, or contributing code.
 
 ---
 
-## Ways to Contribute
+## Code of Conduct
 
-### 🐛 Report Bugs
-
-Found a bug? [Open an issue](https://github.com/knot-literate-programming/knot/issues/new) with:
-- **Description**: What happened vs what you expected
-- **Steps to reproduce**: Minimal example to trigger the bug
-- **Environment**: OS, Rust version, R/Python version
-- **Logs**: Any error messages or stack traces
-
-### 💡 Suggest Features
-
-Have an idea? [Open an issue](https://github.com/knot-literate-programming/knot/issues/new) with:
-- **Use case**: What problem does this solve?
-- **Proposed solution**: How should it work?
-- **Alternatives**: Other approaches you considered
-
-### 📝 Improve Documentation
-
-- Fix typos or unclear explanations
-- Add examples or tutorials
-- Update outdated information
-
-### 💻 Contribute Code
-
-See **Development Setup** below to get started.
+Be respectful, inclusive, and constructive. We follow the common standards of the Rust and Typst communities.
 
 ---
 
 ## Development Setup
 
 ### Prerequisites
-
-- **Rust** 1.70+ — [Install from rustup.rs](https://rustup.rs/)
-- **Node.js** 20+ — [Install from nodejs.org](https://nodejs.org/)
-- **Typst CLI** — [Install from typst.app](https://github.com/typst/typst#installation)
-- **R** (optional) — For testing R executor
-- **Python 3.8+** (optional) — For testing Python executor
+- **Rust** 1.80+ — [Install from rustup.rs](https://rustup.rs/)
+- **Node.js** 20+ — For building the VS Code extension
+- **Typst CLI** — For document rendering
+- **R** and **Python 3.8+** — For testing executors
 
 ### Clone the repository
-
 ```bash
 git clone https://github.com/knot-literate-programming/knot.git
 cd knot
 ```
 
 ### Build the project
-
 ```bash
 # Build all components
 cargo build --release
 
-# Binaries will be in target/release/
-# - knot
-# - knot-lsp
-```
-
-### Run tests
-
-```bash
-# Run all tests
-cargo test --workspace
-
-# Run tests for a specific crate
-cargo test -p knot-core
-cargo test -p knot-lsp
+# Binaries: target/release/knot and target/release/knot-lsp
 ```
 
 ### Build the VS Code extension
-
 ```bash
 cd editors/vscode
 npm install
 npm run compile
-
-# Package extension
-npm run package
-# Creates knot-*.vsix
-```
-
----
-
-## Project Structure
-
-```
-knot/
-├── crates/
-│   ├── knot-core/          # Parser, executor, cache engine
-│   │   ├── src/
-│   │   │   ├── parser/     # Winnow-based parser
-│   │   │   ├── executors/  # R and Python executors
-│   │   │   ├── compiler/   # Compilation pipeline
-│   │   │   └── cache/      # SHA256-based caching
-│   │   └── resources/      # Embedded helper scripts (typst.py, typst.R)
-│   ├── knot-cli/           # Command-line interface
-│   └── knot-lsp/           # Language Server Protocol
-├── editors/
-│   └── vscode/             # VS Code extension
-├── templates/
-│   └── minimal/            # knot init template
-├── examples/               # Example projects
-└── docs/
-    └── dev-plans/          # Architecture and design docs
+# Create .vsix: npm run package
 ```
 
 ---
 
 ## Development Workflow
 
-### 1. Pick an issue
+1.  **Pick an issue** or [open one](https://github.com/knot-literate-programming/knot/issues/new) to discuss a feature.
+2.  **Create a branch**: `git checkout -b fix/issue-description` or `git checkout -b feature/feature-name`.
+3.  **Implement changes** and add tests if applicable.
+4.  **Format and lint**:
+    ```bash
+    cargo fmt --all
+    cargo clippy --all-targets --all-features -- -D warnings
+    ```
+5.  **Run tests**: `cargo test --workspace`.
+6.  **Push and create a Pull Request**.
 
-Browse [issues labeled "good first issue"](https://github.com/knot-literate-programming/knot/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22).
-
-Comment on the issue to claim it and avoid duplicate work.
-
-### 2. Create a branch
-
-```bash
-git checkout -b fix/issue-description
-# or
-git checkout -b feature/feature-name
-```
-
-### 3. Make changes
-
-- **Write tests** for new functionality
-- **Update documentation** if behavior changes
-- **Follow Rust conventions** (rustfmt, clippy)
-
-### 4. Test your changes
-
-```bash
-# Format code
-cargo fmt --all
-
-# Check for issues
-cargo clippy --all-targets --all-features -- -D warnings
-
-# Run tests
-cargo test --workspace
-```
-
-### 5. Commit
-
-```bash
-git add .
-git commit -m "fix: description of the fix
-
-Longer explanation if needed.
-
-Fixes #123"
-```
-
-**Commit message format:**
-- `fix:` — Bug fixes
-- `feat:` — New features
-- `docs:` — Documentation changes
-- `refactor:` — Code refactoring
-- `test:` — Test additions or fixes
-- `ci:` — CI/CD changes
-
-### 6. Push and create a PR
-
-```bash
-git push origin your-branch-name
-```
-
-Open a Pull Request on GitHub with:
-- **Description**: What does this PR do?
-- **Related issues**: `Fixes #123` or `Relates to #456`
-- **Testing**: How did you test this?
+**Commit messages** should follow the Conventional Commits format (e.g., `feat: ...`, `fix: ...`, `docs: ...`).
 
 ---
 
-## Code Style
+## Project Architecture
 
-### Rust
-
-We follow standard Rust conventions:
-
-- **Format with rustfmt**: `cargo fmt --all`
-- **Lint with clippy**: `cargo clippy --all-targets --all-features -- -D warnings`
-- **Document public APIs**: Use `///` doc comments
-- **Write tests**: Unit tests in the same file, integration tests in `tests/`
-
-### TypeScript (VS Code extension)
-
-- **Use ESLint**: Configured in `editors/vscode/.eslintrc.json`
-- **Format with Prettier**: Run `npm run lint`
+- **`crates/knot-core`**: The heart of Knot. Winnow-based parser, SHA256 caching, and persistent executors for R and Python.
+- **`crates/knot-cli`**: The user-facing command-line tool.
+- **`crates/knot-lsp`**: Language Server implementation. Proxies Typst LSP (Tinymist) while adding Knot-specific overlays.
+- **`editors/vscode`**: VS Code extension source.
 
 ---
 
-## Testing
+## Documentation
 
-### Unit tests
-
-```bash
-# Test a specific crate
-cargo test -p knot-core
-
-# Test a specific module
-cargo test -p knot-core parser
-```
-
-### Integration tests
-
-```bash
-# Test the full compilation pipeline
-cargo test -p knot-cli --test integration_build
-```
-
-### Manual testing
-
-```bash
-# Build and test with an example
-cargo build --release
-./target/release/knot compile examples/consolidated/main.knot
-typst compile examples/consolidated/.main.typ test.pdf
-```
+For high-level roadmap and architectural details, see the documents in **[docs/dev-plans/](docs/dev-plans/)**.
 
 ---
 
-## Architecture Guidelines
-
-### Parser (`knot-core/src/parser`)
-
-- Uses **winnow** for parsing
-- AST defined in `ast.rs`
-- Chunk options defined with `define_options!` macro
-
-### Executors (`knot-core/src/executors`)
-
-- **Persistent processes**: One R/Python process per session
-- **Side-channel communication**: Metadata via JSON files
-- Helper scripts embedded in binary (`resources/typst.py`, `typst.R`)
-
-### Compiler (`knot-core/src/compiler`)
-
-- Sequential chunk execution (deterministic)
-- Dependency tracking for caching
-- Generates pure Typst output
-
-### LSP (`knot-lsp`)
-
-- Proxies Typst LSP to Tinymist
-- Adds Knot-specific features (hover on chunks, chunk option completion)
-- Position mapping between `.knot` and `.typ` coordinates
-
----
-
-## Design Principles
-
-1. **Reproducibility**: Execution is strictly linear and deterministic
-2. **Performance**: Rust for speed, Typst for fast PDF generation
-3. **Simplicity**: Typst is the ONLY documentation language (no Markdown intermediate)
-4. **Caching**: SHA256-based, cascading invalidation
-5. **IDE integration**: First-class support via LSP
-
----
-
-## Getting Help
-
-- **Questions?** Open a [discussion](https://github.com/knot-literate-programming/knot/discussions)
-- **Stuck?** Comment on your PR or issue
-- **Architecture questions?** Read [docs/dev-plans/](docs/dev-plans/)
-
----
-
-## Code of Conduct
-
-Be respectful, inclusive, and constructive. We're all here to build something cool together.
-
----
-
-**Thank you for contributing!** 🙏
+**Thank you for your help in making Knot the best literate programming system for Typst!** 🙏

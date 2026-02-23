@@ -1,201 +1,113 @@
 # Knot
 
-**knot is not knitr** — A modern literate programming system for Typst
+**knot is not knitr** — A modern literate programming system for [Typst](https://typst.app/).
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.70+-orange.svg)](https://www.rust-lang.org)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/rust-1.80+-orange.svg)](https://www.rust-lang.org)
 [![GitHub Release](https://img.shields.io/github/v/release/knot-literate-programming/knot)](https://github.com/knot-literate-programming/knot/releases)
 
 ---
 
 ## What is Knot?
 
-Knot brings **executable R and Python code** to [Typst](https://typst.app/) documents. Write your analysis, visualizations, and text together in one place — Knot executes the code, caches results intelligently, and generates beautiful PDFs.
+Knot brings **executable R and Python code** directly into your Typst documents. It allows you to weave analysis, visualizations, and text into a single source, providing a modern, fast, and reproducible alternative to RMarkdown or Jupyter, powered by the performance of Rust and the beauty of Typst.
 
-**Think:** RMarkdown or Jupyter, but with Typst's modern typesetting instead of Markdown/LaTeX.
+### Key Features
 
-### Why Knot?
-
-- 🚀 **Modern stack**: Typst + Rust (fast, reliable, no LaTeX hell)
-- 🔬 **Reproducible**: Deterministic execution, intelligent caching
-- 🎨 **Beautiful output**: Professional PDFs with Typst's power
-- 💻 **IDE integration**: VS Code extension with hover, completion, diagnostics
-- 📦 **Multi-file projects**: Organize large documents with `knot.toml`
-- 🐍🔵 **R + Python**: Switch between languages seamlessly
+- 🚀 **Blazing Fast**: Built with Rust, featuring a three-pass compilation pipeline for progressive updates.
+- 🔬 **Reproducible**: Intelligent SHA256-based caching with sequential invalidation.
+- 🐍🔵 **Polyglot**: Seamlessly switch between R and Python in the same document.
+- 🎨 **Rich Output**: Automatic conversion of DataFrames to Typst tables and plots (Matplotlib, ggplot2) to SVG/PNG.
+- 💻 **First-class IDE support**: A dedicated VS Code extension providing hover docs, completion, and live diagnostics.
+- 🔗 **Sync Mapping**: Perfect bidirectional "Click-to-Source" (PDF ↔ Source) synchronization.
 
 ---
 
 ## Quick Start
 
-### Installation
+### 1. Installation
 
-**Download from [GitHub Releases](https://github.com/knot-literate-programming/knot/releases):**
+**Using pre-compiled binaries:**
+Download the CLI tools (`knot`, `knot-lsp`) and the VS Code extension (`.vsix`) for your platform from the [latest releases](https://github.com/knot-literate-programming/knot/releases).
 
-1. **CLI tools** (`knot`, `knot-lsp`) for your platform (macOS/Linux/Windows)
-2. **VS Code extension** (`knot-X.Y.Z.vsix`)
-
+**Using Cargo:**
 ```bash
-# Install CLI (example for macOS/Linux)
-tar -xzf knot-*-{platform}.tar.gz
-mv knot knot-lsp ~/.local/bin/  # or /usr/local/bin
-
-# Install VS Code extension
-code --install-extension knot-0.1.0.vsix
+cargo install --git https://github.com/knot-literate-programming/knot.git knot-cli
 ```
 
-**Verify installation:**
+### 2. Create a Project
 ```bash
-knot --version
+knot init my-project
+cd my-project
+code . # Open in VS Code
 ```
 
-### Your First Document
-
-Create a new project:
-```bash
-knot init my-analysis
-cd my-analysis
-```
-
+### 3. Write and Compile
 Edit `main.knot`:
-```typst
+
+~~~typst
 #import "lib/knot.typ": *
 
-= My First Analysis
-
-Here's some data analysis with R:
+= Analysis
 
 ```{r}
-x <- 1:10
-mean(x)
+#| show: "both"
+x <- rnorm(100)
+hist(x, col="steelblue")
+typst(current_plot())
 ```
 
-And a plot with Python:
+The average value is `{python} import numpy; print(numpy.mean(numpy.random.randn(100)))`.
+~~~
 
-```{python}
-import matplotlib.pyplot as plt
-import numpy as np
-
-x = np.linspace(0, 2*np.pi, 100)
-plt.plot(x, np.sin(x))
-typst(plt.gcf())  # Send plot to Typst
-```
-```
-
-Compile to PDF:
+Compile it:
 ```bash
-knot compile main.knot
-typst compile .main.typ output.pdf
+knot watch # Start live preview mode
 ```
 
-**Or use watch mode** for live preview:
-```bash
-knot watch
-```
-
-👉 **[Full tutorial in QUICKSTART.md](QUICKSTART.md)**
-
 ---
 
-## Features
+## Project Structure
 
-### Execution
-- ✅ R and Python with persistent sessions
-- ✅ Intelligent caching (SHA256-based invalidation)
-- ✅ Rich output: DataFrames → tables, plots → SVG/PNG
-
-### Project Management
-- ✅ Multi-file documents via `knot.toml` includes
-- ✅ Configurable chunk defaults (graphics, styling, behavior)
-- ✅ Watch mode with live PDF preview
-
-### IDE Support (VS Code)
-- ✅ Syntax highlighting (Typst + embedded R/Python)
-- ✅ Hover information (variables, functions, chunks)
-- ✅ Code completion (chunk options, R/Python)
-- ✅ Diagnostics (parsing errors, invalid options)
-- ✅ Document symbols (chunk navigation)
-
-### Chunk Customization
-- ✅ 12+ presentation options (layout, colors, borders, spacing)
-- ✅ Graphics options (size, format, DPI)
-- ✅ Execution control (eval, show, cache)
-
----
-
-## Documentation
-
-- **[QUICKSTART.md](QUICKSTART.md)** — Step-by-step tutorial
-- **[Example Project](examples/)** — Complete multi-file example with R, Python, graphics *(coming soon)*
-- **[Dev Plans](docs/dev-plans/)** — Architecture and roadmap
-
----
-
-## Project Status
-
-**Current version:** v0.1.6 (Early Testing)
-
-Knot is in active development and ready for **early adopters and testers**. The core features work well, but expect rough edges and breaking changes before v1.0.
-
-**What works today:**
-- Core compilation pipeline (R, Python, caching)
-- VS Code extension with LSP
-- Multi-file projects
-- Graphics and rich output
-- Watch mode
-
-**What's coming:**
-- Structured error handling (precise line numbers for R/Python errors)
-- Go to Definition
-- Hybrid formatting (Air for R, Ruff for Python)
-- User documentation and tutorials
+- **`knot-core`**: The engine (parser, executors, cache).
+- **`knot-lsp`**: Language Server for IDE features.
+- **`knot-cli`**: Command-line interface.
+- **`editors/vscode`**: VS Code extension source.
 
 ---
 
 ## Contributing
 
-We're looking for **early testers** and **contributors**!
-
-### Testing & Feedback
-
-Found a bug or have a suggestion?
-- 🐛 [Open an issue](https://github.com/knot-literate-programming/knot/issues)
-- 💬 Share your experience (what works, what doesn't)
-- 📝 Try the example project and report issues
-
-### Contributing Code
-
-See **[CONTRIBUTING.md](CONTRIBUTING.md)** for development setup and guidelines.
-
-**Good first issues:** [Link to issues](https://github.com/knot-literate-programming/knot/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
+We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
 
 ---
 
-## Architecture
+## Citing Knot
 
-- **`knot-core`** — Parser, executor, cache engine
-- **`knot-cli`** — Command-line interface (compile, watch, init)
-- **`knot-lsp`** — Language Server Protocol implementation
-- **`editors/vscode`** — VS Code extension
+If you use Knot for your research, please cite it as follows:
 
-Built with Rust for performance and reliability.
+```bibtex
+@software{Klutchnikoff_Knot_A_modern_2026,
+  author = {Klutchnikoff, Nicolas},
+  month = feb,
+  title = {{Knot: A modern literate programming system for Typst}},
+  url = {https://github.com/knot-literate-programming/knot},
+  version = {0.2.4},
+  year = {2026}
+}
+```
+
+See [CITATION.cff](CITATION.cff) for full metadata.
 
 ---
 
 ## License
 
-MIT License — See [LICENSE](LICENSE) for details.
+Knot is licensed under the [Apache License, Version 2.0](LICENSE). This matches the license used by Typst.
 
 ---
 
 ## Acknowledgments
 
-Inspired by:
-- [knitr](https://yihui.org/knitr/) — The OG literate programming for R
-- [Quarto](https://quarto.org/) — Modern scientific publishing
-- [Typst](https://typst.app/) — The future of typesetting
-
-Developed with the assistance of [Claude](https://claude.ai) (Anthropic) as a pair-programming tool for code generation and architecture design.
-
----
-
-**Ready to try it?** → [QUICKSTART.md](QUICKSTART.md)
+Inspired by [knitr](https://yihui.org/knitr/), [Quarto](https://quarto.org/), and [Typst](https://typst.app/).
+Developed with the assistance of [Claude](https://claude.ai) as a pair-programming partner.
