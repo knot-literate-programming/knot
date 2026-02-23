@@ -3,7 +3,7 @@ message: "If you use this software, please cite it as below."
 authors:
   - family-names: "Klutchnikoff"
     given-names: "Nicolas"
-    orcid: "https://orcid.org/0000-0001-6548-1896"
+    orcid: "https://orcid.org/0000-0001-9349-0771"
 title: "Knot: A modern literate programming system for Typst"
 version: 0.2.4
 date-released: 2026-02-23
