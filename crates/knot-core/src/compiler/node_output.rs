@@ -45,7 +45,7 @@ pub(super) fn inert_output(pn: &PlannedNode, backend: &TypstBackend, config: &Co
     match &pn.node {
         ExecutableNode::Chunk(chunk) => {
             let (_, inert_resolved, inert_codly) =
-                super::resolve_options(chunk, config, &ChunkExecutionState::Inert);
+                super::options::resolve_options(chunk, config, &ChunkExecutionState::Inert);
             let empty = ExecutionOutput {
                 result: ExecutionResult::Text(String::new()),
                 warnings: vec![],

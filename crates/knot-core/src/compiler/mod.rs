@@ -1,9 +1,7 @@
 use crate::cache::Cache;
-use crate::cache::{hash_dependencies, hashing};
 use crate::config::Config;
 use crate::executors::{ExecutorManager, KnotExecutor};
 use crate::parser::ast::{Chunk, Document, InlineExpr};
-use crate::parser::{ChunkOptions, ResolvedChunkOptions};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -18,6 +16,7 @@ pub mod sync;
 mod execution;
 mod freeze;
 mod node_output;
+mod options;
 
 pub use pipeline::{ChunkExecutionState, ExecutedNode, ExecutionNeed, PlannedNode};
 
@@ -28,6 +27,7 @@ use anyhow::Result;
 use log::info;
 
 use execution::{ChainOutput, group_by_language, run_language_chain};
+use options::{compute_hash, resolve_options};
 
 /// Represents a node in the document that can be executed.
 pub enum ExecutableNode {
@@ -337,55 +337,6 @@ fn assemble_pass(executed: &[ExecutedNode], source: &str, source_file: &str) -> 
     }
 
     output
-}
-
-// ---------------------------------------------------------------------------
-// Chunk helpers (options, hashing)
-// ---------------------------------------------------------------------------
-
-/// Applies config layering (global → language → error) to produce resolved options
-/// and merged codly options for a chunk.
-fn resolve_options(
-    chunk: &Chunk,
-    config: &Config,
-    state: &ChunkExecutionState,
-) -> (ChunkOptions, ResolvedChunkOptions, HashMap<String, String>) {
-    let mut chunk_options = chunk.options.clone();
-
-    let mut effective_defaults = config.chunk_defaults.clone();
-    if let Some(lang_defaults) = config.get_language_defaults(&chunk.language) {
-        effective_defaults.merge(lang_defaults);
-    }
-    if matches!(state, ChunkExecutionState::Inert)
-        && let Some(error_defaults) = config.get_language_error_defaults(&chunk.language)
-    {
-        effective_defaults.merge(error_defaults);
-    }
-
-    chunk_options.apply_config_defaults(&effective_defaults);
-
-    let mut merged_codly_options = effective_defaults.codly_options.clone();
-    for (key, value) in &chunk.codly_options {
-        merged_codly_options.insert(key.clone(), value.clone());
-    }
-
-    let resolved_options = chunk_options.resolve();
-    (chunk_options, resolved_options, merged_codly_options)
-}
-
-/// Computes the chunk hash from code, options, previous hash, and file dependencies.
-///
-/// Freeze objects are intentionally excluded from the hash: their immutability
-/// is enforced by the snapshot mechanism, and cache invalidation propagates
-/// correctly through hash chaining (`previous_hash`).
-fn compute_hash(code: &str, chunk_options: &ChunkOptions, previous_hash: &str) -> Result<String> {
-    let deps_hash = hash_dependencies(&chunk_options.depends)?;
-    Ok(hashing::get_chunk_hash(
-        code,
-        chunk_options,
-        previous_hash,
-        &deps_hash,
-    ))
 }
 
 // ---------------------------------------------------------------------------
