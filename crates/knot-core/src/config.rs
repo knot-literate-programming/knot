@@ -9,7 +9,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct Config {
     #[serde(default)]
     pub document: DocumentConfig,
@@ -38,18 +38,18 @@ pub struct Config {
     pub python_error: Option<ChunkDefaults>,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct DocumentConfig {
     pub main: Option<String>,
     pub includes: Option<Vec<String>>,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct HelpersConfig {
     pub typst: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct ExecutionConfig {
     /// Maximum execution time (seconds) for a single R/Python chunk.

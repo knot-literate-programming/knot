@@ -181,13 +181,25 @@ impl<'a> ChunkProcessor<'a> {
         // Lazy state restoration: only restore when we actually need to execute.
         // Lock cache for the read, release before calling executor.
         {
+            // Temporarily take the executor out so SnapshotManager can receive
+            // `&mut Option<Box<dyn KnotExecutor>>` without a conflicting borrow on
+            // self.executor_manager.  The executor is put back immediately after.
+            let lang = &req.chunk.language;
+            let mut exec_opt = self.executor_manager.take(lang);
+            if exec_opt.is_none() {
+                // Not yet initialised: force initialization via get_executor, then take.
+                self.executor_manager.get_executor(lang)?;
+                exec_opt = self.executor_manager.take(lang);
+            }
             let sm = &mut *self.snapshot_manager;
-            let em = &mut *self.executor_manager;
             let cache_guard = self.cache.lock().unwrap();
             let c = &*cache_guard;
             let pr = self.project_root;
-            sm.restore_if_needed(&req.chunk.language, req.previous_hash, em, c, pr)?;
-            // cache_guard dropped here
+            sm.restore_if_needed(lang, req.previous_hash, &mut exec_opt, c, pr)?;
+            // cache_guard dropped here; put executor back
+            if let Some(exec) = exec_opt {
+                self.executor_manager.put_back(lang.to_string(), exec);
+            }
         }
 
         let graphics_opts = GraphicsOptions {

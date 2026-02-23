@@ -1,7 +1,9 @@
 use crate::cache::FreezeObjectInfo;
 use crate::config::Config;
 use crate::executors::side_channel::RuntimeError;
-use crate::executors::{ExecutionOutput, ExecutionResult, ExecutorManager, GraphicsOptions};
+use crate::executors::{
+    ExecutionOutput, ExecutionResult, ExecutorManager, GraphicsOptions, KnotExecutor,
+};
 use crate::parser::ast::{Chunk, Document, InlineExpr};
 use std::collections::HashMap;
 use std::path::Path;
@@ -32,7 +34,6 @@ use crate::defaults::Defaults;
 use crate::get_cache_dir;
 use anyhow::{Context, Result};
 use log::info;
-use std::collections::HashSet;
 use std::path::PathBuf;
 
 pub struct Compiler {
@@ -86,7 +87,6 @@ impl Compiler {
     pub fn compile(&mut self, doc: &Document, source_file: &str) -> Result<String> {
         let cache = Arc::new(Mutex::new(Cache::new(self.cache_dir.clone())?));
         let backend = TypstBackend::new();
-        let mut snapshot_manager = SnapshotManager::new();
 
         let nodes = build_executable_nodes(doc);
         info!("🔧 Processing {} executable nodes...", nodes.len());
@@ -94,9 +94,8 @@ impl Compiler {
         // Pass 1: resolve options, compute hashes, check cache — no code executed.
         let planned = self.plan_pass(nodes, &cache)?;
 
-        // Pass 2: execute pending nodes, format output, handle error cascade.
-        let executed =
-            self.execute_pass(planned, Arc::clone(&cache), &mut snapshot_manager, &backend)?;
+        // Pass 2: execute pending nodes in parallel per language, format output.
+        let executed = self.execute_pass(planned, Arc::clone(&cache), &backend)?;
 
         // Pass 3: interleave node outputs with source text.
         let typst_output = assemble_pass(&executed, &doc.source, source_file);
@@ -194,232 +193,355 @@ impl Compiler {
     }
 
     // -----------------------------------------------------------------------
-    // Pass 2 — Execute
+    // Pass 2 — Execute (parallel per language)
     // -----------------------------------------------------------------------
 
-    /// Execute pending nodes, format all outputs, propagate the Inert cascade on error.
+    /// Execute pending nodes in parallel per language, format all outputs.
+    ///
+    /// Nodes of the same language run sequentially (shared interpreter state);
+    /// nodes of different languages run in separate OS threads simultaneously.
     fn execute_pass(
         &mut self,
         planned: Vec<PlannedNode>,
         cache: Arc<Mutex<Cache>>,
-        snapshot_manager: &mut SnapshotManager,
         backend: &TypstBackend,
     ) -> Result<Vec<ExecutedNode>> {
-        use chunk_processor::format_output;
+        // Step 1: group nodes by language, preserving document order via indices.
+        let groups = group_by_language(planned);
 
-        let mut executed = Vec::with_capacity(planned.len());
-        let mut broken_languages: HashSet<String> = HashSet::new();
+        // Step 2: for languages with MustExecute nodes, ensure the executor is
+        // initialized (lazy), then take it for exclusive use in its thread.
+        let mut chain_executors: HashMap<String, Box<dyn KnotExecutor>> = HashMap::new();
+        for (lang, nodes) in &groups {
+            let needs_exec = nodes
+                .iter()
+                .any(|(_, pn)| matches!(pn.need, ExecutionNeed::MustExecute));
+            if needs_exec {
+                // Initialize if needed; ignore failure — the chain will produce an error block.
+                let _ = self.executor_manager.get_executor(lang);
+            }
+            if let Some(exec) = self.executor_manager.take(lang) {
+                chain_executors.insert(lang.clone(), exec);
+            }
+        }
 
-        for pn in planned {
-            let is_chunk = matches!(&pn.node, ExecutableNode::Chunk(_));
-            let source_line = match &pn.node {
-                ExecutableNode::Chunk(c) => (c.range.start.line + 1) as u32,
-                ExecutableNode::InlineExpr(_) => 0,
-            };
+        // Clone immutable data once so threads can borrow it without capturing `self`.
+        let config = self.config.clone();
+        let project_root = self.project_root.clone();
 
-            // Determine effective execution state for this node.
-            let state = if broken_languages.contains(&pn.lang) {
-                ChunkExecutionState::Inert
-            } else {
-                ChunkExecutionState::Ready
-            };
+        // Step 3: build per-chain inputs (each chain owns its executor).
+        let chain_data: Vec<(String, Vec<(usize, PlannedNode)>, Option<Box<dyn KnotExecutor>>)> =
+            groups
+                .into_iter()
+                .map(|(lang, nodes)| {
+                    let exec = chain_executors.remove(&lang);
+                    (lang, nodes, exec)
+                })
+                .collect();
 
-            let (typst_content, errored) = if matches!(state, ChunkExecutionState::Inert) {
-                // Language is broken — render as inert (no execution).
-                (inert_output(&pn, backend, &self.config), false)
-            } else {
-                match pn.need {
-                    ExecutionNeed::CacheHit(ref output) => {
-                        let data = pn.chunk_data.as_ref().unwrap();
-                        info!("  ✓ {} [cached]", data.name);
-                        if let Some(error) = &output.error {
-                            broken_languages.insert(pn.lang.clone());
-                            (
-                                format_error_block_for_node(&pn.node, &pn.lang, &error.to_string()),
-                                true,
-                            )
-                        } else {
-                            let chunk = match &pn.node {
-                                ExecutableNode::Chunk(c) => c,
-                                _ => unreachable!(),
-                            };
-                            (
-                                format_output(
-                                    backend,
-                                    chunk,
-                                    &data.merged_codly_options,
-                                    &data.resolved_options,
-                                    output,
-                                    &state,
-                                ),
-                                false,
-                            )
+        // Step 4: run each language chain in its own OS thread.
+        type ChainResult =
+            Result<(String, Option<Box<dyn KnotExecutor>>, Vec<(usize, ExecutedNode)>)>;
+
+        // Reborrow as references so closures can copy them (references are Copy).
+        let config_ref = &config;
+        let project_root_ref = &project_root;
+
+        let chain_results: Vec<ChainResult> = std::thread::scope(|s| {
+            let handles: Vec<_> = chain_data
+                .into_iter()
+                .map(|(lang, nodes, exec)| {
+                    let cache = Arc::clone(&cache);
+                    s.spawn(move || {
+                        run_language_chain(
+                            lang,
+                            nodes,
+                            exec,
+                            cache,
+                            SnapshotManager::new(),
+                            backend,
+                            config_ref,
+                            project_root_ref,
+                        )
+                    })
+                })
+                .collect();
+
+            handles
+                .into_iter()
+                .map(|h| h.join().expect("language chain thread panicked"))
+                .collect()
+        });
+
+        // Step 5: put executors back, collect indexed nodes, propagate any Err.
+        let mut all_indexed: Vec<(usize, ExecutedNode)> = Vec::new();
+        for result in chain_results {
+            let (lang, exec, nodes) = result?;
+            if let Some(exec) = exec {
+                self.executor_manager.put_back(lang, exec);
+            }
+            all_indexed.extend(nodes);
+        }
+
+        // Step 6: restore document order.
+        all_indexed.sort_by_key(|(i, _)| *i);
+        Ok(all_indexed.into_iter().map(|(_, n)| n).collect())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Pass 2 helpers — language chain execution
+// ---------------------------------------------------------------------------
+
+/// Group planned nodes by language, preserving their original document indices.
+fn group_by_language(planned: Vec<PlannedNode>) -> HashMap<String, Vec<(usize, PlannedNode)>> {
+    let mut groups: HashMap<String, Vec<(usize, PlannedNode)>> = HashMap::new();
+    for (i, pn) in planned.into_iter().enumerate() {
+        groups.entry(pn.lang.clone()).or_default().push((i, pn));
+    }
+    groups
+}
+
+/// Execute all nodes for a single language sequentially, returning results tagged
+/// with their original document indices (for later reassembly in document order).
+///
+/// Returns `(lang, executor, indexed_nodes)` — the executor is returned so the
+/// caller can put it back into the `ExecutorManager`.
+fn run_language_chain(
+    lang: String,
+    nodes: Vec<(usize, PlannedNode)>,
+    mut exec: Option<Box<dyn KnotExecutor>>,
+    cache: Arc<Mutex<Cache>>,
+    mut snapshot_manager: SnapshotManager,
+    backend: &TypstBackend,
+    config: &Config,
+    project_root: &Path,
+) -> Result<(String, Option<Box<dyn KnotExecutor>>, Vec<(usize, ExecutedNode)>)> {
+    use chunk_processor::format_output;
+
+    let mut indexed = Vec::with_capacity(nodes.len());
+    let mut broken = false;
+
+    for (doc_idx, pn) in nodes {
+        let is_chunk = matches!(&pn.node, ExecutableNode::Chunk(_));
+        let source_line = match &pn.node {
+            ExecutableNode::Chunk(c) => (c.range.start.line + 1) as u32,
+            ExecutableNode::InlineExpr(_) => 0,
+        };
+
+        let state = if broken {
+            ChunkExecutionState::Inert
+        } else {
+            ChunkExecutionState::Ready
+        };
+
+        // Snapshot update is inlined into each successful arm to avoid double-matching
+        // pn.need, which would confuse the borrow checker about the lifetime of `exec`.
+        let (typst_content, errored) = if matches!(state, ChunkExecutionState::Inert) {
+            (inert_output(&pn, backend, config), false)
+        } else {
+            match pn.need {
+                ExecutionNeed::CacheHit(ref output) => {
+                    let data = pn.chunk_data.as_ref().unwrap();
+                    info!("  ✓ {} [cached]", data.name);
+                    if let Some(error) = &output.error {
+                        broken = true;
+                        (
+                            format_error_block_for_node(&pn.node, &lang, &error.to_string()),
+                            true,
+                        )
+                    } else {
+                        let chunk = match &pn.node {
+                            ExecutableNode::Chunk(c) => c,
+                            _ => unreachable!(),
+                        };
+                        let content = format_output(
+                            backend,
+                            chunk,
+                            &data.merged_codly_options,
+                            &data.resolved_options,
+                            output,
+                            &state,
+                        );
+                        {
+                            let cache_guard = cache.lock().unwrap();
+                            snapshot_manager.update_after_node(
+                                &lang,
+                                &pn.hash,
+                                &pn.previous_hash,
+                                &mut exec,
+                                &*cache_guard,
+                                project_root,
+                            )?;
                         }
+                        (content, false)
                     }
+                }
 
-                    ExecutionNeed::CacheHitInline(ref result) => {
-                        info!("  ✓ [cached inline]");
-                        (result.clone(), false)
+                ExecutionNeed::CacheHitInline(ref result) => {
+                    info!("  ✓ [cached inline]");
+                    let result_clone = result.clone();
+                    {
+                        let cache_guard = cache.lock().unwrap();
+                        snapshot_manager.update_after_node(
+                            &lang,
+                            &pn.hash,
+                            &pn.previous_hash,
+                            &mut exec,
+                            &*cache_guard,
+                            project_root,
+                        )?;
                     }
+                    (result_clone, false)
+                }
 
-                    ExecutionNeed::Skip => {
-                        // eval = false: format with empty output.
-                        (skip_output(&pn, backend, &state), false)
+                ExecutionNeed::Skip => {
+                    let content = skip_output(&pn, backend, &state);
+                    {
+                        let cache_guard = cache.lock().unwrap();
+                        snapshot_manager.update_after_node(
+                            &lang,
+                            &pn.hash,
+                            &pn.previous_hash,
+                            &mut exec,
+                            &*cache_guard,
+                            project_root,
+                        )?;
                     }
+                    (content, false)
+                }
 
-                    ExecutionNeed::MustExecute => {
-                        match self.run_node(&pn, Arc::clone(&cache), snapshot_manager) {
-                            Ok(output) => {
-                                if let Some(error) = &output.error {
-                                    // Runtime error: persist to cache, then cascade.
-                                    if let ExecutableNode::Chunk(chunk) = &pn.node {
-                                        let data = pn.chunk_data.as_ref().unwrap();
-                                        if data.resolved_options.cache {
-                                            cache.lock().unwrap().save_error(
-                                                chunk.index,
-                                                chunk.name.clone(),
-                                                chunk.language.clone(),
-                                                pn.hash.clone(),
-                                                error.clone(),
-                                                data.chunk_options.depends.clone(),
-                                            )?;
-                                        }
-                                    }
-                                    broken_languages.insert(pn.lang.clone());
-                                    (
-                                        format_error_block_for_node(
-                                            &pn.node,
-                                            &pn.lang,
-                                            &error.to_string(),
-                                        ),
-                                        true,
-                                    )
-                                } else {
-                                    // Register freeze objects if declared.
-                                    if let ExecutableNode::Chunk(chunk) = &pn.node
-                                        && !chunk.options.freeze.is_empty()
-                                    {
-                                        register_freeze_objects(
-                                            chunk,
-                                            &mut self.executor_manager,
-                                            &cache,
-                                            &self.project_root,
+                ExecutionNeed::MustExecute => {
+                    match execute_for_node(&pn, &mut exec, &cache, &mut snapshot_manager, project_root) {
+                        Ok(output) => {
+                            if let Some(error) = &output.error {
+                                // Runtime error: persist to cache, then cascade.
+                                if let ExecutableNode::Chunk(chunk) = &pn.node {
+                                    let data = pn.chunk_data.as_ref().unwrap();
+                                    if data.resolved_options.cache {
+                                        cache.lock().unwrap().save_error(
+                                            chunk.index,
+                                            chunk.name.clone(),
+                                            chunk.language.clone(),
+                                            pn.hash.clone(),
+                                            error.clone(),
+                                            data.chunk_options.depends.clone(),
                                         )?;
                                     }
-                                    // Check freeze contract: cascade like a runtime error if violated.
-                                    // IMPORTANT: save_result is only called when the contract passes.
-                                    // A violating chunk must NOT be cached as success — if it were,
-                                    // the check would be bypassed (CacheHit path) on every subsequent run.
-                                    match check_freeze_contract(
-                                        &pn,
-                                        &mut self.executor_manager,
-                                        &cache,
-                                    ) {
-                                        Err(e) => {
-                                            // Hash computation failed: cascade without caching.
-                                            broken_languages.insert(pn.lang.clone());
-                                            (
-                                                format_error_block_for_node(
-                                                    &pn.node,
-                                                    &pn.lang,
-                                                    &e.to_string(),
-                                                ),
-                                                true,
-                                            )
-                                        }
-                                        Ok(Some(violation)) => {
-                                            // Contract violated: cache the error so LSP shows full
-                                            // details (detailed_message), then cascade.
-                                            if let ExecutableNode::Chunk(chunk) = &pn.node {
-                                                let data = pn.chunk_data.as_ref().unwrap();
-                                                if data.resolved_options.cache {
-                                                    cache.lock().unwrap().save_error(
-                                                        chunk.index,
-                                                        chunk.name.clone(),
-                                                        chunk.language.clone(),
-                                                        pn.hash.clone(),
-                                                        violation.clone(),
-                                                        data.chunk_options.depends.clone(),
-                                                    )?;
-                                                }
-                                            }
-                                            broken_languages.insert(pn.lang.clone());
-                                            (
-                                                format_error_block_for_node(
-                                                    &pn.node,
-                                                    &pn.lang,
-                                                    &violation.to_string(),
-                                                ),
-                                                true,
-                                            )
-                                        }
-                                        Ok(None) => {
-                                            // Contract OK: persist result to cache.
-                                            if let ExecutableNode::Chunk(chunk) = &pn.node {
-                                                let data = pn.chunk_data.as_ref().unwrap();
-                                                if data.resolved_options.cache {
-                                                    cache.lock().unwrap().save_result(
-                                                        chunk.index,
-                                                        chunk.name.clone(),
-                                                        chunk.language.clone(),
-                                                        pn.hash.clone(),
-                                                        &output,
-                                                        data.chunk_options.depends.clone(),
-                                                    )?;
-                                                }
-                                            }
-                                            {
-                                                let cache_guard = cache.lock().unwrap();
-                                                snapshot_manager.update_after_node(
-                                                    &pn.lang,
-                                                    &pn.hash,
-                                                    &pn.previous_hash,
-                                                    &mut self.executor_manager,
-                                                    &*cache_guard,
-                                                    &self.project_root,
+                                }
+                                broken = true;
+                                (
+                                    format_error_block_for_node(
+                                        &pn.node,
+                                        &lang,
+                                        &error.to_string(),
+                                    ),
+                                    true,
+                                )
+                            } else {
+                                // Register freeze objects if declared.
+                                if let ExecutableNode::Chunk(chunk) = &pn.node {
+                                    if !chunk.options.freeze.is_empty() {
+                                        register_freeze_objects(
+                                            chunk,
+                                            &mut exec,
+                                            &cache,
+                                            project_root,
+                                        )?;
+                                    }
+                                }
+                                // Check freeze contract: cascade like a runtime error if violated.
+                                // IMPORTANT: save_result is only called when the contract passes.
+                                // A violating chunk must NOT be cached as success — if it were,
+                                // the check would be bypassed (CacheHit path) on every subsequent run.
+                                match check_freeze_contract(&pn, &mut exec, &cache) {
+                                    Err(e) => {
+                                        // Hash computation failed: cascade without caching.
+                                        broken = true;
+                                        (
+                                            format_error_block_for_node(
+                                                &pn.node,
+                                                &lang,
+                                                &e.to_string(),
+                                            ),
+                                            true,
+                                        )
+                                    }
+                                    Ok(Some(violation)) => {
+                                        // Contract violated: cache the error so LSP shows full
+                                        // details (detailed_message), then cascade.
+                                        if let ExecutableNode::Chunk(chunk) = &pn.node {
+                                            let data = pn.chunk_data.as_ref().unwrap();
+                                            if data.resolved_options.cache {
+                                                cache.lock().unwrap().save_error(
+                                                    chunk.index,
+                                                    chunk.name.clone(),
+                                                    chunk.language.clone(),
+                                                    pn.hash.clone(),
+                                                    violation.clone(),
+                                                    data.chunk_options.depends.clone(),
                                                 )?;
                                             }
-                                            let content =
-                                                format_executed_node(&pn, &output, backend, &state);
-                                            (content, false)
                                         }
+                                        broken = true;
+                                        (
+                                            format_error_block_for_node(
+                                                &pn.node,
+                                                &lang,
+                                                &violation.to_string(),
+                                            ),
+                                            true,
+                                        )
+                                    }
+                                    Ok(None) => {
+                                        // Contract OK: persist result to cache.
+                                        if let ExecutableNode::Chunk(chunk) = &pn.node {
+                                            let data = pn.chunk_data.as_ref().unwrap();
+                                            if data.resolved_options.cache {
+                                                cache.lock().unwrap().save_result(
+                                                    chunk.index,
+                                                    chunk.name.clone(),
+                                                    chunk.language.clone(),
+                                                    pn.hash.clone(),
+                                                    &output,
+                                                    data.chunk_options.depends.clone(),
+                                                )?;
+                                            }
+                                        }
+                                        {
+                                            let cache_guard = cache.lock().unwrap();
+                                            snapshot_manager.update_after_node(
+                                                &lang,
+                                                &pn.hash,
+                                                &pn.previous_hash,
+                                                &mut exec,
+                                                &*cache_guard,
+                                                project_root,
+                                            )?;
+                                        }
+                                        let content =
+                                            format_executed_node(&pn, &output, backend, &state);
+                                        (content, false)
                                     }
                                 }
                             }
-                            Err(e) => {
-                                broken_languages.insert(pn.lang.clone());
-                                (
-                                    format_error_block_for_node(&pn.node, &pn.lang, &e.to_string()),
-                                    true,
-                                )
-                            }
+                        }
+                        Err(e) => {
+                            broken = true;
+                            (
+                                format_error_block_for_node(&pn.node, &lang, &e.to_string()),
+                                true,
+                            )
                         }
                     }
                 }
-            };
-
-            // For non-error, non-inert, non-MustExecute nodes: update snapshot state.
-            if !errored && !matches!(state, ChunkExecutionState::Inert) {
-                match &pn.need {
-                    ExecutionNeed::CacheHit(_)
-                    | ExecutionNeed::CacheHitInline(_)
-                    | ExecutionNeed::Skip => {
-                        let cache_guard = cache.lock().unwrap();
-                        snapshot_manager.update_after_node(
-                            &pn.lang,
-                            &pn.hash,
-                            &pn.previous_hash,
-                            &mut self.executor_manager,
-                            &*cache_guard,
-                            &self.project_root,
-                        )?;
-                    }
-                    ExecutionNeed::MustExecute => {}
-                }
             }
+        };
 
-            executed.push(ExecutedNode {
-                lang: pn.lang,
+        indexed.push((
+            doc_idx,
+            ExecutedNode {
+                lang: lang.clone(),
                 hash: pn.hash,
                 source_start: pn.source_start,
                 source_end: pn.source_end,
@@ -427,83 +549,90 @@ impl Compiler {
                 is_chunk,
                 source_line,
                 errored,
-            });
-        }
-
-        Ok(executed)
+            },
+        ));
     }
 
-    /// Restore session snapshot if needed, then execute the node's code.
-    ///
-    /// Returns the raw `ExecutionOutput` without formatting.  Only called for
-    /// `ExecutionNeed::MustExecute` nodes.
-    ///
-    /// **Does not persist to cache.** Caching is done by the caller (`execute_pass`)
-    /// so that chunk results are only saved after all post-execution checks (e.g.
-    /// freeze contract) have passed.  Saving before those checks would mark a
-    /// violating chunk as a cache hit, silently bypassing the check on every
-    /// subsequent run.
-    fn run_node(
-        &mut self,
-        pn: &PlannedNode,
-        cache: Arc<Mutex<Cache>>,
-        snapshot_manager: &mut SnapshotManager,
-    ) -> Result<ExecutionOutput> {
-        match &pn.node {
-            ExecutableNode::Chunk(chunk) => {
-                let data = pn.chunk_data.as_ref().unwrap();
-                info!("  ⚙️ {} [executing]", data.name);
+    Ok((lang, exec, indexed))
+}
 
-                // Lazy state restoration: lock only for the read, release before executing.
-                {
-                    let sm = &mut *snapshot_manager;
-                    let em = &mut self.executor_manager;
-                    let cache_guard = cache.lock().unwrap();
-                    let c = &*cache_guard;
-                    let pr = self.project_root.as_path();
-                    sm.restore_if_needed(&pn.lang, &pn.previous_hash, em, c, pr)?;
-                    // cache_guard dropped here
-                }
+/// Restore session snapshot if needed, then execute the node's code.
+///
+/// Returns the raw `ExecutionOutput` without formatting.  Only called for
+/// `ExecutionNeed::MustExecute` nodes.
+///
+/// **Does not persist to cache.** Caching is done by the caller (`run_language_chain`)
+/// so that chunk results are only saved after all post-execution checks (e.g.
+/// freeze contract) have passed.  Saving before those checks would mark a
+/// violating chunk as a cache hit, silently bypassing the check on every
+/// subsequent run.
+fn execute_for_node(
+    pn: &PlannedNode,
+    exec: &mut Option<Box<dyn KnotExecutor>>,
+    cache: &Arc<Mutex<Cache>>,
+    snapshot_manager: &mut SnapshotManager,
+    project_root: &Path,
+) -> Result<ExecutionOutput> {
+    match &pn.node {
+        ExecutableNode::Chunk(chunk) => {
+            let data = pn.chunk_data.as_ref().unwrap();
+            info!("  ⚙️ {} [executing]", data.name);
 
-                let graphics_opts = GraphicsOptions {
-                    width: data.resolved_options.fig_width,
-                    height: data.resolved_options.fig_height,
-                    dpi: data.resolved_options.dpi,
-                    format: data.resolved_options.fig_format.as_str().to_string(),
-                };
-
-                let output = {
-                    let exec = self.executor_manager.get_executor(&pn.lang)?;
-                    exec.execute(&chunk.code, &graphics_opts)?
-                };
-
-                Ok(output)
+            if exec.is_none() {
+                return Err(anyhow::anyhow!("Unsupported language: '{}'", pn.lang));
             }
-            ExecutableNode::InlineExpr(inline) => {
-                info!("  ⚙️ `{{{}}} {}` [executing]", inline.language, inline.code);
-                let result = self
-                    .executor_manager
-                    .get_executor(&pn.lang)?
-                    .execute_inline(&inline.code)
-                    .context(format!(
-                        "Failed to execute inline expression: `{{{}}} {}`",
-                        inline.language, inline.code
-                    ))?;
 
-                let resolved = inline.options.resolve();
-                let final_result = match resolved.show {
-                    crate::parser::Show::Output | crate::parser::Show::Both => result,
-                    crate::parser::Show::Code | crate::parser::Show::None => String::new(),
-                };
-
-                cache.lock().unwrap().save_inline_result(pn.hash.clone(), &final_result)?;
-
-                Ok(ExecutionOutput {
-                    result: ExecutionResult::Text(final_result),
-                    warnings: vec![],
-                    error: None,
-                })
+            // Lazy state restoration: lock only for the read, release before executing.
+            {
+                let cache_guard = cache.lock().unwrap();
+                snapshot_manager.restore_if_needed(
+                    &pn.lang,
+                    &pn.previous_hash,
+                    exec,
+                    &*cache_guard,
+                    project_root,
+                )?;
+                // cache_guard dropped here
             }
+
+            let graphics_opts = GraphicsOptions {
+                width: data.resolved_options.fig_width,
+                height: data.resolved_options.fig_height,
+                dpi: data.resolved_options.dpi,
+                format: data.resolved_options.fig_format.as_str().to_string(),
+            };
+
+            // SAFETY: checked is_none() above; restore_if_needed doesn't consume the executor.
+            exec.as_deref_mut().unwrap().execute(&chunk.code, &graphics_opts)
+        }
+
+        ExecutableNode::InlineExpr(inline) => {
+            info!("  ⚙️ `{{{}}} {}` [executing]", inline.language, inline.code);
+
+            let e = exec.as_deref_mut().ok_or_else(|| {
+                anyhow::anyhow!("Unsupported language: '{}'", pn.lang)
+            })?;
+
+            let result = e
+                .execute_inline(&inline.code)
+                .context(format!(
+                    "Failed to execute inline expression: `{{{}}} {}`",
+                    inline.language, inline.code
+                ))?;
+
+            let resolved = inline.options.resolve();
+            let final_result = match resolved.show {
+                crate::parser::Show::Output | crate::parser::Show::Both => result,
+                crate::parser::Show::Code | crate::parser::Show::None => String::new(),
+            };
+
+            cache.lock().unwrap().save_inline_result(pn.hash.clone(), &final_result)?;
+
+            Ok(ExecutionOutput {
+                result: ExecutionResult::Text(final_result),
+                warnings: vec![],
+                error: None,
+            })
         }
     }
 }
@@ -551,7 +680,7 @@ fn assemble_pass(executed: &[ExecutedNode], source: &str, source_file: &str) -> 
 }
 
 // ---------------------------------------------------------------------------
-// Per-node output helpers (called from execute_pass)
+// Per-node output helpers (called from run_language_chain)
 // ---------------------------------------------------------------------------
 
 /// Format the output of a freshly executed node.
@@ -691,14 +820,19 @@ fn freeze_key(lang: &str, name: &str) -> String {
 }
 
 /// Saves all freeze objects declared by a chunk to the object cache.
+///
+/// `exec` must be `Some` when this is called (freeze objects only arise from
+/// successfully executed chunks, so an executor is always present).
 fn register_freeze_objects(
     chunk: &Chunk,
-    executor_manager: &mut ExecutorManager,
+    exec: &mut Option<Box<dyn KnotExecutor>>,
     cache: &Arc<Mutex<Cache>>,
     project_root: &Path,
 ) -> Result<()> {
+    let exec = exec
+        .as_deref_mut()
+        .expect("executor must be present when registering freeze objects");
     let chunk_name = chunk.name.as_deref().unwrap_or("unnamed").to_string();
-    let exec = executor_manager.get_executor(&chunk.language)?;
     let cache_dir = project_root.join(Defaults::CACHE_DIR_NAME);
 
     for obj_name in &chunk.options.freeze {
@@ -750,7 +884,7 @@ fn register_freeze_objects(
 /// - `Err(e)` — the hash computation itself failed (propagated to the caller)
 fn check_freeze_contract(
     pn: &PlannedNode,
-    executor_manager: &mut ExecutorManager,
+    exec: &mut Option<Box<dyn KnotExecutor>>,
     cache: &Arc<Mutex<Cache>>,
 ) -> Result<Option<RuntimeError>> {
     // Collect needed data while holding the lock briefly, then release before calling executor.
@@ -769,7 +903,11 @@ fn check_freeze_contract(
         return Ok(None);
     }
 
-    let exec = executor_manager.get_executor(&pn.lang)?;
+    let exec = match exec.as_deref_mut() {
+        Some(e) => e,
+        None => return Ok(None),
+    };
+
     let chunk_name = match &pn.node {
         ExecutableNode::Chunk(c) => c.name.as_deref().unwrap_or("unnamed"),
         ExecutableNode::InlineExpr(_) => "inline",

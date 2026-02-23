@@ -5,7 +5,7 @@
 
 use crate::cache::Cache;
 use crate::defaults::Defaults;
-use crate::executors::ExecutorManager;
+use crate::executors::KnotExecutor;
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::path::Path;
@@ -26,15 +26,27 @@ impl SnapshotManager {
         Self::default()
     }
 
-    /// Ensure the executor for the given language is in the state corresponding to `previous_hash`
+    /// Ensure the executor for the given language is in the state corresponding to `previous_hash`.
+    ///
+    /// `exec` is a mutable reference to an `Option<Box<dyn KnotExecutor>>`.  If the
+    /// option is `None` (executor not yet started), returns `Ok(())` immediately.
+    ///
+    /// Using `&mut Option<Box<…>>` instead of `Option<&mut dyn …>` avoids a
+    /// lifetime-inference issue (the borrow checker over-extends `&mut dyn Trait`
+    /// lifetimes when the call appears inside a `for` loop).
     pub fn restore_if_needed(
         &mut self,
         lang: &str,
         previous_hash: &str,
-        executor_manager: &mut ExecutorManager,
+        exec: &mut Option<Box<dyn KnotExecutor>>,
         cache: &Cache,
         project_root: &Path,
     ) -> Result<()> {
+        let exec = match exec.as_deref_mut() {
+            Some(e) => e,
+            None => return Ok(()),
+        };
+
         if previous_hash.is_empty() {
             return Ok(());
         }
@@ -46,7 +58,6 @@ impl SnapshotManager {
             .unwrap_or_default();
 
         if current_loaded != previous_hash {
-            let exec = executor_manager.get_executor(lang)?;
             let ext = exec.snapshot_extension();
             let snapshot_path = cache.get_snapshot_path(previous_hash, ext);
 
@@ -88,17 +99,25 @@ impl SnapshotManager {
         Ok(())
     }
 
-    /// Update the snapshot state after execution or cache hit
+    /// Update the snapshot state after execution or cache hit.
+    ///
+    /// `exec` is a mutable reference to an `Option<Box<dyn KnotExecutor>>`.  If the
+    /// option is `None`, returns `Ok(())` immediately — for cache-hit-only chains the
+    /// snapshot already exists on disk and no executor operations are needed.
     pub fn update_after_node(
         &mut self,
         lang: &str,
         node_hash: &str,
         previous_hash: &str,
-        executor_manager: &mut ExecutorManager,
+        exec: &mut Option<Box<dyn KnotExecutor>>,
         cache: &Cache,
         project_root: &Path,
     ) -> Result<()> {
-        let exec = executor_manager.get_executor(lang)?;
+        let exec = match exec.as_deref_mut() {
+            Some(e) => e,
+            None => return Ok(()),
+        };
+
         let ext = exec.snapshot_extension();
         let snapshot_path = cache.get_snapshot_path(node_hash, ext);
         let snapshot_exists = cache.has_snapshot(node_hash, ext);
