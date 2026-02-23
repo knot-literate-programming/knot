@@ -5,6 +5,7 @@ use crate::executors::{ExecutionOutput, ExecutionResult, ExecutorManager, Graphi
 use crate::parser::ast::{Chunk, Document, InlineExpr};
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 pub mod chunk_processor;
@@ -18,9 +19,9 @@ pub use chunk_processor::{ChunkExecutionState, ChunkProcessor};
 pub use pipeline::{ExecutedNode, ExecutionNeed, PlannedNode};
 
 /// Represents a node in the document that can be executed.
-pub enum ExecutableNode<'a> {
-    Chunk(&'a Chunk),
-    InlineExpr(&'a InlineExpr),
+pub enum ExecutableNode {
+    Chunk(Chunk),
+    InlineExpr(InlineExpr),
 }
 
 use crate::backend::TypstBackend;
@@ -83,7 +84,7 @@ impl Compiler {
     ///
     /// `source_file` is the filename of the `.knot` source (e.g. `"chapter1.knot"`).
     pub fn compile(&mut self, doc: &Document, source_file: &str) -> Result<String> {
-        let mut cache = Cache::new(self.cache_dir.clone())?;
+        let cache = Arc::new(Mutex::new(Cache::new(self.cache_dir.clone())?));
         let backend = TypstBackend::new();
         let mut snapshot_manager = SnapshotManager::new();
 
@@ -91,16 +92,17 @@ impl Compiler {
         info!("🔧 Processing {} executable nodes...", nodes.len());
 
         // Pass 1: resolve options, compute hashes, check cache — no code executed.
-        let planned = self.plan_pass(nodes, &mut cache)?;
+        let planned = self.plan_pass(nodes, &cache)?;
 
         // Pass 2: execute pending nodes, format output, handle error cascade.
-        let executed = self.execute_pass(planned, &mut cache, &mut snapshot_manager, &backend)?;
+        let executed =
+            self.execute_pass(planned, Arc::clone(&cache), &mut snapshot_manager, &backend)?;
 
         // Pass 3: interleave node outputs with source text.
         let typst_output = assemble_pass(&executed, &doc.source, source_file);
 
         info!("✓ All nodes processed.");
-        cache.save_metadata()?;
+        cache.lock().unwrap().save_metadata()?;
 
         Ok(typst_output)
     }
@@ -111,12 +113,15 @@ impl Compiler {
 
     /// For every node: resolve options, compute hash, check cache.
     /// Returns a `PlannedNode` for each node — no code is executed.
-    fn plan_pass<'a>(
+    fn plan_pass(
         &mut self,
-        nodes: Vec<ExecutableNode<'a>>,
-        cache: &mut Cache,
-    ) -> Result<Vec<PlannedNode<'a>>> {
+        nodes: Vec<ExecutableNode>,
+        cache: &Arc<Mutex<Cache>>,
+    ) -> Result<Vec<PlannedNode>> {
         use chunk_processor::{compute_hash, resolve_options};
+
+        // Lock once for the entire planning pass (synchronous, no contention).
+        let cache = cache.lock().unwrap();
 
         let mut planned = Vec::with_capacity(nodes.len());
         let mut last_hash_per_lang: HashMap<String, String> = HashMap::new();
@@ -193,10 +198,10 @@ impl Compiler {
     // -----------------------------------------------------------------------
 
     /// Execute pending nodes, format all outputs, propagate the Inert cascade on error.
-    fn execute_pass<'a>(
+    fn execute_pass(
         &mut self,
-        planned: Vec<PlannedNode<'a>>,
-        cache: &mut Cache,
+        planned: Vec<PlannedNode>,
+        cache: Arc<Mutex<Cache>>,
         snapshot_manager: &mut SnapshotManager,
         backend: &TypstBackend,
     ) -> Result<Vec<ExecutedNode>> {
@@ -263,14 +268,14 @@ impl Compiler {
                     }
 
                     ExecutionNeed::MustExecute => {
-                        match self.run_node(&pn, cache, snapshot_manager) {
+                        match self.run_node(&pn, Arc::clone(&cache), snapshot_manager) {
                             Ok(output) => {
                                 if let Some(error) = &output.error {
                                     // Runtime error: persist to cache, then cascade.
                                     if let ExecutableNode::Chunk(chunk) = &pn.node {
                                         let data = pn.chunk_data.as_ref().unwrap();
                                         if data.resolved_options.cache {
-                                            cache.save_error(
+                                            cache.lock().unwrap().save_error(
                                                 chunk.index,
                                                 chunk.name.clone(),
                                                 chunk.language.clone(),
@@ -297,7 +302,7 @@ impl Compiler {
                                         register_freeze_objects(
                                             chunk,
                                             &mut self.executor_manager,
-                                            cache,
+                                            &cache,
                                             &self.project_root,
                                         )?;
                                     }
@@ -308,7 +313,7 @@ impl Compiler {
                                     match check_freeze_contract(
                                         &pn,
                                         &mut self.executor_manager,
-                                        cache,
+                                        &cache,
                                     ) {
                                         Err(e) => {
                                             // Hash computation failed: cascade without caching.
@@ -328,7 +333,7 @@ impl Compiler {
                                             if let ExecutableNode::Chunk(chunk) = &pn.node {
                                                 let data = pn.chunk_data.as_ref().unwrap();
                                                 if data.resolved_options.cache {
-                                                    cache.save_error(
+                                                    cache.lock().unwrap().save_error(
                                                         chunk.index,
                                                         chunk.name.clone(),
                                                         chunk.language.clone(),
@@ -353,7 +358,7 @@ impl Compiler {
                                             if let ExecutableNode::Chunk(chunk) = &pn.node {
                                                 let data = pn.chunk_data.as_ref().unwrap();
                                                 if data.resolved_options.cache {
-                                                    cache.save_result(
+                                                    cache.lock().unwrap().save_result(
                                                         chunk.index,
                                                         chunk.name.clone(),
                                                         chunk.language.clone(),
@@ -363,14 +368,17 @@ impl Compiler {
                                                     )?;
                                                 }
                                             }
-                                            snapshot_manager.update_after_node(
-                                                &pn.lang,
-                                                &pn.hash,
-                                                &pn.previous_hash,
-                                                &mut self.executor_manager,
-                                                cache,
-                                                &self.project_root,
-                                            )?;
+                                            {
+                                                let cache_guard = cache.lock().unwrap();
+                                                snapshot_manager.update_after_node(
+                                                    &pn.lang,
+                                                    &pn.hash,
+                                                    &pn.previous_hash,
+                                                    &mut self.executor_manager,
+                                                    &*cache_guard,
+                                                    &self.project_root,
+                                                )?;
+                                            }
                                             let content =
                                                 format_executed_node(&pn, &output, backend, &state);
                                             (content, false)
@@ -396,12 +404,13 @@ impl Compiler {
                     ExecutionNeed::CacheHit(_)
                     | ExecutionNeed::CacheHitInline(_)
                     | ExecutionNeed::Skip => {
+                        let cache_guard = cache.lock().unwrap();
                         snapshot_manager.update_after_node(
                             &pn.lang,
                             &pn.hash,
                             &pn.previous_hash,
                             &mut self.executor_manager,
-                            cache,
+                            &*cache_guard,
                             &self.project_root,
                         )?;
                     }
@@ -436,8 +445,8 @@ impl Compiler {
     /// subsequent run.
     fn run_node(
         &mut self,
-        pn: &PlannedNode<'_>,
-        cache: &mut Cache,
+        pn: &PlannedNode,
+        cache: Arc<Mutex<Cache>>,
         snapshot_manager: &mut SnapshotManager,
     ) -> Result<ExecutionOutput> {
         match &pn.node {
@@ -445,13 +454,15 @@ impl Compiler {
                 let data = pn.chunk_data.as_ref().unwrap();
                 info!("  ⚙️ {} [executing]", data.name);
 
-                // Lazy state restoration.
+                // Lazy state restoration: lock only for the read, release before executing.
                 {
                     let sm = &mut *snapshot_manager;
                     let em = &mut self.executor_manager;
-                    let c = &*cache;
+                    let cache_guard = cache.lock().unwrap();
+                    let c = &*cache_guard;
                     let pr = self.project_root.as_path();
                     sm.restore_if_needed(&pn.lang, &pn.previous_hash, em, c, pr)?;
+                    // cache_guard dropped here
                 }
 
                 let graphics_opts = GraphicsOptions {
@@ -485,7 +496,7 @@ impl Compiler {
                     crate::parser::Show::Code | crate::parser::Show::None => String::new(),
                 };
 
-                cache.save_inline_result(pn.hash.clone(), &final_result)?;
+                cache.lock().unwrap().save_inline_result(pn.hash.clone(), &final_result)?;
 
                 Ok(ExecutionOutput {
                     result: ExecutionResult::Text(final_result),
@@ -545,7 +556,7 @@ fn assemble_pass(executed: &[ExecutedNode], source: &str, source_file: &str) -> 
 
 /// Format the output of a freshly executed node.
 fn format_executed_node(
-    pn: &PlannedNode<'_>,
+    pn: &PlannedNode,
     output: &ExecutionOutput,
     backend: &TypstBackend,
     state: &ChunkExecutionState,
@@ -571,7 +582,7 @@ fn format_executed_node(
 }
 
 /// Format a node that is in the Inert state (upstream error, no execution).
-fn inert_output(pn: &PlannedNode<'_>, backend: &TypstBackend, config: &Config) -> String {
+fn inert_output(pn: &PlannedNode, backend: &TypstBackend, config: &Config) -> String {
     use chunk_processor::{format_output, resolve_options};
     match &pn.node {
         ExecutableNode::Chunk(chunk) => {
@@ -602,7 +613,7 @@ fn inert_output(pn: &PlannedNode<'_>, backend: &TypstBackend, config: &Config) -
 
 /// Format a node with eval = false (no execution, empty result).
 fn skip_output(
-    pn: &PlannedNode<'_>,
+    pn: &PlannedNode,
     backend: &TypstBackend,
     state: &ChunkExecutionState,
 ) -> String {
@@ -629,7 +640,7 @@ fn skip_output(
 }
 
 /// Format the Typst error block shown when a node fails to execute.
-fn format_error_block_for_node(node: &ExecutableNode<'_>, lang: &str, error_msg: &str) -> String {
+fn format_error_block_for_node(node: &ExecutableNode, lang: &str, error_msg: &str) -> String {
     let error_msg = error_msg.replace('"', "\\\"");
     let node_kind = match node {
         ExecutableNode::Chunk(_) => "chunk",
@@ -653,12 +664,12 @@ fn format_error_block_for_node(node: &ExecutableNode<'_>, lang: &str, error_msg:
 // ---------------------------------------------------------------------------
 
 /// Collects all executable nodes from the document and sorts them by source position.
-fn build_executable_nodes(doc: &Document) -> Vec<ExecutableNode<'_>> {
-    let mut nodes: Vec<ExecutableNode<'_>> = doc
+fn build_executable_nodes(doc: &Document) -> Vec<ExecutableNode> {
+    let mut nodes: Vec<ExecutableNode> = doc
         .chunks
         .iter()
-        .map(ExecutableNode::Chunk)
-        .chain(doc.inline_exprs.iter().map(ExecutableNode::InlineExpr))
+        .map(|c| ExecutableNode::Chunk(c.clone()))
+        .chain(doc.inline_exprs.iter().map(|e| ExecutableNode::InlineExpr(e.clone())))
         .collect();
     nodes.sort_by_key(|node| match node {
         ExecutableNode::Chunk(c) => c.start_byte,
@@ -683,7 +694,7 @@ fn freeze_key(lang: &str, name: &str) -> String {
 fn register_freeze_objects(
     chunk: &Chunk,
     executor_manager: &mut ExecutorManager,
-    cache: &mut Cache,
+    cache: &Arc<Mutex<Cache>>,
     project_root: &Path,
 ) -> Result<()> {
     let chunk_name = chunk.name.as_deref().unwrap_or("unnamed").to_string();
@@ -705,7 +716,7 @@ fn register_freeze_objects(
         let size_bytes = std::fs::metadata(&object_path)?.len();
 
         let key = freeze_key(&chunk.language, obj_name);
-        cache.metadata.freeze_objects.insert(
+        cache.lock().unwrap().metadata.freeze_objects.insert(
             key,
             FreezeObjectInfo {
                 name: obj_name.clone(),
@@ -738,16 +749,21 @@ fn register_freeze_objects(
 ///   `detailed_message()` gives the full LSP diagnostic
 /// - `Err(e)` — the hash computation itself failed (propagated to the caller)
 fn check_freeze_contract(
-    pn: &PlannedNode<'_>,
+    pn: &PlannedNode,
     executor_manager: &mut ExecutorManager,
-    cache: &Cache,
+    cache: &Arc<Mutex<Cache>>,
 ) -> Result<Option<RuntimeError>> {
-    let freeze_entries: Vec<_> = cache
-        .metadata
-        .freeze_objects
-        .values()
-        .filter(|info| info.language == pn.lang)
-        .collect();
+    // Collect needed data while holding the lock briefly, then release before calling executor.
+    let freeze_entries: Vec<FreezeObjectInfo> = {
+        let cache_guard = cache.lock().unwrap();
+        cache_guard
+            .metadata
+            .freeze_objects
+            .values()
+            .filter(|info| info.language == pn.lang)
+            .cloned()
+            .collect()
+    };
 
     if freeze_entries.is_empty() {
         return Ok(None);
@@ -759,7 +775,7 @@ fn check_freeze_contract(
         ExecutableNode::InlineExpr(_) => "inline",
     };
 
-    for info in freeze_entries {
+    for info in &freeze_entries {
         let current_hash = exec
             .hash_object(&info.name)
             .context(format!("Failed to hash freeze object '{}'", info.name))?;

@@ -44,8 +44,8 @@ pub struct ChunkPlanData {
 }
 
 /// A node after the planning phase: hash computed, cache checked, no code executed yet.
-pub struct PlannedNode<'a> {
-    pub node: ExecutableNode<'a>,
+pub struct PlannedNode {
+    pub node: ExecutableNode,
     pub lang: String,
     pub hash: String,
     pub previous_hash: String,

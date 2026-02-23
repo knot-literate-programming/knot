@@ -11,16 +11,19 @@ use crate::executors::ExecutorManager;
 use crate::parser::InlineExpr;
 use anyhow::{Context, Result};
 use log::info;
+use std::sync::{Arc, Mutex};
 
 pub fn process_inline_expr(
     inline_expr: &InlineExpr,
     executor_manager: &mut ExecutorManager,
-    cache: &mut Cache,
+    cache: &Arc<Mutex<Cache>>,
     previous_hash: &str,
 ) -> Result<(String, String)> {
     let resolved_options = inline_expr.options.resolve();
-    let inline_hash =
-        cache.get_inline_expr_hash(&inline_expr.code, &inline_expr.options, previous_hash);
+    let inline_hash = {
+        let cache_guard = cache.lock().unwrap();
+        cache_guard.get_inline_expr_hash(&inline_expr.code, &inline_expr.options, previous_hash)
+    };
 
     // If eval=false, skip execution
     if !resolved_options.eval {
@@ -32,12 +35,19 @@ pub fn process_inline_expr(
     }
 
     // Check cache
-    if cache.has_cached_inline_result(&inline_hash) {
+    let cached = {
+        let cache_guard = cache.lock().unwrap();
+        if cache_guard.has_cached_inline_result(&inline_hash) {
+            Some(cache_guard.get_cached_inline_result(&inline_hash)?)
+        } else {
+            None
+        }
+    };
+    if let Some(cached_result) = cached {
         info!(
             "  ✓ `{{{}}} {}` [cached]",
             inline_expr.language, inline_expr.code
         );
-        let cached_result = cache.get_cached_inline_result(&inline_hash)?;
         return Ok((cached_result, inline_hash));
     }
 
@@ -63,7 +73,10 @@ pub fn process_inline_expr(
     };
 
     // Cache the result (either the actual result or empty string)
-    cache.save_inline_result(inline_hash.clone(), &final_result)?;
+    cache
+        .lock()
+        .unwrap()
+        .save_inline_result(inline_hash.clone(), &final_result)?;
 
     Ok((final_result, inline_hash))
 }
@@ -95,10 +108,11 @@ mod tests {
                 ..Default::default()
             },
         );
-        let (_temp_dir_cache, mut cache) = setup_test_cache();
+        let (_temp_dir_cache, cache) = setup_test_cache();
+        let cache = std::sync::Arc::new(std::sync::Mutex::new(cache));
         let (_temp_dir_mgr, mut manager) = setup_test_manager();
 
-        let result = process_inline_expr(&inline, &mut manager, &mut cache, "prev_hash");
+        let result = process_inline_expr(&inline, &mut manager, &cache, "prev_hash");
 
         // Should succeed even if manager can't start R (because eval=false skips execution)
         assert!(result.is_ok());

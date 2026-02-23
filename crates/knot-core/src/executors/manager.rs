@@ -103,6 +103,16 @@ impl ExecutorManager {
         Ok(executor.as_mut())
     }
 
+    /// Move an executor out of the manager for exclusive use in a task.
+    pub fn take(&mut self, lang: &str) -> Option<Box<dyn KnotExecutor>> {
+        self.executors.remove(lang)
+    }
+
+    /// Return an executor to the manager after use.
+    pub fn put_back(&mut self, lang: String, executor: Box<dyn KnotExecutor>) {
+        self.executors.insert(lang, executor);
+    }
+
     /// Check if a language is supported
     pub fn is_supported(&self, lang: &str) -> bool {
         crate::defaults::Defaults::SUPPORTED_LANGUAGES.contains(&lang)

@@ -19,6 +19,7 @@ use anyhow::Result;
 use log::info;
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 /// Execution lifecycle state of a chunk within the compilation pipeline.
 ///
@@ -51,7 +52,7 @@ struct ExecutionRequest<'a> {
 /// configuration that stays fixed (`config`, `backend`, `project_root`).
 pub struct ChunkProcessor<'a> {
     executor_manager: &'a mut ExecutorManager,
-    cache: &'a mut Cache,
+    cache: Arc<Mutex<Cache>>,
     snapshot_manager: &'a mut SnapshotManager,
     config: &'a Config,
     backend: &'a TypstBackend,
@@ -61,7 +62,7 @@ pub struct ChunkProcessor<'a> {
 impl<'a> ChunkProcessor<'a> {
     pub fn new(
         executor_manager: &'a mut ExecutorManager,
-        cache: &'a mut Cache,
+        cache: Arc<Mutex<Cache>>,
         snapshot_manager: &'a mut SnapshotManager,
         config: &'a Config,
         backend: &'a TypstBackend,
@@ -97,9 +98,18 @@ impl<'a> ChunkProcessor<'a> {
 
         let chunk_hash = compute_hash(&chunk.code, &chunk_options, previous_hash)?;
 
-        if resolved_options.cache && self.cache.has_cached_result(&chunk_hash) {
+        let cached_output = if resolved_options.cache {
+            let cache_guard = self.cache.lock().unwrap();
+            if cache_guard.has_cached_result(&chunk_hash) {
+                Some(cache_guard.get_cached_result(&chunk_hash)?)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        if let Some(execution_output) = cached_output {
             info!("  ✓ {} [cached]", chunk_name);
-            let execution_output = self.cache.get_cached_result(&chunk_hash)?;
             if let Some(error) = &execution_output.error {
                 return Err(anyhow::anyhow!("{}", error));
             }
@@ -151,7 +161,7 @@ impl<'a> ChunkProcessor<'a> {
         inline_processor::process_inline_expr(
             inline_expr,
             self.executor_manager,
-            self.cache,
+            &self.cache,
             previous_hash,
         )
     }
@@ -169,13 +179,15 @@ impl<'a> ChunkProcessor<'a> {
         info!("  ⚙️ {} [executing]", req.chunk_name);
 
         // Lazy state restoration: only restore when we actually need to execute.
-        // Explicit reborrows let the borrow checker split the struct's &mut fields.
+        // Lock cache for the read, release before calling executor.
         {
             let sm = &mut *self.snapshot_manager;
             let em = &mut *self.executor_manager;
-            let c = &*self.cache;
+            let cache_guard = self.cache.lock().unwrap();
+            let c = &*cache_guard;
             let pr = self.project_root;
             sm.restore_if_needed(&req.chunk.language, req.previous_hash, em, c, pr)?;
+            // cache_guard dropped here
         }
 
         let graphics_opts = GraphicsOptions {
@@ -193,7 +205,7 @@ impl<'a> ChunkProcessor<'a> {
 
         if req.resolved_options.cache {
             if let Some(error) = &output.error {
-                self.cache.save_error(
+                self.cache.lock().unwrap().save_error(
                     req.chunk.index,
                     req.chunk.name.clone(),
                     req.chunk.language.clone(),
@@ -202,7 +214,7 @@ impl<'a> ChunkProcessor<'a> {
                     req.chunk_options.depends.clone(),
                 )?;
             } else {
-                self.cache.save_result(
+                self.cache.lock().unwrap().save_result(
                     req.chunk.index,
                     req.chunk.name.clone(),
                     req.chunk.language.clone(),
@@ -357,7 +369,7 @@ mod tests {
     /// Convenience helper: build a `ChunkProcessor` rooted at `.` for tests.
     fn make_processor<'a>(
         manager: &'a mut ExecutorManager,
-        cache: &'a mut Cache,
+        cache: Arc<Mutex<Cache>>,
         sm: &'a mut SnapshotManager,
         config: &'a crate::config::Config,
         backend: &'a TypstBackend,
@@ -368,13 +380,14 @@ mod tests {
     #[test]
     fn test_process_chunk_eval_false() {
         let chunk = create_test_chunk("r", "x <- 1", None, false, true);
-        let (_temp_dir_cache, mut cache) = setup_test_cache();
+        let (_temp_dir_cache, cache) = setup_test_cache();
+        let cache = Arc::new(Mutex::new(cache));
         let (_temp_dir_mgr, mut manager) = setup_test_manager();
         let mut sm = SnapshotManager::new();
         let config = setup_test_config();
         let backend = crate::backend::TypstBackend::new();
 
-        let (output, _hash) = make_processor(&mut manager, &mut cache, &mut sm, &config, &backend)
+        let (output, _hash) = make_processor(&mut manager, Arc::clone(&cache), &mut sm, &config, &backend)
             .process_chunk(&chunk, ChunkExecutionState::Ready, "prev_hash")
             .unwrap();
 
@@ -386,14 +399,15 @@ mod tests {
     #[test]
     fn test_process_chunk_generates_name() {
         let chunk = create_test_chunk("r", "x <- 1", None, false, false);
-        let (_temp_dir_cache, mut cache) = setup_test_cache();
+        let (_temp_dir_cache, cache) = setup_test_cache();
+        let cache = Arc::new(Mutex::new(cache));
         let (_temp_dir_mgr, mut manager) = setup_test_manager();
         let mut sm = SnapshotManager::new();
         let config = setup_test_config();
         let backend = crate::backend::TypstBackend::new();
 
         // Should not panic
-        make_processor(&mut manager, &mut cache, &mut sm, &config, &backend)
+        make_processor(&mut manager, Arc::clone(&cache), &mut sm, &config, &backend)
             .process_chunk(&chunk, ChunkExecutionState::Ready, "prev_hash")
             .unwrap();
     }
@@ -401,13 +415,14 @@ mod tests {
     #[test]
     fn test_process_chunk_with_name() {
         let chunk = create_test_chunk("r", "x <- 1", Some("my-chunk".to_string()), false, false);
-        let (_temp_dir_cache, mut cache) = setup_test_cache();
+        let (_temp_dir_cache, cache) = setup_test_cache();
+        let cache = Arc::new(Mutex::new(cache));
         let (_temp_dir_mgr, mut manager) = setup_test_manager();
         let mut sm = SnapshotManager::new();
         let config = setup_test_config();
         let backend = crate::backend::TypstBackend::new();
 
-        let (output, _hash) = make_processor(&mut manager, &mut cache, &mut sm, &config, &backend)
+        let (output, _hash) = make_processor(&mut manager, Arc::clone(&cache), &mut sm, &config, &backend)
             .process_chunk(&chunk, ChunkExecutionState::Ready, "prev_hash")
             .unwrap();
 
@@ -419,21 +434,22 @@ mod tests {
     #[test]
     fn test_process_chunk_hash_consistency() {
         let chunk = create_test_chunk("r", "x <- 1", None, false, false);
-        let (_temp_dir_cache, mut cache) = setup_test_cache();
+        let (_temp_dir_cache, cache) = setup_test_cache();
+        let cache = Arc::new(Mutex::new(cache));
         let (_temp_dir_mgr, mut manager) = setup_test_manager();
         let config = setup_test_config();
         let backend = crate::backend::TypstBackend::new();
 
         let mut sm1 = SnapshotManager::new();
         let (_output1, hash1) =
-            make_processor(&mut manager, &mut cache, &mut sm1, &config, &backend)
+            make_processor(&mut manager, Arc::clone(&cache), &mut sm1, &config, &backend)
                 .process_chunk(&chunk, ChunkExecutionState::Ready, "prev_hash")
                 .unwrap();
 
         // Process same chunk again with same previous_hash
         let mut sm2 = SnapshotManager::new();
         let (_output2, hash2) =
-            make_processor(&mut manager, &mut cache, &mut sm2, &config, &backend)
+            make_processor(&mut manager, Arc::clone(&cache), &mut sm2, &config, &backend)
                 .process_chunk(&chunk, ChunkExecutionState::Ready, "prev_hash")
                 .unwrap();
 
@@ -446,20 +462,21 @@ mod tests {
         let chunk1 = create_test_chunk("r", "x <- 1", None, false, false);
         let chunk2 = create_test_chunk("r", "x <- 2", None, false, false);
 
-        let (_temp_dir_cache, mut cache) = setup_test_cache();
+        let (_temp_dir_cache, cache) = setup_test_cache();
+        let cache = Arc::new(Mutex::new(cache));
         let (_temp_dir_mgr, mut manager) = setup_test_manager();
         let config = setup_test_config();
         let backend = crate::backend::TypstBackend::new();
 
         let mut sm1 = SnapshotManager::new();
         let (_output1, hash1) =
-            make_processor(&mut manager, &mut cache, &mut sm1, &config, &backend)
+            make_processor(&mut manager, Arc::clone(&cache), &mut sm1, &config, &backend)
                 .process_chunk(&chunk1, ChunkExecutionState::Ready, "prev_hash")
                 .unwrap();
 
         let mut sm2 = SnapshotManager::new();
         let (_output2, hash2) =
-            make_processor(&mut manager, &mut cache, &mut sm2, &config, &backend)
+            make_processor(&mut manager, Arc::clone(&cache), &mut sm2, &config, &backend)
                 .process_chunk(&chunk2, ChunkExecutionState::Ready, "prev_hash")
                 .unwrap();
 
@@ -470,20 +487,21 @@ mod tests {
     #[test]
     fn test_process_chunk_hash_changes_with_previous() {
         let chunk = create_test_chunk("r", "x <- 1", None, false, false);
-        let (_temp_dir_cache, mut cache) = setup_test_cache();
+        let (_temp_dir_cache, cache) = setup_test_cache();
+        let cache = Arc::new(Mutex::new(cache));
         let (_temp_dir_mgr, mut manager) = setup_test_manager();
         let config = setup_test_config();
         let backend = crate::backend::TypstBackend::new();
 
         let mut sm1 = SnapshotManager::new();
         let (_output1, hash1) =
-            make_processor(&mut manager, &mut cache, &mut sm1, &config, &backend)
+            make_processor(&mut manager, Arc::clone(&cache), &mut sm1, &config, &backend)
                 .process_chunk(&chunk, ChunkExecutionState::Ready, "prev_hash_1")
                 .unwrap();
 
         let mut sm2 = SnapshotManager::new();
         let (_output2, hash2) =
-            make_processor(&mut manager, &mut cache, &mut sm2, &config, &backend)
+            make_processor(&mut manager, Arc::clone(&cache), &mut sm2, &config, &backend)
                 .process_chunk(&chunk, ChunkExecutionState::Ready, "prev_hash_2")
                 .unwrap();
 
@@ -494,13 +512,14 @@ mod tests {
     #[test]
     fn test_process_chunk_unsupported_language() {
         let chunk = create_test_chunk("unsupported_lang", "print(42)", None, true, false);
-        let (_temp_dir_cache, mut cache) = setup_test_cache();
+        let (_temp_dir_cache, cache) = setup_test_cache();
+        let cache = Arc::new(Mutex::new(cache));
         let (_temp_dir_mgr, mut manager) = setup_test_manager();
         let mut sm = SnapshotManager::new();
         let config = setup_test_config();
         let backend = crate::backend::TypstBackend::new();
 
-        let result = make_processor(&mut manager, &mut cache, &mut sm, &config, &backend)
+        let result = make_processor(&mut manager, Arc::clone(&cache), &mut sm, &config, &backend)
             .process_chunk(&chunk, ChunkExecutionState::Ready, "prev_hash");
 
         // Should fail with unsupported language
@@ -531,13 +550,14 @@ mod tests {
 
         chunk.options.depends = vec![dep1.clone(), dep2.clone()];
 
-        let (_temp_dir_cache, mut cache) = setup_test_cache();
+        let (_temp_dir_cache, cache) = setup_test_cache();
+        let cache = Arc::new(Mutex::new(cache));
         let (_temp_dir_mgr, mut manager) = setup_test_manager();
         let config = setup_test_config();
         let backend = crate::backend::TypstBackend::new();
 
         let mut sm1 = SnapshotManager::new();
-        let (_output, hash) = make_processor(&mut manager, &mut cache, &mut sm1, &config, &backend)
+        let (_output, hash) = make_processor(&mut manager, Arc::clone(&cache), &mut sm1, &config, &backend)
             .process_chunk(&chunk, ChunkExecutionState::Ready, "prev_hash")
             .unwrap();
 
@@ -548,7 +568,7 @@ mod tests {
         chunk.options.depends = vec![dep1.clone(), dep3.clone()];
         let mut sm2 = SnapshotManager::new();
         let (_output2, hash2) =
-            make_processor(&mut manager, &mut cache, &mut sm2, &config, &backend)
+            make_processor(&mut manager, Arc::clone(&cache), &mut sm2, &config, &backend)
                 .process_chunk(&chunk, ChunkExecutionState::Ready, "prev_hash")
                 .unwrap();
 
@@ -558,13 +578,14 @@ mod tests {
     #[test]
     fn test_process_chunk_empty_code() {
         let chunk = create_test_chunk("r", "", None, false, false);
-        let (_temp_dir_cache, mut cache) = setup_test_cache();
+        let (_temp_dir_cache, cache) = setup_test_cache();
+        let cache = Arc::new(Mutex::new(cache));
         let (_temp_dir_mgr, mut manager) = setup_test_manager();
         let mut sm = SnapshotManager::new();
         let config = setup_test_config();
         let backend = crate::backend::TypstBackend::new();
 
-        let (output, _hash) = make_processor(&mut manager, &mut cache, &mut sm, &config, &backend)
+        let (output, _hash) = make_processor(&mut manager, Arc::clone(&cache), &mut sm, &config, &backend)
             .process_chunk(&chunk, ChunkExecutionState::Ready, "prev_hash")
             .unwrap();
 
@@ -575,13 +596,14 @@ mod tests {
     #[test]
     fn test_process_chunk_output_contains_language() {
         let chunk = create_test_chunk("r", "x <- 1", None, false, true);
-        let (_temp_dir_cache, mut cache) = setup_test_cache();
+        let (_temp_dir_cache, cache) = setup_test_cache();
+        let cache = Arc::new(Mutex::new(cache));
         let (_temp_dir_mgr, mut manager) = setup_test_manager();
         let mut sm = SnapshotManager::new();
         let config = setup_test_config();
         let backend = crate::backend::TypstBackend::new();
 
-        let (output, _hash) = make_processor(&mut manager, &mut cache, &mut sm, &config, &backend)
+        let (output, _hash) = make_processor(&mut manager, Arc::clone(&cache), &mut sm, &config, &backend)
             .process_chunk(&chunk, ChunkExecutionState::Ready, "prev_hash")
             .unwrap();
 
@@ -623,7 +645,8 @@ mod tests {
             code_end_byte: 190,
         };
 
-        let (_temp_dir_cache, mut cache) = setup_test_cache();
+        let (_temp_dir_cache, cache) = setup_test_cache();
+        let cache = Arc::new(Mutex::new(cache));
         let (_temp_dir_mgr, mut manager) = setup_test_manager();
 
         // Create config with language-specific defaults for R
@@ -641,7 +664,7 @@ mod tests {
         let backend = crate::backend::TypstBackend::new();
         let mut sm = SnapshotManager::new();
 
-        let (output, _hash) = make_processor(&mut manager, &mut cache, &mut sm, &config, &backend)
+        let (output, _hash) = make_processor(&mut manager, Arc::clone(&cache), &mut sm, &config, &backend)
             .process_chunk(&chunk, ChunkExecutionState::Ready, "prev_hash")
             .unwrap();
 
@@ -657,7 +680,8 @@ mod tests {
         let mut chunk = create_test_chunk("python", "x = 1", None, false, false);
         chunk.options.show = Some(crate::parser::Show::Both); // Override with chunk-specific option
 
-        let (_temp_dir_cache, mut cache) = setup_test_cache();
+        let (_temp_dir_cache, cache) = setup_test_cache();
+        let cache = Arc::new(Mutex::new(cache));
         let (_temp_dir_mgr, mut manager) = setup_test_manager();
 
         // Create config with both global and language-specific defaults
@@ -676,7 +700,7 @@ mod tests {
         let backend = crate::backend::TypstBackend::new();
         let mut sm = SnapshotManager::new();
 
-        let (output, _hash) = make_processor(&mut manager, &mut cache, &mut sm, &config, &backend)
+        let (output, _hash) = make_processor(&mut manager, Arc::clone(&cache), &mut sm, &config, &backend)
             .process_chunk(&chunk, ChunkExecutionState::Ready, "prev_hash")
             .unwrap();
 
@@ -716,7 +740,8 @@ mod tests {
             code_end_byte: 190,
         };
 
-        let (_temp_dir_cache, mut cache) = setup_test_cache();
+        let (_temp_dir_cache, cache) = setup_test_cache();
+        let cache = Arc::new(Mutex::new(cache));
         let (_temp_dir_mgr, mut manager) = setup_test_manager();
 
         // Create config with only global defaults (no python-chunks defined)
@@ -732,7 +757,7 @@ mod tests {
         let backend = crate::backend::TypstBackend::new();
         let mut sm = SnapshotManager::new();
 
-        let (output, _hash) = make_processor(&mut manager, &mut cache, &mut sm, &config, &backend)
+        let (output, _hash) = make_processor(&mut manager, Arc::clone(&cache), &mut sm, &config, &backend)
             .process_chunk(&chunk, ChunkExecutionState::Ready, "prev_hash")
             .unwrap();
 
