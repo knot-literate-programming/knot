@@ -1,5 +1,6 @@
 use crate::cache::FreezeObjectInfo;
 use crate::config::Config;
+use crate::executors::side_channel::RuntimeError;
 use crate::executors::{ExecutionOutput, ExecutionResult, ExecutorManager, GraphicsOptions};
 use crate::parser::ast::{Chunk, Document, InlineExpr};
 use std::collections::HashMap;
@@ -302,48 +303,78 @@ impl Compiler {
                                     }
                                     // Check freeze contract: cascade like a runtime error if violated.
                                     // IMPORTANT: save_result is only called when the contract passes.
-                                    // A violating chunk must NOT be cached — if it were, the check
-                                    // would be bypassed (CacheHit path) on every subsequent run.
-                                    if let Err(e) = check_freeze_contract(
+                                    // A violating chunk must NOT be cached as success — if it were,
+                                    // the check would be bypassed (CacheHit path) on every subsequent run.
+                                    match check_freeze_contract(
                                         &pn,
                                         &mut self.executor_manager,
                                         cache,
                                     ) {
-                                        broken_languages.insert(pn.lang.clone());
-                                        (
-                                            format_error_block_for_node(
-                                                &pn.node,
-                                                &pn.lang,
-                                                &e.to_string(),
-                                            ),
-                                            true,
-                                        )
-                                    } else {
-                                        // Contract OK: persist result to cache.
-                                        if let ExecutableNode::Chunk(chunk) = &pn.node {
-                                            let data = pn.chunk_data.as_ref().unwrap();
-                                            if data.resolved_options.cache {
-                                                cache.save_result(
-                                                    chunk.index,
-                                                    chunk.name.clone(),
-                                                    chunk.language.clone(),
-                                                    pn.hash.clone(),
-                                                    &output,
-                                                    data.chunk_options.depends.clone(),
-                                                )?;
-                                            }
+                                        Err(e) => {
+                                            // Hash computation failed: cascade without caching.
+                                            broken_languages.insert(pn.lang.clone());
+                                            (
+                                                format_error_block_for_node(
+                                                    &pn.node,
+                                                    &pn.lang,
+                                                    &e.to_string(),
+                                                ),
+                                                true,
+                                            )
                                         }
-                                        snapshot_manager.update_after_node(
-                                            &pn.lang,
-                                            &pn.hash,
-                                            &pn.previous_hash,
-                                            &mut self.executor_manager,
-                                            cache,
-                                            &self.project_root,
-                                        )?;
-                                        let content =
-                                            format_executed_node(&pn, &output, backend, &state);
-                                        (content, false)
+                                        Ok(Some(violation)) => {
+                                            // Contract violated: cache the error so LSP shows full
+                                            // details (detailed_message), then cascade.
+                                            if let ExecutableNode::Chunk(chunk) = &pn.node {
+                                                let data = pn.chunk_data.as_ref().unwrap();
+                                                if data.resolved_options.cache {
+                                                    cache.save_error(
+                                                        chunk.index,
+                                                        chunk.name.clone(),
+                                                        chunk.language.clone(),
+                                                        pn.hash.clone(),
+                                                        violation.clone(),
+                                                        data.chunk_options.depends.clone(),
+                                                    )?;
+                                                }
+                                            }
+                                            broken_languages.insert(pn.lang.clone());
+                                            (
+                                                format_error_block_for_node(
+                                                    &pn.node,
+                                                    &pn.lang,
+                                                    &violation.to_string(),
+                                                ),
+                                                true,
+                                            )
+                                        }
+                                        Ok(None) => {
+                                            // Contract OK: persist result to cache.
+                                            if let ExecutableNode::Chunk(chunk) = &pn.node {
+                                                let data = pn.chunk_data.as_ref().unwrap();
+                                                if data.resolved_options.cache {
+                                                    cache.save_result(
+                                                        chunk.index,
+                                                        chunk.name.clone(),
+                                                        chunk.language.clone(),
+                                                        pn.hash.clone(),
+                                                        &output,
+                                                        data.chunk_options.depends.clone(),
+                                                    )?;
+                                                }
+                                            }
+                                            snapshot_manager.update_after_node(
+                                                &pn.lang,
+                                                &pn.hash,
+                                                &pn.previous_hash,
+                                                &mut self.executor_manager,
+                                                cache,
+                                                &self.project_root,
+                                            )?;
+                                            let content =
+                                                format_executed_node(&pn, &output, backend, &state);
+                                            (content, false)
+                                        }
                                     }
                                 }
                             }
@@ -699,12 +730,18 @@ fn register_freeze_objects(
 /// Checks that no freeze object for `pn`'s language was mutated during chunk execution.
 ///
 /// Called after each successful MustExecute node, before saving the snapshot.
-/// Errors immediately if any freeze object's current hash differs from its registered hash.
+///
+/// Returns:
+/// - `Ok(None)` — all freeze contracts satisfied, execution can proceed
+/// - `Ok(Some(error))` — a freeze object was mutated; `error` is a [`RuntimeError`]
+///   whose `to_string()` gives a short PDF message and whose
+///   `detailed_message()` gives the full LSP diagnostic
+/// - `Err(e)` — the hash computation itself failed (propagated to the caller)
 fn check_freeze_contract(
     pn: &PlannedNode<'_>,
     executor_manager: &mut ExecutorManager,
     cache: &Cache,
-) -> Result<()> {
+) -> Result<Option<RuntimeError>> {
     let freeze_entries: Vec<_> = cache
         .metadata
         .freeze_objects
@@ -713,7 +750,7 @@ fn check_freeze_contract(
         .collect();
 
     if freeze_entries.is_empty() {
-        return Ok(());
+        return Ok(None);
     }
 
     let exec = executor_manager.get_executor(&pn.lang)?;
@@ -728,24 +765,28 @@ fn check_freeze_contract(
             .context(format!("Failed to hash freeze object '{}'", info.name))?;
 
         if current_hash != info.hash {
-            anyhow::bail!(
-                "❌ Freeze contract violated!\n\n\
-                 Object '{}' ({}) was declared as frozen in chunk '{}' but was modified in chunk '{}'.\n\n\
-                 Expected hash: {}\n\
-                 Current hash:  {}\n\n\
-                 Frozen objects must not be mutated after declaration.\n\
-                 Output file NOT generated to preserve reproducibility.",
-                info.name,
-                info.language,
-                info.created_in_chunk,
-                chunk_name,
-                info.hash,
-                current_hash
-            );
+            let error = RuntimeError {
+                message: Some(format!(
+                    "Freeze contract violated: object '{}' ({}) was modified in chunk '{}'",
+                    info.name, info.language, chunk_name
+                )),
+                call: None,
+                line: None,
+                traceback: vec![
+                    format!(
+                        "Object '{}' was frozen in chunk '{}'",
+                        info.name, info.created_in_chunk
+                    ),
+                    format!("Expected hash : {}", info.hash),
+                    format!("Current hash  : {}", current_hash),
+                    String::from("Frozen objects must not be mutated after declaration."),
+                ],
+            };
+            return Ok(Some(error));
         }
     }
 
-    Ok(())
+    Ok(None)
 }
 
 #[cfg(test)]
