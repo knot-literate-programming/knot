@@ -267,6 +267,57 @@ impl KnotLanguageServer {
 // ---------------------------------------------------------------------------
 
 impl KnotLanguageServer {
+    /// Poll `metadata.json` until its mtime changes (compilation wrote new data),
+    /// then re-read diagnostics from the updated cache and publish them.
+    ///
+    /// This bridges the gap between `knot build` / `knot watch` updating the
+    /// on-disk cache and the LSP client seeing the new errors.  Without this,
+    /// errors are only shown after the user next types something in the editor.
+    ///
+    /// Times out after 30 s so the background task does not linger if the
+    /// compiler is not running.
+    pub(crate) async fn refresh_diagnostics_on_cache_update(&self, uri: &Url) {
+        let Some(metadata_path) = self.cache_metadata_path(uri) else {
+            return;
+        };
+
+        let initial_mtime = std::fs::metadata(&metadata_path)
+            .and_then(|m| m.modified())
+            .ok();
+
+        // Poll every 500 ms for up to 30 seconds (60 attempts).
+        for _ in 0..60u8 {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+            let current_mtime = std::fs::metadata(&metadata_path)
+                .and_then(|m| m.modified())
+                .ok();
+
+            if current_mtime != initial_mtime {
+                let text = {
+                    let docs = self.state.documents.read().await;
+                    docs.get(uri).map(|d| d.text.clone())
+                };
+                if let Some(text) = text {
+                    self.update_document(uri, &text).await;
+                    self.publish_combined_diagnostics(uri).await;
+                }
+                return;
+            }
+        }
+    }
+
+    /// Returns the path to `metadata.json` for the cache associated with `uri`.
+    fn cache_metadata_path(&self, uri: &Url) -> Option<std::path::PathBuf> {
+        let path = uri.to_file_path().ok()?;
+        let project_root = Config::find_project_root(&path).ok()?;
+        let file_stem = path.file_stem().and_then(|s| s.to_str())?;
+        let cache_dir = get_cache_dir(&project_root, file_stem);
+        Some(cache_dir.join("metadata.json"))
+    }
+}
+
+impl KnotLanguageServer {
     /// Load the most recent executor session snapshots from the on-disk cache.
     pub(crate) async fn sync_with_cache(&self, uri: &Url) {
         let path = match uri.to_file_path() {

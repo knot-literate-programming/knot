@@ -6,9 +6,9 @@ In this chapter, we explore temperature data using R and ggplot2.
 
 
 ```{python}
+#| freeze: [x]
 x = 1
 ```
-
 
 ```{python}
 x = 4

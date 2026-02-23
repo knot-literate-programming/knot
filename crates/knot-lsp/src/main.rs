@@ -169,6 +169,11 @@ impl LanguageServer for KnotLanguageServer {
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             this.sync_with_cache(&uri_for_cache).await;
+            // Refresh diagnostics as soon as the cache is updated by the compiler.
+            // This picks up runtime errors and freeze violations written by `knot build`
+            // or `knot watch` without waiting for the user to make an edit.
+            this.refresh_diagnostics_on_cache_update(&uri_for_cache)
+                .await;
         });
         self.forward_to_tinymist(lsp::DID_SAVE, &uri).await;
     }
