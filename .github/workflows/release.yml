@@ -254,6 +254,20 @@ jobs:
           # Overwrite the previous copy
           name: artifacts-dist-manifest
           path: dist-manifest.json
+      # Upload all binary artifacts to the GitHub Release created by dist
+      - name: "Download GitHub Artifacts"
+        uses: actions/download-artifact@v4
+        with:
+          pattern: artifacts-*
+          path: artifacts
+          merge-multiple: true
+      - name: Cleanup
+        run: |
+          # Remove the granular manifests
+          rm -f artifacts/*-dist-manifest.json
+      - name: Upload release artifacts
+        run: |
+          gh release upload "${{ needs.plan.outputs.tag }}" artifacts/* --clobber
 
   # Build and package VS Code extension
   build-vscode-extension:

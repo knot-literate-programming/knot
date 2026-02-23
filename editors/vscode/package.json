@@ -2,7 +2,7 @@
   "name": "knot",
   "displayName": "Knot",
   "description": "Language support for Knot files (.knot) - Literate programming with R and Typst",
-  "version": "0.2.3",
+  "version": "0.2.5",
   "publisher": "knot-dev",
   "engines": {
     "vscode": "^1.80.0"
