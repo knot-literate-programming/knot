@@ -3,15 +3,22 @@
 !**/lib/*.typ
 .*.typ
 *.pdf
-.knot_cache/
-_knot_r_files/
+**/.knot_cache/
+**/_knot_files/
+**/_knot_r_files/
 
 # Rust
 /target/
 Cargo.lock
 .RData
 .Rhistory
-_knot_files/
+
+# IDEs
+.vscode/
+.claude/
+.idea/
+*.swp
+*.swo
 
 # macOS
 .DS_Store
