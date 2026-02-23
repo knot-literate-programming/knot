@@ -30,9 +30,8 @@ use log::info;
 use execution::{ChainOutput, group_by_language, run_language_chain};
 
 /// Represents a node in the document that can be executed.
-#[allow(clippy::large_enum_variant)]
 pub enum ExecutableNode {
-    Chunk(Chunk),
+    Chunk(Box<Chunk>),
     InlineExpr(InlineExpr),
 }
 
@@ -398,7 +397,7 @@ fn build_executable_nodes(doc: &Document) -> Vec<ExecutableNode> {
     let mut nodes: Vec<ExecutableNode> = doc
         .chunks
         .iter()
-        .map(|c| ExecutableNode::Chunk(c.clone()))
+        .map(|c| ExecutableNode::Chunk(Box::new(c.clone())))
         .chain(
             doc.inline_exprs
                 .iter()
