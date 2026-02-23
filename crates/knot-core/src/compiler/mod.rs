@@ -1,24 +1,24 @@
-use crate::cache::FreezeObjectInfo;
+use crate::backend::Backend;
+use crate::cache::{hash_dependencies, hashing, FreezeObjectInfo};
 use crate::config::Config;
 use crate::executors::side_channel::RuntimeError;
 use crate::executors::{
     ExecutionOutput, ExecutionResult, ExecutorManager, GraphicsOptions, KnotExecutor,
 };
 use crate::parser::ast::{Chunk, Document, InlineExpr};
+use crate::parser::{ChunkOptions, ResolvedChunkOptions};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-pub mod chunk_processor;
 pub mod formatters;
 pub mod inline_processor;
 pub mod pipeline;
 pub mod snapshot_manager;
 pub mod sync;
 
-pub use chunk_processor::{ChunkExecutionState, ChunkProcessor};
-pub use pipeline::{ExecutedNode, ExecutionNeed, PlannedNode};
+pub use pipeline::{ChunkExecutionState, ExecutedNode, ExecutionNeed, PlannedNode};
 
 /// Represents a node in the document that can be executed.
 pub enum ExecutableNode {
@@ -117,7 +117,6 @@ impl Compiler {
         nodes: Vec<ExecutableNode>,
         cache: &Arc<Mutex<Cache>>,
     ) -> Result<Vec<PlannedNode>> {
-        use chunk_processor::{compute_hash, resolve_options};
 
         // Lock once for the entire planning pass (synchronous, no contention).
         let cache = cache.lock().unwrap();
@@ -274,13 +273,27 @@ impl Compiler {
         });
 
         // Step 5: put executors back, collect indexed nodes, propagate any Err.
+        // Always put back ALL executors before propagating an error — a `?` on the
+        // first Err would skip the remaining iterations and silently drop live executors.
         let mut all_indexed: Vec<(usize, ExecutedNode)> = Vec::new();
+        let mut first_error: Option<anyhow::Error> = None;
         for result in chain_results {
-            let (lang, exec, nodes) = result?;
-            if let Some(exec) = exec {
-                self.executor_manager.put_back(lang, exec);
+            match result {
+                Ok((lang, exec, nodes)) => {
+                    if let Some(exec) = exec {
+                        self.executor_manager.put_back(lang, exec);
+                    }
+                    all_indexed.extend(nodes);
+                }
+                Err(e) => {
+                    if first_error.is_none() {
+                        first_error = Some(e);
+                    }
+                }
             }
-            all_indexed.extend(nodes);
+        }
+        if let Some(e) = first_error {
+            return Err(e);
         }
 
         // Step 6: restore document order.
@@ -317,7 +330,6 @@ fn run_language_chain(
     config: &Config,
     project_root: &Path,
 ) -> Result<(String, Option<Box<dyn KnotExecutor>>, Vec<(usize, ExecutedNode)>)> {
-    use chunk_processor::format_output;
 
     let mut indexed = Vec::with_capacity(nodes.len());
     let mut broken = false;
@@ -412,7 +424,19 @@ fn run_language_chain(
                 }
 
                 ExecutionNeed::MustExecute => {
-                    match execute_for_node(&pn, &mut exec, &cache, &mut snapshot_manager, project_root) {
+                    // Restore session snapshot before executing.
+                    // Lock only for the read, release before executing.
+                    {
+                        let cache_guard = cache.lock().unwrap();
+                        snapshot_manager.restore_if_needed(
+                            &lang,
+                            &pn.previous_hash,
+                            &mut exec,
+                            &*cache_guard,
+                            project_root,
+                        )?;
+                    }
+                    match execute_for_node(&pn, &mut exec, &cache) {
                         Ok(output) => {
                             if let Some(error) = &output.error {
                                 // Runtime error: persist to cache, then cascade.
@@ -556,10 +580,10 @@ fn run_language_chain(
     Ok((lang, exec, indexed))
 }
 
-/// Restore session snapshot if needed, then execute the node's code.
+/// Execute the node's code and return the raw output.
 ///
-/// Returns the raw `ExecutionOutput` without formatting.  Only called for
-/// `ExecutionNeed::MustExecute` nodes.
+/// Snapshot restoration is the caller's responsibility and must happen before
+/// this call.  Only called for `ExecutionNeed::MustExecute` nodes.
 ///
 /// **Does not persist to cache.** Caching is done by the caller (`run_language_chain`)
 /// so that chunk results are only saved after all post-execution checks (e.g.
@@ -570,30 +594,11 @@ fn execute_for_node(
     pn: &PlannedNode,
     exec: &mut Option<Box<dyn KnotExecutor>>,
     cache: &Arc<Mutex<Cache>>,
-    snapshot_manager: &mut SnapshotManager,
-    project_root: &Path,
 ) -> Result<ExecutionOutput> {
     match &pn.node {
         ExecutableNode::Chunk(chunk) => {
             let data = pn.chunk_data.as_ref().unwrap();
             info!("  ⚙️ {} [executing]", data.name);
-
-            if exec.is_none() {
-                return Err(anyhow::anyhow!("Unsupported language: '{}'", pn.lang));
-            }
-
-            // Lazy state restoration: lock only for the read, release before executing.
-            {
-                let cache_guard = cache.lock().unwrap();
-                snapshot_manager.restore_if_needed(
-                    &pn.lang,
-                    &pn.previous_hash,
-                    exec,
-                    &*cache_guard,
-                    project_root,
-                )?;
-                // cache_guard dropped here
-            }
 
             let graphics_opts = GraphicsOptions {
                 width: data.resolved_options.fig_width,
@@ -602,8 +607,9 @@ fn execute_for_node(
                 format: data.resolved_options.fig_format.as_str().to_string(),
             };
 
-            // SAFETY: checked is_none() above; restore_if_needed doesn't consume the executor.
-            exec.as_deref_mut().unwrap().execute(&chunk.code, &graphics_opts)
+            exec.as_deref_mut()
+                .ok_or_else(|| anyhow::anyhow!("Unsupported language: '{}'", pn.lang))?
+                .execute(&chunk.code, &graphics_opts)
         }
 
         ExecutableNode::InlineExpr(inline) => {
@@ -690,7 +696,6 @@ fn format_executed_node(
     backend: &TypstBackend,
     state: &ChunkExecutionState,
 ) -> String {
-    use chunk_processor::format_output;
     match &pn.node {
         ExecutableNode::Chunk(chunk) => {
             let data = pn.chunk_data.as_ref().unwrap();
@@ -712,7 +717,6 @@ fn format_executed_node(
 
 /// Format a node that is in the Inert state (upstream error, no execution).
 fn inert_output(pn: &PlannedNode, backend: &TypstBackend, config: &Config) -> String {
-    use chunk_processor::{format_output, resolve_options};
     match &pn.node {
         ExecutableNode::Chunk(chunk) => {
             let (_, inert_resolved, inert_codly) =
@@ -746,7 +750,6 @@ fn skip_output(
     backend: &TypstBackend,
     state: &ChunkExecutionState,
 ) -> String {
-    use chunk_processor::format_output;
     match &pn.node {
         ExecutableNode::Chunk(chunk) => {
             let data = pn.chunk_data.as_ref().unwrap();
@@ -786,6 +789,64 @@ fn format_error_block_for_node(node: &ExecutableNode, lang: &str, error_msg: &st
     errors: ([#local(zebra-fill: none)[\n=== Execution Error ({lang})\nIn {node_kind} `{node_name}`\n\n```\n{error_msg}\n```\n\n_Execution of subsequent `{lang}` blocks has been suspended._]],)
 )\n"
     )
+}
+
+// ---------------------------------------------------------------------------
+// Chunk helpers (options, hashing, formatting)
+// ---------------------------------------------------------------------------
+
+/// Applies config layering (global → language → error) to produce resolved options
+/// and merged codly options for a chunk.
+fn resolve_options(
+    chunk: &Chunk,
+    config: &Config,
+    state: &ChunkExecutionState,
+) -> (ChunkOptions, ResolvedChunkOptions, HashMap<String, String>) {
+    let mut chunk_options = chunk.options.clone();
+
+    let mut effective_defaults = config.chunk_defaults.clone();
+    if let Some(lang_defaults) = config.get_language_defaults(&chunk.language) {
+        effective_defaults.merge(lang_defaults);
+    }
+    if matches!(state, ChunkExecutionState::Inert)
+        && let Some(error_defaults) = config.get_language_error_defaults(&chunk.language)
+    {
+        effective_defaults.merge(error_defaults);
+    }
+
+    chunk_options.apply_config_defaults(&effective_defaults);
+
+    let mut merged_codly_options = effective_defaults.codly_options.clone();
+    for (key, value) in &chunk.codly_options {
+        merged_codly_options.insert(key.clone(), value.clone());
+    }
+
+    let resolved_options = chunk_options.resolve();
+    (chunk_options, resolved_options, merged_codly_options)
+}
+
+/// Computes the chunk hash from code, options, previous hash, and file dependencies.
+///
+/// Freeze objects are intentionally excluded from the hash: their immutability
+/// is enforced by the snapshot mechanism, and cache invalidation propagates
+/// correctly through hash chaining (`previous_hash`).
+fn compute_hash(code: &str, chunk_options: &ChunkOptions, previous_hash: &str) -> Result<String> {
+    let deps_hash = hash_dependencies(&chunk_options.depends)?;
+    Ok(hashing::get_chunk_hash(code, chunk_options, previous_hash, &deps_hash))
+}
+
+/// Clones the chunk with merged codly options and delegates to the backend formatter.
+fn format_output(
+    backend: &TypstBackend,
+    chunk: &Chunk,
+    merged_codly_options: &HashMap<String, String>,
+    resolved_options: &ResolvedChunkOptions,
+    output: &ExecutionOutput,
+    state: &ChunkExecutionState,
+) -> String {
+    let mut chunk_with_codly = chunk.clone();
+    chunk_with_codly.codly_options = merged_codly_options.clone();
+    backend.format_chunk(&chunk_with_codly, resolved_options, output, state)
 }
 
 // ---------------------------------------------------------------------------
@@ -960,6 +1021,39 @@ pub(super) mod test_helpers {
         let manager = ExecutorManager::new(temp_dir.path().to_path_buf());
         (temp_dir, manager)
     }
+
+    /// Creates a minimal test chunk for use in unit tests.
+    pub fn create_test_chunk(
+        language: &str,
+        code: &str,
+        name: Option<String>,
+        eval: bool,
+    ) -> crate::parser::Chunk {
+        use crate::parser::{ChunkOptions, Position, Range};
+        let dummy_range = Range {
+            start: Position { line: 0, column: 0 },
+            end: Position { line: 0, column: 0 },
+        };
+        crate::parser::Chunk {
+            index: 0,
+            language: language.to_string(),
+            code: code.to_string(),
+            name,
+            base_indentation: String::new(),
+            options: ChunkOptions {
+                eval: Some(eval),
+                ..Default::default()
+            },
+            codly_options: std::collections::HashMap::new(),
+            errors: vec![],
+            range: dummy_range.clone(),
+            code_range: dummy_range,
+            start_byte: 0,
+            end_byte: 0,
+            code_start_byte: 0,
+            code_end_byte: 0,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1096,6 +1190,109 @@ mod tests {
         assert!(result.contains("BBB "), "Inter-node text 'BBB ' missing");
         assert!(result.contains("2"), "Inline result missing");
         assert!(result.ends_with(" CCC"), "Suffix ' CCC' missing");
+    }
+
+    // -----------------------------------------------------------------------
+    // compute_hash
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_compute_hash_consistency() {
+        let chunk = test_helpers::create_test_chunk("r", "x <- 1", None, false);
+        let hash1 = compute_hash(&chunk.code, &chunk.options, "prev_hash").unwrap();
+        let hash2 = compute_hash(&chunk.code, &chunk.options, "prev_hash").unwrap();
+        assert_eq!(hash1, hash2);
+    }
+
+    #[test]
+    fn test_compute_hash_changes_with_code() {
+        let chunk1 = test_helpers::create_test_chunk("r", "x <- 1", None, false);
+        let chunk2 = test_helpers::create_test_chunk("r", "x <- 2", None, false);
+        let hash1 = compute_hash(&chunk1.code, &chunk1.options, "prev").unwrap();
+        let hash2 = compute_hash(&chunk2.code, &chunk2.options, "prev").unwrap();
+        assert_ne!(hash1, hash2);
+    }
+
+    #[test]
+    fn test_compute_hash_changes_with_previous() {
+        let chunk = test_helpers::create_test_chunk("r", "x <- 1", None, false);
+        let hash1 = compute_hash(&chunk.code, &chunk.options, "prev_1").unwrap();
+        let hash2 = compute_hash(&chunk.code, &chunk.options, "prev_2").unwrap();
+        assert_ne!(hash1, hash2);
+    }
+
+    #[test]
+    fn test_compute_hash_includes_dependencies() {
+        use std::fs;
+        let temp = TempDir::new().unwrap();
+        let dep1 = temp.path().join("dep1.txt");
+        let dep2 = temp.path().join("dep2.txt");
+        fs::write(&dep1, "content1").unwrap();
+        fs::write(&dep2, "content2").unwrap();
+
+        let mut chunk = test_helpers::create_test_chunk("r", "x <- 1", None, false);
+        chunk.options.depends = vec![dep1.clone()];
+        let hash1 = compute_hash(&chunk.code, &chunk.options, "prev").unwrap();
+
+        chunk.options.depends = vec![dep2.clone()];
+        let hash2 = compute_hash(&chunk.code, &chunk.options, "prev").unwrap();
+
+        assert_ne!(hash1, hash2);
+    }
+
+    // -----------------------------------------------------------------------
+    // resolve_options
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_resolve_options_language_specific_defaults() {
+        use crate::config::{ChunkDefaults, Config};
+        let mut chunk = test_helpers::create_test_chunk("r", "x <- 1", None, true);
+        chunk.options.show = None; // let defaults apply
+
+        let config = Config {
+            r_chunks: Some(ChunkDefaults {
+                show: Some(crate::parser::Show::Output),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let (_, resolved, _) = resolve_options(&chunk, &config, &ChunkExecutionState::Ready);
+        assert_eq!(resolved.show, crate::parser::Show::Output);
+    }
+
+    #[test]
+    fn test_resolve_options_chunk_overrides_language_defaults() {
+        use crate::config::{ChunkDefaults, Config};
+        let mut chunk = test_helpers::create_test_chunk("r", "x <- 1", None, true);
+        chunk.options.show = Some(crate::parser::Show::Both); // explicit chunk option
+
+        let config = Config {
+            r_chunks: Some(ChunkDefaults {
+                show: Some(crate::parser::Show::Output),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let (_, resolved, _) = resolve_options(&chunk, &config, &ChunkExecutionState::Ready);
+        assert_eq!(resolved.show, crate::parser::Show::Both);
+    }
+
+    #[test]
+    fn test_resolve_options_global_fallback() {
+        use crate::config::{ChunkDefaults, Config};
+        let mut chunk = test_helpers::create_test_chunk("python", "x = 1", None, true);
+        chunk.options.show = None;
+
+        let config = Config {
+            chunk_defaults: ChunkDefaults {
+                show: Some(crate::parser::Show::Output),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let (_, resolved, _) = resolve_options(&chunk, &config, &ChunkExecutionState::Ready);
+        assert_eq!(resolved.show, crate::parser::Show::Output);
     }
 
     // -----------------------------------------------------------------------

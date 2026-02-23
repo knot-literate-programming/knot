@@ -28,12 +28,22 @@ impl SnapshotManager {
 
     /// Ensure the executor for the given language is in the state corresponding to `previous_hash`.
     ///
-    /// `exec` is a mutable reference to an `Option<Box<dyn KnotExecutor>>`.  If the
-    /// option is `None` (executor not yet started), returns `Ok(())` immediately.
+    /// If `exec` is `None` (executor not yet started), returns `Ok(())` immediately.
     ///
-    /// Using `&mut Option<Box<…>>` instead of `Option<&mut dyn …>` avoids a
-    /// lifetime-inference issue (the borrow checker over-extends `&mut dyn Trait`
-    /// lifetimes when the call appears inside a `for` loop).
+    /// # Borrow-checker note
+    ///
+    /// The parameter is `&mut Option<Box<dyn KnotExecutor>>` rather than
+    /// `Option<&mut dyn KnotExecutor>` to work around an NLL limitation.
+    ///
+    /// With `Option<&mut dyn KnotExecutor>`, calling `exec.as_deref_mut()` at the
+    /// call site produces a borrow whose lifetime the compiler infers must cover the
+    /// entire function call *and* any subsequent use of `exec` in the same loop
+    /// body (E0499 — "cannot borrow `exec` as mutable more than once at a time").
+    ///
+    /// By accepting `&mut Option<Box<…>>` instead, `as_deref_mut()` is called
+    /// *inside* this function: the short-lived `&mut dyn KnotExecutor` borrow is
+    /// entirely contained within the function body and never visible to the caller,
+    /// so subsequent uses of `exec` in the loop are unaffected.
     pub fn restore_if_needed(
         &mut self,
         lang: &str,
@@ -101,9 +111,11 @@ impl SnapshotManager {
 
     /// Update the snapshot state after execution or cache hit.
     ///
-    /// `exec` is a mutable reference to an `Option<Box<dyn KnotExecutor>>`.  If the
-    /// option is `None`, returns `Ok(())` immediately — for cache-hit-only chains the
-    /// snapshot already exists on disk and no executor operations are needed.
+    /// If `exec` is `None`, returns `Ok(())` immediately — for cache-hit-only chains
+    /// the snapshot already exists on disk and no executor operations are needed.
+    ///
+    /// See [`Self::restore_if_needed`] for the rationale behind the
+    /// `&mut Option<Box<dyn KnotExecutor>>` signature (borrow-checker workaround).
     pub fn update_after_node(
         &mut self,
         lang: &str,

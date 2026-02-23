@@ -23,6 +23,19 @@ use crate::executors::ExecutionOutput;
 use crate::parser::{ChunkOptions, ResolvedChunkOptions};
 use std::collections::HashMap;
 
+/// Execution lifecycle state of a chunk within the compilation pipeline.
+///
+/// - `Ready`   : cache valid or execution just succeeded — full output available.
+/// - `Inert`   : follows an upstream error; rendered as raw code without execution.
+/// - `Pending` : cache invalidated, not yet executed (reserved for progressive
+///   compilation: first-pass placeholder before execution completes).
+#[derive(Debug, Clone, PartialEq)]
+pub enum ChunkExecutionState {
+    Ready,
+    Inert,
+    Pending,
+}
+
 /// What the execution phase must do with this node.
 pub enum ExecutionNeed {
     /// Cache hit for a code chunk — `ExecutionOutput` already retrieved.

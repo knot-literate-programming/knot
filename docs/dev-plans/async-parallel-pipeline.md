@@ -1,6 +1,6 @@
 # Architecture Async/Parallèle — Compilation Progressive
 
-**Status:** 🔵 Planifié
+**Status:** 🟡 En cours — Étape 0 ✅ Étape 1 ✅ Refactoring ✅
 **Date de réflexion :** 2026-02-22
 **Branche cible :** `feat/progressive-compilation`
 **Prérequis :** Fondations posées dans `refactor/foundations` (v0.2.4)
@@ -41,13 +41,17 @@ plan_pass()
      ↓
 group_by_language()
      ↓
-tokio::join!(
-    run_language_chain("r",      r_nodes),     ← tâche tokio A
-    run_language_chain("python", py_nodes),    ← tâche tokio B
+std::thread::scope(
+    run_language_chain("r",      r_nodes),     ← thread OS A
+    run_language_chain("python", py_nodes),    ← thread OS B
 )
      ↓
 assemble_pass(all_results, source)             ← réassemblage en ordre document
 ```
+
+> **Note d'implémentation :** `tokio::join!` n'est pas utilisé car `knot-core` est entièrement
+> synchrone — les executors communiquent via des pipes POSIX bloquants (stdin/stdout).
+> `std::thread::scope` offre le parallélisme inter-langages sans runtime async.
 
 ### 2.3 Parallélisme inter-documents
 
@@ -173,16 +177,24 @@ possède localement, zero contention.
 ## 5. Feuille de route
 
 ```
-Étape 0 — Prérequis (must do first)
+Étape 0 — Prérequis ✅ (commit 4ec9149)
   ├── PlannedNode owned (supprimer le lifetime 'a)
   ├── ExecutorManager splittable (take() par langage)
-  └── Cache concurrent-safe (Arc<RwLock> ou similaire)
+  └── Cache concurrent-safe (Arc<Mutex<Cache>>)
 
-Étape 1 — Cœur async (parallel execute_pass)
-  ├── plan_pass → group_by_language()
-  ├── tokio::spawn par chaîne de langage
-  ├── collect results (channel ou JoinSet)
-  └── assemble_pass en ordre document
+Étape 1 — Cœur parallèle ✅ (commit c08f2bd)
+  ├── group_by_language() — partitionnement par langage
+  ├── std::thread::scope par chaîne (pas tokio — knot-core est sync)
+  ├── run_language_chain() — exécution + cascade Inert locale
+  └── assemble_pass en ordre document (tri par index original)
+
+Refactoring ✅ (branche refactor/async-prereqs)
+  ├── Fix : execute_pass remet tous les executors même en cas d'erreur
+  ├── Suppression de ChunkProcessor (code mort depuis Étape 1)
+  │     ├── ChunkExecutionState déplacé dans pipeline.rs
+  │     └── resolve_options / compute_hash / format_output dans mod.rs
+  └── Séparation des responsabilités dans execute_for_node
+        └── restore_if_needed sorti vers run_language_chain (cycle de vie vs exécution)
 
 Étape 2 — Streaming vers tinymist
   ├── Après plan_pass : output partiel (CacheHits + placeholders)
@@ -201,8 +213,8 @@ possède localement, zero contention.
 | Question | Options | Statut |
 |---|---|---|
 | Runtime async | tokio (déjà dans knot-lsp) | ✅ Choix naturel |
-| Parallélisme des tâches | `tokio::join!` / `JoinSet` / `FuturesUnordered` | 🔵 À décider |
-| Synchronisation du cache | `Arc<Mutex>` / `Arc<RwLock>` / segmentation | 🔵 À décider |
+| Parallélisme des tâches | `std::thread::scope` (knot-core sync, I/O bloquant) | ✅ Décidé |
+| Synchronisation du cache | `Arc<Mutex<Cache>>` (contention faible en pratique) | ✅ Décidé |
 | Cancellation | Si nouvelle save arrive pendant exécution en cours | 🔵 À concevoir |
 | Backpressure | Si R tourne 60s, que faire des nouvelles saves ? | 🔵 À concevoir |
 
