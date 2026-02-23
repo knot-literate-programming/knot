@@ -2,6 +2,8 @@
 name = "knot-lsp"
 version = "0.2.4"
 edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/knot-literate-programming/knot"
 
 [dependencies]
 knot-core = { path = "../knot-core" }
