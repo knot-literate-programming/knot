@@ -92,7 +92,7 @@ If you use Knot for your research, please cite it as follows:
   month = feb,
   title = {{Knot: A modern literate programming system for Typst}},
   url = {https://github.com/knot-literate-programming/knot},
-  version = {0.2.4},
+  version = {0.2.5},
   year = {2026}
 }
 ```
