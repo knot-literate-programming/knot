@@ -2,7 +2,6 @@
 //!
 //! Helpers for safely embedding file paths in generated R/Python code.
 
-use anyhow::Result;
 use std::path::Path;
 
 /// Escape a path for safe use in code strings
@@ -26,22 +25,6 @@ pub fn escape_path_for_code(path: &Path) -> String {
         .replace('\\', "\\\\")
         .replace('\'', "\\'")
         .replace('"', "\\\"")
-}
-
-/// Hash a file's content using xxHash64.
-///
-/// Returns a lowercase hex string. Used by all language executors
-/// to verify integrity of cached constant objects.
-pub(crate) fn hash_file(file_path: &Path) -> Result<String> {
-    use std::fs::File;
-    use std::io::Read;
-
-    let mut file = File::open(file_path)?;
-    let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer)?;
-
-    let hash = xxhash_rust::xxh64::xxh64(&buffer, 0);
-    Ok(format!("{:x}", hash))
 }
 
 #[cfg(test)]

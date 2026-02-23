@@ -180,20 +180,6 @@ impl ConstantObjectHandler for PythonExecutor {
     fn load_constant(&mut self, object_name: &str, hash: &str, cache_dir: &Path) -> Result<()> {
         let object_path = cache_dir.join("objects").join(format!("{}.pkl", hash));
 
-        let actual_hash = super::path_utils::hash_file(&object_path)?;
-        if actual_hash != hash {
-            anyhow::bail!(
-                "Cache corruption detected for constant object '{}'.\n\
-                 Expected hash: {}\n\
-                 Actual hash: {}\n\
-                 File: {}",
-                object_name,
-                hash,
-                actual_hash,
-                object_path.display()
-            );
-        }
-
         let path_str = escape_path_for_code(&object_path);
 
         // Delegate to Python helper function
