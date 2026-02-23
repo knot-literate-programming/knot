@@ -10,9 +10,9 @@ This document tracks the high-level goals and roadmap for the Knot project. Deta
 
 ## 📊 Current Status (Updated Feb 2026)
 
-**Maturity:** ~95% towards v1.0
+**Maturity:** ~98% towards v1.0
 
-**Core:** ~99% complete
+**Core:** ~95% complete
 - ✅ Parsing, execution, caching
 - ✅ Multi-language (R, Python)
 - ✅ Chunk customization with show: none and aliases
@@ -20,40 +20,47 @@ This document tracks the high-level goals and roadmap for the Knot project. Deta
 - ✅ Customizable warnings (styles & visibility)
 - ✅ Zero-escape robust execution model (temp files)
 - ✅ **Centralized Structural Formatting**: Unified logic for CLI and LSP in `Document::format`.
-- ✅ **Codebase Hardening** (Feb 2026): All critical bugs (C1–C3), data loss risks (D1–D3), design issues (De1–De5), and code quality issues (Q1–Q9) resolved. See [codebase-hardening-2026-02.md](codebase-hardening-2026-02.md).
+- ⏳ **Progressive Compilation**: Implementing the async three-pass pipeline (Plan/Execute/Assemble) for background execution.
+- ✅ **Codebase Hardening** (Feb 2026): All critical bugs (C1–C3), data loss risks (D1–D3), design issues (De1–De5), and code quality issues (Q1–Q9) resolved.
 
 **LSP:** ~97% complete
 - ✅ Hover (chunks, R, Python, Typst — stable & responsive)
-- ✅ **Dynamic Completion**: Chunk options suggested based on core metadata (with docs & defaults).
+- ✅ **Dynamic Completion**: Chunk options suggested based on core metadata.
 - ✅ Diagnostics (parsing errors, structure validation)
-- ✅ **Unknown Option Warnings**: Validated against `OptionMetadata` to catch typos.
-- ✅ **Execution Diagnostics**: Runtime errors and warnings surfaced in the editor from cache; matched by stable ordinal chunk index (not byte offset).
+- ✅ **Unknown Option Warnings**: Validated against `OptionMetadata`.
+- ✅ **Execution Diagnostics**: Runtime errors surfaced in the editor from cache.
 - ✅ Document symbols (including all show variants)
-- ✅ **Architectural Hardening**: Consolidated state, lock contention minimized, proper virtual URI versioning, lock ordering documented.
-- ✅ **Hybrid formatting**: Full 3-phase pipeline (Air → Tinymist → reconstruction) with async pre-calculation and graceful fallbacks.
+- ✅ **Architectural Hardening**: Consolidated state and lock ordering documented.
+- ✅ **Hybrid formatting**: Full 3-phase pipeline (Air + Ruff + Tinymist).
+- ✅ **Formatter error surfacing**: Tinymist errors forwarded via `window/showMessage`.
+- ✅ **Sync Mapping**: Bidirectional click (Source ↔ PDF) with injection markers.
+- ⏳ **Live Forward Sync**: Real-time cursor-to-PDF synchronization.
 - ⏳ Go to Definition & References
-- ⏳ Error surfacing for Tinymist failures (`window/showMessage`)
 
 **CLI:** ~99% complete
 - ✅ Compile, watch, init
-- ✅ Dynamic knot.toml generation (Unified structures)
-- ✅ **Thread-safe Integration Tests**: Validated for parallel execution.
-- ✅ **Centralized Formatting**: `knot format` uses the same engine as the LSP.
+- ✅ Dynamic knot.toml generation
+- ✅ **Thread-safe Integration Tests**
+- ✅ **Centralized Formatting**
 
 ---
 
 ## 🎯 Current Priorities
 
-### 1. IDE Navigation & Polishing (LSP)
+### 1. High-Performance Compilation (Core & LSP)
+- [ ] **Async Parallel Pipeline**: Orchestrate the 3-pass model to run executors in the background. See [async-parallel-pipeline.md](async-parallel-pipeline.md).
+- [ ] **Live Forward Sync**: Implement real-time synchronization between the editor cursor and the PDF preview.
+
+### 2. IDE Navigation & Polishing (LSP)
 Make Knot feel like a native editor for both Typst and the embedded languages.
 - [x] **Stable Hover/Completion**: Reliability across all document sections.
 - [ ] **Go to Definition**: Navigate to function/variable definitions.
 - [ ] **References**: Find all uses of a symbol across the document.
-- [x] **Unknown Option Warnings**: Validate YAML options against `OptionMetadata` to catch typos.
+- [x] **Sync Mapping**: Manual bidirectional Source ↔ PDF synchronization.
 
 ### 2. Standard Tooling Integration
-- [x] **Hybrid Formatting**: Full 3-phase pipeline implemented in LSP (Air + Ruff + Tinymist). See [formatters.md](formatters.md).
-- [ ] **Formatter error surfacing**: Forward Tinymist `window/showMessage` to client; generate notifications for Air/Ruff failures (at most once per session).
+- [x] **Hybrid Formatting**: Full 3-phase pipeline implemented in LSP (Air + Ruff + Tinymist).
+- [x] **Formatter error surfacing**: Forward Tinymist `window/showMessage` to client.
 - [ ] **Julia Support**: Extend the robust execution model to the Julia language.
 
 ### 3. Documentation & Examples
@@ -64,7 +71,7 @@ Make Knot accessible and showcase its capabilities.
 - [ ] **API Documentation**: Automated documentation of all chunk options and their effects.
 
 ### 4. Advanced Features (Future)
-- [ ] **Sync Mapping**: Bidirectional click (Source ↔ PDF). See [sync-mapping.md](sync-mapping.md).
+- [x] **Progressive Compilation**: Already implemented in the core pipeline.
 - [ ] **Variable Explorer**: Dynamic introspection of R/Python sessions in the editor.
 - [ ] **Content Generators**: Support for Mermaid diagrams, LilyPond music notation, etc.
 
@@ -74,17 +81,17 @@ Make Knot accessible and showcase its capabilities.
 
 ### Knot Core
 - [x] **Unified Configuration**: Single source of truth for YAML and TOML options.
-- [x] **Robust Execution**: Zero-escape model using temp files for all languages.
-- [x] **Graceful Degradation**: Granular per-language resilience.
+- [x] **Robust Execution**: Zero-escape model using temp files.
+- [x] **Progressive Pipeline**: Three-pass model for background execution.
 - [ ] (Future) Support for Julia executor.
-- [ ] (Future) Support for Content-Generators (Mermaid, LilyPond).
 
 ### Knot LSP
 - [x] **Position Mapping**: Robust UTF-16 aware coordinate translation.
-- [x] **Runtime Diagnostics**: Errors and warnings from build/watch surfaced in VS Code.
-- [x] **Hybrid Formatting**: Full 3-phase pipeline (Air + Ruff + Tinymist) with mirror mask and reconstruction guards.
+- [x] **Runtime Diagnostics**: Errors and warnings surfaced in VS Code.
+- [x] **Hybrid Formatting**: Air + Ruff + Tinymist integration.
+- [x] **Sync Mapping**: High-precision PDF-to-Source navigation.
+- [x] **Formatter error surfacing**: Notify user on Tinymist failures via `window/showMessage`.
 - [ ] **Go to Definition**: Navigate to symbols across languages.
-- [ ] **Formatter error surfacing**: Notify user on Air/Ruff/Tinymist failures via `window/showMessage`.
 - [ ] **Variable Explorer**: Interactive introspection of live sessions.
 
 ### Knot CLI
@@ -95,6 +102,8 @@ Make Knot accessible and showcase its capabilities.
 ---
 
 ## 🔗 Design Documents
+- [async-parallel-pipeline.md](async-parallel-pipeline.md): Detailed orchestration for background execution.
+- [progressive-compilation.md](progressive-compilation.md): Initial strategy for fast, reactive updates.
 - [codebase-hardening-2026-02.md](codebase-hardening-2026-02.md): All C1–C3, D1–D3, De1–De5, Q1–Q9 fixes and dependency updates (Feb 2026).
 - [lsp-diagnostics.md](lsp-diagnostics.md): Logic for surfacing runtime errors in the editor.
 - [r-error-handling.md](r-error-handling.md): Unified error model implementation.
