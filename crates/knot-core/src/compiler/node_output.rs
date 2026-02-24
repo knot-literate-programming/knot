@@ -4,15 +4,12 @@
 //! inert (upstream error), skipped (`eval = false`), or execution error.
 
 use crate::backend::{Backend, TypstBackend};
-use crate::compiler::pipeline::ChunkExecutionState;
-use crate::compiler::pipeline::PlannedNode;
+use crate::compiler::pipeline::{ChunkExecutionState, PlannedNode, PlannedNodeKind};
 use crate::config::Config;
 use crate::executors::{ExecutionOutput, ExecutionResult};
 use crate::parser::ResolvedChunkOptions;
 use crate::parser::ast::Chunk;
 use std::collections::HashMap;
-
-use super::ExecutableNode;
 
 /// Format the output of a freshly executed node.
 pub(super) fn format_executed_node(
@@ -21,19 +18,16 @@ pub(super) fn format_executed_node(
     backend: &TypstBackend,
     state: &ChunkExecutionState,
 ) -> String {
-    match &pn.node {
-        ExecutableNode::Chunk(chunk) => {
-            let data = pn.chunk_data.as_ref().unwrap();
-            format_output(
-                backend,
-                chunk,
-                &data.merged_codly_options,
-                &data.resolved_options,
-                output,
-                state,
-            )
-        }
-        ExecutableNode::InlineExpr(_) => match &output.result {
+    match &pn.kind {
+        PlannedNodeKind::Chunk { node: chunk, data } => format_output(
+            backend,
+            chunk,
+            &data.merged_codly_options,
+            &data.resolved_options,
+            output,
+            state,
+        ),
+        PlannedNodeKind::Inline { .. } => match &output.result {
             ExecutionResult::Text(s) => s.clone(),
             _ => String::new(),
         },
@@ -42,8 +36,8 @@ pub(super) fn format_executed_node(
 
 /// Format a node that is in the Inert state (upstream error, no execution).
 pub(super) fn inert_output(pn: &PlannedNode, backend: &TypstBackend, config: &Config) -> String {
-    match &pn.node {
-        ExecutableNode::Chunk(chunk) => {
+    match &pn.kind {
+        PlannedNodeKind::Chunk { node: chunk, .. } => {
             let (_, inert_resolved, inert_codly) =
                 super::options::resolve_options(chunk, config, &ChunkExecutionState::Inert);
             let empty = ExecutionOutput {
@@ -59,7 +53,7 @@ pub(super) fn inert_output(pn: &PlannedNode, backend: &TypstBackend, config: &Co
                 &ChunkExecutionState::Inert,
             )
         }
-        ExecutableNode::InlineExpr(inline) => {
+        PlannedNodeKind::Inline { node: inline } => {
             format!(
                 "#text(fill: luma(150))[`{{{} {}}}`]",
                 inline.language, inline.code
@@ -74,9 +68,8 @@ pub(super) fn skip_output(
     backend: &TypstBackend,
     state: &ChunkExecutionState,
 ) -> String {
-    match &pn.node {
-        ExecutableNode::Chunk(chunk) => {
-            let data = pn.chunk_data.as_ref().unwrap();
+    match &pn.kind {
+        PlannedNodeKind::Chunk { node: chunk, data } => {
             let empty = ExecutionOutput {
                 result: ExecutionResult::Text(String::new()),
                 warnings: vec![],
@@ -90,24 +83,20 @@ pub(super) fn skip_output(
                 state,
             )
         }
-        ExecutableNode::InlineExpr(_) => String::new(),
+        PlannedNodeKind::Inline { .. } => String::new(),
     }
 }
 
 /// Format the Typst error block shown when a node fails to execute.
 pub(super) fn format_error_block_for_node(
-    node: &ExecutableNode,
+    kind: &PlannedNodeKind,
     lang: &str,
     error_msg: &str,
 ) -> String {
     let error_msg = error_msg.replace('"', "\\\"");
-    let node_kind = match node {
-        ExecutableNode::Chunk(_) => "chunk",
-        ExecutableNode::InlineExpr(_) => "inline expression",
-    };
-    let node_name = match node {
-        ExecutableNode::Chunk(c) => c.name.as_deref().unwrap_or("unnamed"),
-        ExecutableNode::InlineExpr(_) => "inline",
+    let (node_kind, node_name) = match kind {
+        PlannedNodeKind::Chunk { node, .. } => ("chunk", node.name.as_deref().unwrap_or("unnamed")),
+        PlannedNodeKind::Inline { .. } => ("inline expression", "inline"),
     };
     format!(
         "#code-chunk(

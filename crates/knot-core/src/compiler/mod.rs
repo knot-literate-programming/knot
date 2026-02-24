@@ -18,7 +18,9 @@ mod freeze;
 mod node_output;
 mod options;
 
-pub use pipeline::{ChunkExecutionState, ExecutedNode, ExecutionNeed, PlannedNode};
+pub use pipeline::{
+    ChunkExecutionState, ExecutedNode, ExecutionNeed, PlannedNode, PlannedNodeKind,
+};
 
 use crate::backend::TypstBackend;
 use crate::compiler::pipeline::ChunkPlanData;
@@ -123,20 +125,16 @@ impl Compiler {
         let mut last_hash_per_lang: HashMap<String, String> = HashMap::new();
 
         for node in nodes {
-            let lang = match &node {
-                ExecutableNode::Chunk(c) => c.language.clone(),
-                ExecutableNode::InlineExpr(e) => e.language.clone(),
+            let (lang, source_start, source_end) = match &node {
+                ExecutableNode::Chunk(c) => (c.language.clone(), c.start_byte, c.end_byte),
+                ExecutableNode::InlineExpr(e) => (e.language.clone(), e.start, e.end),
             };
             let previous_hash = last_hash_per_lang.get(&lang).cloned().unwrap_or_default();
-            let (source_start, source_end) = match &node {
-                ExecutableNode::Chunk(c) => (c.start_byte, c.end_byte),
-                ExecutableNode::InlineExpr(e) => (e.start, e.end),
-            };
 
-            let (hash, need, chunk_data) = match &node {
+            let (hash, need, kind) = match node {
                 ExecutableNode::Chunk(chunk) => {
                     let (chunk_options, resolved_options, merged_codly_options) =
-                        resolve_options(chunk, &self.config, &ChunkExecutionState::Ready);
+                        resolve_options(&chunk, &self.config, &ChunkExecutionState::Ready);
                     let name = chunk
                         .name
                         .as_deref()
@@ -150,13 +148,16 @@ impl Compiler {
                     } else {
                         ExecutionNeed::MustExecute
                     };
-                    let data = ChunkPlanData {
-                        resolved_options,
-                        chunk_options,
-                        merged_codly_options,
-                        name,
+                    let kind = PlannedNodeKind::Chunk {
+                        node: chunk,
+                        data: Box::new(ChunkPlanData {
+                            resolved_options,
+                            chunk_options,
+                            merged_codly_options,
+                            name,
+                        }),
                     };
-                    (hash, need, Some(data))
+                    (hash, need, kind)
                 }
                 ExecutableNode::InlineExpr(inline) => {
                     let resolved = inline.options.resolve();
@@ -169,19 +170,18 @@ impl Compiler {
                     } else {
                         ExecutionNeed::MustExecute
                     };
-                    (hash, need, None)
+                    (hash, need, PlannedNodeKind::Inline { node: inline })
                 }
             };
 
             last_hash_per_lang.insert(lang.clone(), hash.clone());
             planned.push(PlannedNode {
-                node,
+                kind,
                 lang,
                 hash,
                 previous_hash,
                 source_start,
                 source_end,
-                chunk_data,
                 need,
             });
         }

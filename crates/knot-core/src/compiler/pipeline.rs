@@ -18,8 +18,8 @@
 //! nodes can be rendered immediately while the pending ones run in the
 //! background.
 
-use crate::compiler::ExecutableNode;
 use crate::executors::ExecutionAttempt;
+use crate::parser::ast::{Chunk, InlineExpr};
 use crate::parser::{ChunkOptions, ResolvedChunkOptions};
 use std::collections::HashMap;
 
@@ -56,16 +56,29 @@ pub struct ChunkPlanData {
     pub name: String,
 }
 
+/// The node-type-specific part of a planned node.
+///
+/// The compiler guarantees that `ChunkPlanData` is always present for chunk
+/// nodes and absent for inline expressions — this invariant is encoded in the
+/// type rather than relying on `Option::unwrap`.
+pub enum PlannedNodeKind {
+    Chunk {
+        node: Box<Chunk>,
+        data: Box<ChunkPlanData>,
+    },
+    Inline {
+        node: InlineExpr,
+    },
+}
+
 /// A node after the planning phase: hash computed, cache checked, no code executed yet.
 pub struct PlannedNode {
-    pub node: ExecutableNode,
+    pub kind: PlannedNodeKind,
     pub lang: String,
     pub hash: String,
     pub previous_hash: String,
     pub source_start: usize,
     pub source_end: usize,
-    /// Present for chunk nodes; `None` for inline expressions.
-    pub chunk_data: Option<ChunkPlanData>,
     /// What the execution phase must do with this node.
     pub need: ExecutionNeed,
 }

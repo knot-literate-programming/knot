@@ -10,7 +10,7 @@ use anyhow::{Context, Result};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use super::ExecutableNode;
+use super::pipeline::PlannedNodeKind;
 
 /// Returns the composite cache key for a freeze object: `"lang::varname"`.
 ///
@@ -109,9 +109,9 @@ pub(super) fn check_freeze_contract(
         None => return Ok(None),
     };
 
-    let chunk_name = match &pn.node {
-        ExecutableNode::Chunk(c) => c.name.as_deref().unwrap_or("unnamed"),
-        ExecutableNode::InlineExpr(_) => "inline",
+    let chunk_name = match &pn.kind {
+        PlannedNodeKind::Chunk { node, .. } => node.name.as_deref().unwrap_or("unnamed"),
+        PlannedNodeKind::Inline { .. } => "inline",
     };
 
     for info in &freeze_entries {

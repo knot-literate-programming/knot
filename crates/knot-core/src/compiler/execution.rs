@@ -5,7 +5,9 @@
 
 use crate::backend::TypstBackend;
 use crate::cache::Cache;
-use crate::compiler::pipeline::{ChunkExecutionState, ExecutedNode, ExecutionNeed, PlannedNode};
+use crate::compiler::pipeline::{
+    ChunkExecutionState, ExecutedNode, ExecutionNeed, PlannedNode, PlannedNodeKind,
+};
 use crate::compiler::snapshot_manager::SnapshotManager;
 use crate::config::Config;
 use crate::executors::{
@@ -18,7 +20,6 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use super::ExecutableNode;
 use super::freeze::{check_freeze_contract, register_freeze_objects};
 use super::node_output::{
     format_error_block_for_node, format_executed_node, format_output, inert_output, skip_output,
@@ -75,10 +76,9 @@ pub(super) fn run_language_chain(
     let mut broken = false;
 
     for (doc_idx, pn) in nodes {
-        let is_chunk = matches!(&pn.node, ExecutableNode::Chunk(_));
-        let source_line = match &pn.node {
-            ExecutableNode::Chunk(c) => (c.range.start.line + 1) as u32,
-            ExecutableNode::InlineExpr(_) => 0,
+        let (is_chunk, source_line) = match &pn.kind {
+            PlannedNodeKind::Chunk { node, .. } => (true, (node.range.start.line + 1) as u32),
+            PlannedNodeKind::Inline { .. } => (false, 0),
         };
 
         let state = if broken {
@@ -127,18 +127,17 @@ fn process_node(
 
     match &pn.need {
         ExecutionNeed::CacheHit(attempt) => {
-            let data = pn.chunk_data.as_ref().unwrap();
+            let (chunk, data) = match &pn.kind {
+                PlannedNodeKind::Chunk { node, data } => (node, data),
+                PlannedNodeKind::Inline { .. } => unreachable!("CacheHit only for chunks"),
+            };
             info!("  ✓ {} [cached]", data.name);
             match attempt {
                 ExecutionAttempt::RuntimeError(error) => Ok((
-                    format_error_block_for_node(&pn.node, ctx.lang, &error.to_string()),
+                    format_error_block_for_node(&pn.kind, ctx.lang, &error.to_string()),
                     true,
                 )),
                 ExecutionAttempt::Success(output) => {
-                    let chunk = match &pn.node {
-                        ExecutableNode::Chunk(c) => c,
-                        _ => unreachable!(),
-                    };
                     let content = format_output(
                         ctx.backend,
                         chunk,
@@ -218,7 +217,7 @@ fn handle_must_execute(
     let attempt = match execute_for_node(pn, sm.executor_mut(), ctx.cache) {
         Err(e) => {
             return Ok((
-                format_error_block_for_node(&pn.node, ctx.lang, &e.to_string()),
+                format_error_block_for_node(&pn.kind, ctx.lang, &e.to_string()),
                 true,
             ));
         }
@@ -230,7 +229,7 @@ fn handle_must_execute(
         ExecutionAttempt::RuntimeError(error) => {
             cache_chunk_error(pn, &error, ctx.cache)?;
             return Ok((
-                format_error_block_for_node(&pn.node, ctx.lang, &error.to_string()),
+                format_error_block_for_node(&pn.kind, ctx.lang, &error.to_string()),
                 true,
             ));
         }
@@ -238,7 +237,7 @@ fn handle_must_execute(
     };
 
     // Successful execution: register freeze objects if declared.
-    if let ExecutableNode::Chunk(chunk) = &pn.node
+    if let PlannedNodeKind::Chunk { node: chunk, .. } = &pn.kind
         && !chunk.options.freeze.is_empty()
     {
         register_freeze_objects(chunk, sm.executor_mut(), ctx.cache, ctx.project_root)?;
@@ -252,7 +251,7 @@ fn handle_must_execute(
         // Contract violated: cache as error so LSP shows full details, then cascade.
         cache_chunk_error(pn, &violation, ctx.cache)?;
         return Ok((
-            format_error_block_for_node(&pn.node, ctx.lang, &violation.to_string()),
+            format_error_block_for_node(&pn.kind, ctx.lang, &violation.to_string()),
             true,
         ));
     }
@@ -281,18 +280,17 @@ fn cache_chunk_error(
     error: &crate::executors::RuntimeError,
     cache: &Arc<Mutex<Cache>>,
 ) -> Result<()> {
-    if let ExecutableNode::Chunk(chunk) = &pn.node {
-        let data = pn.chunk_data.as_ref().unwrap();
-        if data.resolved_options.cache {
-            cache.lock().unwrap().save_error(
-                chunk.index,
-                chunk.name.clone(),
-                chunk.language.clone(),
-                pn.hash.clone(),
-                error.clone(),
-                data.chunk_options.depends.clone(),
-            )?;
-        }
+    if let PlannedNodeKind::Chunk { node: chunk, data } = &pn.kind
+        && data.resolved_options.cache
+    {
+        cache.lock().unwrap().save_error(
+            chunk.index,
+            chunk.name.clone(),
+            chunk.language.clone(),
+            pn.hash.clone(),
+            error.clone(),
+            data.chunk_options.depends.clone(),
+        )?;
     }
     Ok(())
 }
@@ -303,18 +301,17 @@ fn cache_chunk_result(
     output: &ExecutionOutput,
     cache: &Arc<Mutex<Cache>>,
 ) -> Result<()> {
-    if let ExecutableNode::Chunk(chunk) = &pn.node {
-        let data = pn.chunk_data.as_ref().unwrap();
-        if data.resolved_options.cache {
-            cache.lock().unwrap().save_result(
-                chunk.index,
-                chunk.name.clone(),
-                chunk.language.clone(),
-                pn.hash.clone(),
-                output,
-                data.chunk_options.depends.clone(),
-            )?;
-        }
+    if let PlannedNodeKind::Chunk { node: chunk, data } = &pn.kind
+        && data.resolved_options.cache
+    {
+        cache.lock().unwrap().save_result(
+            chunk.index,
+            chunk.name.clone(),
+            chunk.language.clone(),
+            pn.hash.clone(),
+            output,
+            data.chunk_options.depends.clone(),
+        )?;
     }
     Ok(())
 }
@@ -333,9 +330,8 @@ fn execute_for_node(
     exec: &mut Option<Box<dyn KnotExecutor>>,
     cache: &Arc<Mutex<Cache>>,
 ) -> Result<ExecutionAttempt> {
-    match &pn.node {
-        ExecutableNode::Chunk(chunk) => {
-            let data = pn.chunk_data.as_ref().unwrap();
+    match &pn.kind {
+        PlannedNodeKind::Chunk { node: chunk, data } => {
             info!("  ⚙️ {} [executing]", data.name);
 
             let graphics_opts = GraphicsOptions {
@@ -350,7 +346,7 @@ fn execute_for_node(
                 .execute(&chunk.code, &graphics_opts)
         }
 
-        ExecutableNode::InlineExpr(inline) => {
+        PlannedNodeKind::Inline { node: inline } => {
             info!("  ⚙️ `{{{}}} {}` [executing]", inline.language, inline.code);
 
             let e = exec
