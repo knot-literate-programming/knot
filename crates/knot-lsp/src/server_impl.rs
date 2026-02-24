@@ -20,7 +20,7 @@ use crate::lsp_methods::{text_document as lsp, window as win};
 use crate::position_mapper::PositionMapper;
 use crate::transform;
 use crate::transform::transform_to_typst;
-use crate::{FormatChunkParams, KnotLanguageServer};
+use crate::{FormatChunkParams, KnotLanguageServer, SyncForwardParams};
 
 // ---------------------------------------------------------------------------
 // Custom request handling
@@ -54,6 +54,93 @@ impl KnotLanguageServer {
             Ok(None) => Ok(serde_json::json!({"status": "no_changes"})),
             Err(_) => Err(tower_lsp::jsonrpc::Error::internal_error()),
         }
+    }
+
+    /// Forward sync: map a `.knot` cursor position to the corresponding `.typ` line,
+    /// then instruct Tinymist to scroll its preview to that line.
+    ///
+    /// Failures are logged as warnings and converted to a JSON error response so
+    /// that the VS Code extension never sees a hard LSP error (e.g. when Tinymist
+    /// has not started yet or the compiled `.typ` file does not exist).
+    pub(crate) async fn handle_sync_forward(
+        &self,
+        params: SyncForwardParams,
+    ) -> tower_lsp::jsonrpc::Result<serde_json::Value> {
+        match self.do_sync_forward(&params).await {
+            Ok(()) => Ok(serde_json::json!({"status": "ok"})),
+            Err(e) => {
+                self.client
+                    .log_message(MessageType::WARNING, format!("[syncForward] {e}"))
+                    .await;
+                Ok(serde_json::json!({"status": "error", "message": e.to_string()}))
+            }
+        }
+    }
+
+    async fn do_sync_forward(&self, params: &SyncForwardParams) -> anyhow::Result<()> {
+        use anyhow::Context as _;
+
+        let knot_path = params
+            .uri
+            .to_file_path()
+            .map_err(|_| anyhow::anyhow!("Invalid URI: {}", params.uri))?;
+
+        let (config, project_root) = knot_core::config::Config::find_and_load(&knot_path)
+            .context("Could not find knot.toml")?;
+
+        let main_file = config.document.main.as_deref().unwrap_or("main.knot");
+        let main_stem = std::path::Path::new(main_file)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("main");
+        let main_typ_path = project_root.join(format!("{main_stem}.typ"));
+
+        let typ_content = std::fs::read_to_string(&main_typ_path)
+            .with_context(|| format!("Could not read {}", main_typ_path.display()))?;
+
+        let blocks = knot_core::sync::parse_knot_markers(&typ_content);
+
+        let knot_rel = knot_path
+            .strip_prefix(&project_root)
+            .unwrap_or(&knot_path)
+            .to_string_lossy()
+            .to_string();
+
+        // params.line is 0-based (VSCode); map_knot_line_to_typ expects 1-based.
+        let knot_line_1based = params.line as usize + 1;
+        let Some(typ_line) =
+            knot_core::sync::map_knot_line_to_typ(&knot_rel, knot_line_1based, &blocks, &knot_path)
+        else {
+            return Ok(()); // Line not mappable — silently skip.
+        };
+
+        // map_knot_line_to_typ returns a 1-based line; Tinymist expects 0-based.
+        let typ_line_0based = typ_line.saturating_sub(1);
+        let filepath = main_typ_path.to_string_lossy().to_string();
+
+        let mut tinymist_guard = self.state.tinymist.write().await;
+        if let Some(proxy) = tinymist_guard.as_mut() {
+            // `null` as taskId targets all active preview tasks.
+            let _ = proxy
+                .send_request(
+                    "workspace/executeCommand",
+                    serde_json::json!({
+                        "command": "tinymist.scrollPreview",
+                        "arguments": [
+                            null,
+                            {
+                                "event": "panelScrollTo",
+                                "filepath": filepath,
+                                "line": typ_line_0based,
+                                "character": 0
+                            }
+                        ]
+                    }),
+                )
+                .await;
+        }
+
+        Ok(())
     }
 
     /// Create a clonable `Arc` handle to `self` for use in `tokio::spawn` tasks.

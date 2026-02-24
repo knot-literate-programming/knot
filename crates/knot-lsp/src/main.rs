@@ -31,6 +31,12 @@ struct FormatChunkParams {
     position: Position,
 }
 
+#[derive(Debug, Deserialize)]
+struct SyncForwardParams {
+    uri: Url,
+    line: u32,
+}
+
 struct KnotLanguageServer {
     client: Client,
     state: ServerState,
@@ -242,6 +248,7 @@ async fn main() {
         "knot/formatChunk",
         KnotLanguageServer::handle_custom_format_chunk,
     )
+    .custom_method("knot/syncForward", KnotLanguageServer::handle_sync_forward)
     .finish();
     Server::new(stdin, stdout, socket).serve(service).await;
 }

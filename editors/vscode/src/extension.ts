@@ -34,6 +34,7 @@ let watchProcesses: Map<string, ChildProcess> = new Map();
 let compilationStatusBar: StatusBarItem;
 let suppressAutoSync = false;
 let syncDebounceTimer: ReturnType<typeof setTimeout> | undefined;
+let forwardSyncTimer: ReturnType<typeof setTimeout> | undefined;
 
 /**
  * Handles URIs in the form of vscode://knot-dev.knot/jump?file=...&line=...
@@ -127,6 +128,33 @@ export async function activate(context: ExtensionContext) {
                     outputChannel.appendLine(`[auto-sync] Error: ${e}`);
                 }
             }, 50);
+        })
+    );
+
+    // Auto forward sync: when cursor moves in a .knot file, scroll Tinymist preview.
+    context.subscriptions.push(
+        window.onDidChangeTextEditorSelection((event) => {
+            const doc = event.textEditor.document;
+            if (doc.languageId !== 'knot') return;
+            if (!client) return;
+            if (event.selections.length !== 1 || !event.selections[0].isEmpty) return;
+
+            const pos = event.selections[0].active;
+            const uri = doc.uri.toString();
+
+            if (forwardSyncTimer) clearTimeout(forwardSyncTimer);
+            forwardSyncTimer = setTimeout(async () => {
+                forwardSyncTimer = undefined;
+                try {
+                    await client!.sendRequest('knot/syncForward', {
+                        uri,
+                        line: pos.line,
+                        character: pos.character,
+                    });
+                } catch (_) {
+                    // Silently ignore — Tinymist may not be ready yet.
+                }
+            }, 150);
         })
     );
 
