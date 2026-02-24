@@ -43,11 +43,12 @@ impl SnapshotManager {
         self.exec
     }
 
-    /// Mutable reference to the executor slot, for callers that need to pass
-    /// it to functions expecting `&mut Option<Box<dyn KnotExecutor>>` (e.g.
-    /// freeze helpers).
-    pub fn executor_mut(&mut self) -> &mut Option<Box<dyn KnotExecutor>> {
-        &mut self.exec
+    /// Returns a mutable reference to the executor box, or `None` if the
+    /// language is not supported.  Callers that require an executor handle the
+    /// `None` case once; method calls on the box are auto-dereffed through
+    /// `Box<dyn KnotExecutor>` transparently.
+    pub fn executor_mut(&mut self) -> Option<&mut Box<dyn KnotExecutor>> {
+        self.exec.as_mut()
     }
 
     /// Ensure the executor is in the state corresponding to `previous_hash`.

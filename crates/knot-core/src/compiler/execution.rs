@@ -212,49 +212,71 @@ fn handle_must_execute(
         sm.restore_if_needed(ctx.lang, &pn.previous_hash, &cache_guard, ctx.project_root)?;
     }
 
-    // Infrastructure failure (process crash, unsupported language, timeout…):
-    // display an error block and cascade Inert — but do NOT cache (not deterministic).
-    let attempt = match execute_for_node(pn, sm.executor_mut(), ctx.cache) {
-        Err(e) => {
+    // All executor interactions are confined to this block so that the borrow
+    // of sm.exec ends before sm.update_after_node is called below.
+    let output = {
+        // Language not supported: show an error block and cascade Inert.
+        // Not cached — an unsupported language is not a deterministic runtime state.
+        let exec = match sm.executor_mut() {
+            None => {
+                return Ok((
+                    format_error_block_for_node(
+                        &pn.kind,
+                        ctx.lang,
+                        &format!("Unsupported language: '{}'", ctx.lang),
+                    ),
+                    true,
+                ));
+            }
+            Some(e) => e,
+        };
+
+        // Infrastructure failure (process crash, timeout…): error block, cascade Inert.
+        // Not cached — not a deterministic runtime state.
+        let attempt = match execute_for_node(pn, exec, ctx.cache) {
+            Err(e) => {
+                return Ok((
+                    format_error_block_for_node(&pn.kind, ctx.lang, &e.to_string()),
+                    true,
+                ));
+            }
+            Ok(a) => a,
+        };
+
+        // Runtime error → cache it, then cascade Inert.
+        let output = match attempt {
+            ExecutionAttempt::RuntimeError(error) => {
+                cache_chunk_error(pn, &error, ctx.cache)?;
+                return Ok((
+                    format_error_block_for_node(&pn.kind, ctx.lang, &error.to_string()),
+                    true,
+                ));
+            }
+            ExecutionAttempt::Success(output) => output,
+        };
+
+        // Successful execution: register freeze objects if declared.
+        if let PlannedNodeKind::Chunk { node: chunk, .. } = &pn.kind
+            && !chunk.options.freeze.is_empty()
+        {
+            register_freeze_objects(chunk, exec, ctx.cache, ctx.project_root)?;
+        }
+
+        // Check freeze contract.
+        // IMPORTANT: save_result is only called when the contract passes.
+        // A violating chunk must NOT be cached as success — if it were,
+        // the check would be bypassed (CacheHit path) on every subsequent run.
+        if let Some(violation) = check_freeze_contract(pn, exec, ctx.cache)? {
+            // Contract violated: cache as error so LSP shows full details, then cascade.
+            cache_chunk_error(pn, &violation, ctx.cache)?;
             return Ok((
-                format_error_block_for_node(&pn.kind, ctx.lang, &e.to_string()),
+                format_error_block_for_node(&pn.kind, ctx.lang, &violation.to_string()),
                 true,
             ));
         }
-        Ok(a) => a,
-    };
 
-    // Runtime error → cache it, then cascade Inert.
-    let output = match attempt {
-        ExecutionAttempt::RuntimeError(error) => {
-            cache_chunk_error(pn, &error, ctx.cache)?;
-            return Ok((
-                format_error_block_for_node(&pn.kind, ctx.lang, &error.to_string()),
-                true,
-            ));
-        }
-        ExecutionAttempt::Success(output) => output,
-    };
-
-    // Successful execution: register freeze objects if declared.
-    if let PlannedNodeKind::Chunk { node: chunk, .. } = &pn.kind
-        && !chunk.options.freeze.is_empty()
-    {
-        register_freeze_objects(chunk, sm.executor_mut(), ctx.cache, ctx.project_root)?;
-    }
-
-    // Check freeze contract.
-    // IMPORTANT: save_result is only called when the contract passes.
-    // A violating chunk must NOT be cached as success — if it were,
-    // the check would be bypassed (CacheHit path) on every subsequent run.
-    if let Some(violation) = check_freeze_contract(pn, sm.executor_mut(), ctx.cache)? {
-        // Contract violated: cache as error so LSP shows full details, then cascade.
-        cache_chunk_error(pn, &violation, ctx.cache)?;
-        return Ok((
-            format_error_block_for_node(&pn.kind, ctx.lang, &violation.to_string()),
-            true,
-        ));
-    }
+        output
+    }; // exec (and its borrow of sm.exec) is released here.
 
     // Contract OK: persist result to cache, advance snapshot pointer.
     cache_chunk_result(pn, &output, ctx.cache)?;
@@ -327,7 +349,7 @@ fn cache_chunk_result(
 /// cache hit, silently bypassing the check on every subsequent run.
 fn execute_for_node(
     pn: &PlannedNode,
-    exec: &mut Option<Box<dyn KnotExecutor>>,
+    exec: &mut Box<dyn KnotExecutor>,
     cache: &Arc<Mutex<Cache>>,
 ) -> Result<ExecutionAttempt> {
     match &pn.kind {
@@ -341,19 +363,13 @@ fn execute_for_node(
                 format: data.resolved_options.fig_format.as_str().to_string(),
             };
 
-            exec.as_deref_mut()
-                .ok_or_else(|| anyhow::anyhow!("Unsupported language: '{}'", pn.lang))?
-                .execute(&chunk.code, &graphics_opts)
+            exec.execute(&chunk.code, &graphics_opts)
         }
 
         PlannedNodeKind::Inline { node: inline } => {
             info!("  ⚙️ `{{{}}} {}` [executing]", inline.language, inline.code);
 
-            let e = exec
-                .as_deref_mut()
-                .ok_or_else(|| anyhow::anyhow!("Unsupported language: '{}'", pn.lang))?;
-
-            let result = e.execute_inline(&inline.code).context(format!(
+            let result = exec.execute_inline(&inline.code).context(format!(
                 "Failed to execute inline expression: `{{{}}} {}`",
                 inline.language, inline.code
             ))?;

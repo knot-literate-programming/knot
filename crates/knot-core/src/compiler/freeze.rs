@@ -26,13 +26,10 @@ fn freeze_key(lang: &str, name: &str) -> String {
 /// successfully executed chunks, so an executor is always present).
 pub(super) fn register_freeze_objects(
     chunk: &Chunk,
-    exec: &mut Option<Box<dyn KnotExecutor>>,
+    exec: &mut Box<dyn KnotExecutor>,
     cache: &Arc<Mutex<Cache>>,
     project_root: &Path,
 ) -> Result<()> {
-    let exec = exec
-        .as_deref_mut()
-        .expect("executor must be present when registering freeze objects");
     let chunk_name = chunk.name.as_deref().unwrap_or("unnamed").to_string();
     let cache_dir = project_root.join(Defaults::CACHE_DIR_NAME);
 
@@ -85,7 +82,7 @@ pub(super) fn register_freeze_objects(
 /// - `Err(e)` — the hash computation itself failed (propagated to the caller)
 pub(super) fn check_freeze_contract(
     pn: &PlannedNode,
-    exec: &mut Option<Box<dyn KnotExecutor>>,
+    exec: &mut Box<dyn KnotExecutor>,
     cache: &Arc<Mutex<Cache>>,
 ) -> Result<Option<RuntimeError>> {
     // Collect needed data while holding the lock briefly, then release before calling executor.
@@ -103,11 +100,6 @@ pub(super) fn check_freeze_contract(
     if freeze_entries.is_empty() {
         return Ok(None);
     }
-
-    let exec = match exec.as_deref_mut() {
-        Some(e) => e,
-        None => return Ok(None),
-    };
 
     let chunk_name = match &pn.kind {
         PlannedNodeKind::Chunk { node, .. } => node.name.as_deref().unwrap_or("unnamed"),
