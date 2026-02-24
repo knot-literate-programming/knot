@@ -146,11 +146,39 @@ export async function activate(context: ExtensionContext) {
             forwardSyncTimer = setTimeout(async () => {
                 forwardSyncTimer = undefined;
                 try {
-                    await client!.sendRequest('knot/syncForward', {
-                        uri,
-                        line: pos.line,
-                        character: pos.character,
-                    });
+                    const resp = await client!.sendRequest<{
+                        status: string;
+                        filepath?: string;
+                        typ_line?: number;
+                    }>('knot/syncForward', { uri, line: pos.line, character: pos.character });
+
+                    if (resp.status !== 'ok' || resp.filepath === undefined || resp.typ_line === undefined) {
+                        return;
+                    }
+
+                    // Position the cursor in main.typ then ask tinymist to sync.
+                    const typUri = Uri.file(resp.filepath);
+                    const typLine = resp.typ_line;
+                    const typDoc = await workspace.openTextDocument(typUri);
+
+                    suppressAutoSync = true;
+                    try {
+                        await window.showTextDocument(typDoc, {
+                            selection: new Range(new Position(typLine, 0), new Position(typLine, 0)),
+                            preserveFocus: false,
+                            viewColumn: ViewColumn.Active,
+                        });
+                        await commands.executeCommand('typst-preview.sync');
+                    } finally {
+                        // Switch back to the .knot file immediately.
+                        const knotDoc = await workspace.openTextDocument(doc.uri);
+                        await window.showTextDocument(knotDoc, {
+                            selection: new Range(pos, pos),
+                            preserveFocus: false,
+                            viewColumn: ViewColumn.Active,
+                        });
+                        setTimeout(() => { suppressAutoSync = false; }, 300);
+                    }
                 } catch (_) {
                     // Silently ignore — Tinymist may not be ready yet.
                 }

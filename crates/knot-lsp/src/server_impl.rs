@@ -56,28 +56,31 @@ impl KnotLanguageServer {
         }
     }
 
-    /// Forward sync: map a `.knot` cursor position to the corresponding `.typ` line,
-    /// then instruct Tinymist to scroll its preview to that line.
+    /// Forward sync: map a `.knot` cursor position to the corresponding `.typ` line.
     ///
-    /// Failures are logged as warnings and converted to a JSON error response so
-    /// that the VS Code extension never sees a hard LSP error (e.g. when Tinymist
-    /// has not started yet or the compiled `.typ` file does not exist).
+    /// Returns `{ status, filepath, typ_line }` so the VS Code extension can
+    /// trigger `typst-preview.sync` itself at the right position.
+    ///
+    /// This keeps the scroll logic in the extension, which has direct access to the
+    /// tinymist VS Code API (including preview task IDs managed by the tinymist
+    /// extension's own subprocess, separate from ours).
     pub(crate) async fn handle_sync_forward(
         &self,
         params: SyncForwardParams,
     ) -> tower_lsp::jsonrpc::Result<serde_json::Value> {
         match self.do_sync_forward(&params).await {
-            Ok(()) => Ok(serde_json::json!({"status": "ok"})),
+            Ok(result) => Ok(result),
             Err(e) => {
-                self.client
-                    .log_message(MessageType::WARNING, format!("[syncForward] {e}"))
-                    .await;
+                log::warn!("[syncForward] {e}");
                 Ok(serde_json::json!({"status": "error", "message": e.to_string()}))
             }
         }
     }
 
-    async fn do_sync_forward(&self, params: &SyncForwardParams) -> anyhow::Result<()> {
+    async fn do_sync_forward(
+        &self,
+        params: &SyncForwardParams,
+    ) -> anyhow::Result<serde_json::Value> {
         use anyhow::Context as _;
 
         let knot_path = params
@@ -111,36 +114,27 @@ impl KnotLanguageServer {
         let Some(typ_line) =
             knot_core::sync::map_knot_line_to_typ(&knot_rel, knot_line_1based, &blocks, &knot_path)
         else {
-            return Ok(()); // Line not mappable — silently skip.
+            // Cursor is in a Typst-only region — no mapping available.
+            return Ok(serde_json::json!({"status": "unmapped"}));
         };
 
-        // map_knot_line_to_typ returns a 1-based line; Tinymist expects 0-based.
+        // map_knot_line_to_typ returns a 1-based line; VSCode/Tinymist expect 0-based.
         let typ_line_0based = typ_line.saturating_sub(1);
         let filepath = main_typ_path.to_string_lossy().to_string();
 
-        let mut tinymist_guard = self.state.tinymist.write().await;
-        if let Some(proxy) = tinymist_guard.as_mut() {
-            // `null` as taskId targets all active preview tasks.
-            let _ = proxy
-                .send_request(
-                    "workspace/executeCommand",
-                    serde_json::json!({
-                        "command": "tinymist.scrollPreview",
-                        "arguments": [
-                            null,
-                            {
-                                "event": "panelScrollTo",
-                                "filepath": filepath,
-                                "line": typ_line_0based,
-                                "character": 0
-                            }
-                        ]
-                    }),
-                )
-                .await;
-        }
+        log::info!(
+            "[syncForward] {}:{} → {}:{}",
+            knot_rel,
+            knot_line_1based,
+            filepath,
+            typ_line_0based
+        );
 
-        Ok(())
+        Ok(serde_json::json!({
+            "status": "ok",
+            "filepath": filepath,
+            "typ_line": typ_line_0based,
+        }))
     }
 
     /// Create a clonable `Arc` handle to `self` for use in `tokio::spawn` tasks.
