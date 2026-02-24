@@ -37,6 +37,11 @@ struct SyncForwardParams {
     line: u32,
 }
 
+#[derive(Debug, Deserialize)]
+struct StartPreviewParams {
+    uri: Url,
+}
+
 struct KnotLanguageServer {
     client: Client,
     state: ServerState,
@@ -249,6 +254,10 @@ async fn main() {
         KnotLanguageServer::handle_custom_format_chunk,
     )
     .custom_method("knot/syncForward", KnotLanguageServer::handle_sync_forward)
+    .custom_method(
+        "knot/startPreview",
+        KnotLanguageServer::handle_start_preview,
+    )
     .finish();
     Server::new(stdin, stdout, socket).serve(service).await;
 }

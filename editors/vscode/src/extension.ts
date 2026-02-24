@@ -7,6 +7,7 @@ import {
     ExtensionContext,
     window,
     commands,
+    env,
     Uri,
     ProgressLocation,
     StatusBarAlignment,
@@ -146,9 +147,9 @@ export async function activate(context: ExtensionContext) {
             forwardSyncTimer = setTimeout(async () => {
                 forwardSyncTimer = undefined;
                 try {
-                    // knot/syncForward maps the knot line to the corresponding typ line.
-                    // The result is stored for future use once a reliable scroll mechanism
-                    // is available (direct WebSocket to the tinymist preview server).
+                    // knot/syncForward maps the knot line to the corresponding typ line
+                    // and scrolls the preview by calling tinymist.scrollPreview on our
+                    // tinymist subprocess. Fire-and-forget — result is not used here.
                     await client!.sendRequest('knot/syncForward', {
                         uri,
                         line: pos.line,
@@ -294,6 +295,7 @@ async function openPreview(outputChannel: any): Promise<void> {
     if (!editor || editor.document.languageId !== 'knot') return;
 
     const knotPath = editor.document.uri.fsPath;
+    const knotUri = Uri.file(knotPath);
     const projectRoot = findProjectRoot(path.dirname(knotPath));
     if (!projectRoot) {
         window.showErrorMessage('Could not find knot.toml');
@@ -315,7 +317,7 @@ async function openPreview(outputChannel: any): Promise<void> {
                 const watchProcess = spawn(knotBinary, ['watch'], { cwd: projectRoot, stdio: ['ignore', 'pipe', 'pipe'] });
                 watchProcess.on('exit', () => watchProcesses.delete(projectRoot));
                 watchProcesses.set(projectRoot, watchProcess);
-                
+
                 progress.report({ message: 'Waiting for Typst output...' });
                 let attempts = 0;
                 while (!fs.existsSync(mainTypPath) && attempts < 20) {
@@ -324,23 +326,38 @@ async function openPreview(outputChannel: any): Promise<void> {
                 }
             }
 
-            progress.report({ message: 'Opening Tinymist Preview...' });
-            
-            const mainTypUri = Uri.file(mainTypPath);
-            const knotUri = Uri.file(knotPath);
-
-            suppressAutoSync = true;
-            try {
-                const mainTypDoc = await workspace.openTextDocument(mainTypUri);
-                await window.showTextDocument(mainTypDoc, { viewColumn: ViewColumn.One, preserveFocus: false });
-                await commands.executeCommand('typst-preview.preview');
-                const knotDoc = await workspace.openTextDocument(knotUri);
-                await window.showTextDocument(knotDoc, { viewColumn: ViewColumn.One, preserveFocus: false });
-            } catch (e) {
-                outputChannel.appendLine(`[preview] Failed: ${e}`);
-            } finally {
-                setTimeout(() => { suppressAutoSync = false; }, 1000);
+            if (!fs.existsSync(mainTypPath)) {
+                window.showErrorMessage(`Compiled file not found: ${mainTypPath}`);
+                return;
             }
+
+            progress.report({ message: 'Starting preview...' });
+
+            if (!client) {
+                window.showErrorMessage('LSP not connected — cannot start preview');
+                return;
+            }
+
+            try {
+                const result: any = await client.sendRequest('knot/startPreview', {
+                    uri: knotUri.toString(),
+                });
+                if (result?.status === 'ok' && result?.staticServerPort) {
+                    await env.openExternal(Uri.parse(`http://127.0.0.1:${result.staticServerPort}`));
+                } else {
+                    outputChannel.appendLine(`[preview] startPreview returned: ${JSON.stringify(result)}`);
+                    window.showErrorMessage(`Failed to start preview: ${result?.message ?? 'unknown error'}`);
+                    return;
+                }
+            } catch (e) {
+                outputChannel.appendLine(`[preview] startPreview failed: ${e}`);
+                window.showErrorMessage(`Failed to start preview: ${e}`);
+                return;
+            }
+
+            // Keep focus on the .knot editor
+            const knotDoc = await workspace.openTextDocument(knotUri);
+            await window.showTextDocument(knotDoc, { viewColumn: ViewColumn.One, preserveFocus: false });
 
             compilationStatusBar.text = '$(check) Preview ready!';
             setTimeout(() => compilationStatusBar.hide(), 2000);

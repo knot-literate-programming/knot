@@ -59,6 +59,10 @@ pub struct ServerState {
     pub executors: Arc<RwLock<HashMap<Url, ExecutorManager>>>,
     pub formatter: Arc<RwLock<Option<CodeFormatter>>>,
 
+    /// Active preview task managed by our tinymist subprocess.
+    /// Stores `(task_id, static_server_port)` once `knot/startPreview` succeeds.
+    pub preview_info: Arc<RwLock<Option<(String, u16)>>>,
+
     /// Global configuration and caches
     pub air_path_override: Arc<RwLock<Option<PathBuf>>>,
     pub ruff_path_override: Arc<RwLock<Option<PathBuf>>>,
@@ -73,6 +77,7 @@ impl ServerState {
             tinymist: Arc::new(RwLock::new(None)),
             executors: Arc::new(RwLock::new(HashMap::new())),
             formatter: Arc::new(RwLock::new(None)),
+            preview_info: Arc::new(RwLock::new(None)),
             air_path_override: Arc::new(RwLock::new(None)),
             ruff_path_override: Arc::new(RwLock::new(None)),
             tinymist_path_override: Arc::new(RwLock::new(None)),

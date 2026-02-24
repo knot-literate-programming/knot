@@ -20,7 +20,7 @@ use crate::lsp_methods::{text_document as lsp, window as win};
 use crate::position_mapper::PositionMapper;
 use crate::transform;
 use crate::transform::transform_to_typst;
-use crate::{FormatChunkParams, KnotLanguageServer, SyncForwardParams};
+use crate::{FormatChunkParams, KnotLanguageServer, StartPreviewParams, SyncForwardParams};
 
 // ---------------------------------------------------------------------------
 // Custom request handling
@@ -56,14 +56,92 @@ impl KnotLanguageServer {
         }
     }
 
-    /// Forward sync: map a `.knot` cursor position to the corresponding `.typ` line.
+    /// Start a preview task in our tinymist subprocess and return the static server port.
     ///
-    /// Returns `{ status, filepath, typ_line }` so the VS Code extension can
-    /// trigger `typst-preview.sync` itself at the right position.
-    ///
-    /// This keeps the scroll logic in the extension, which has direct access to the
-    /// tinymist VS Code API (including preview task IDs managed by the tinymist
-    /// extension's own subprocess, separate from ours).
+    /// On the first call, sends `tinymist.doStartPreview` to our subprocess with a
+    /// fixed task ID ("knot-preview") and stores `(task_id, port)` for reuse by
+    /// `do_sync_forward`. On subsequent calls the cached port is returned immediately.
+    pub(crate) async fn handle_start_preview(
+        &self,
+        params: StartPreviewParams,
+    ) -> tower_lsp::jsonrpc::Result<serde_json::Value> {
+        match self.do_start_preview(&params).await {
+            Ok(result) => Ok(result),
+            Err(e) => {
+                log::warn!("[startPreview] {e}");
+                Ok(serde_json::json!({"status": "error", "message": e.to_string()}))
+            }
+        }
+    }
+
+    async fn do_start_preview(
+        &self,
+        params: &StartPreviewParams,
+    ) -> anyhow::Result<serde_json::Value> {
+        use anyhow::Context as _;
+
+        // Return cached info if the preview is already running.
+        if let Some(port) = self.state.preview_info.read().await.as_ref().map(|(_, p)| *p) {
+            return Ok(serde_json::json!({"status": "ok", "staticServerPort": port}));
+        }
+
+        let knot_path = params
+            .uri
+            .to_file_path()
+            .map_err(|_| anyhow::anyhow!("Invalid URI: {}", params.uri))?;
+
+        let (config, project_root) = knot_core::config::Config::find_and_load(&knot_path)
+            .context("Could not find knot.toml")?;
+
+        let main_file = config.document.main.as_deref().unwrap_or("main.knot");
+        let main_stem = std::path::Path::new(main_file)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("main");
+        let main_typ_path = project_root.join(format!("{main_stem}.typ"));
+        let main_typ_str = main_typ_path.to_string_lossy().to_string();
+
+        const TASK_ID: &str = "knot-preview";
+
+        let response = {
+            let mut tinymist_guard = self.state.tinymist.write().await;
+            let proxy = tinymist_guard
+                .as_mut()
+                .ok_or_else(|| anyhow::anyhow!("Tinymist not ready"))?;
+            proxy
+                .send_request(
+                    "workspace/executeCommand",
+                    serde_json::json!({
+                        "command": "tinymist.doStartPreview",
+                        "arguments": [[
+                            "--task-id", TASK_ID,
+                            "--data-plane-host", "127.0.0.1:0",
+                            &main_typ_str,
+                        ]]
+                    }),
+                )
+                .await?
+        };
+
+        let result = response
+            .get("result")
+            .ok_or_else(|| anyhow::anyhow!("No result from tinymist.doStartPreview: {response:?}"))?;
+
+        let static_server_port = result
+            .get("staticServerPort")
+            .and_then(|v| v.as_u64())
+            .ok_or_else(|| anyhow::anyhow!("Missing staticServerPort in: {result:?}"))?
+            as u16;
+
+        *self.state.preview_info.write().await = Some((TASK_ID.to_string(), static_server_port));
+
+        log::info!("[startPreview] Preview started on port {static_server_port} (task={TASK_ID})");
+
+        Ok(serde_json::json!({"status": "ok", "staticServerPort": static_server_port}))
+    }
+
+    /// Forward sync: map a `.knot` cursor position to the corresponding `.typ` line
+    /// and scroll the tinymist preview to that position.
     pub(crate) async fn handle_sync_forward(
         &self,
         params: SyncForwardParams,
@@ -129,6 +207,35 @@ impl KnotLanguageServer {
             filepath,
             typ_line_0based
         );
+
+        // Scroll the preview if one is running in our tinymist subprocess.
+        let preview_info = self.state.preview_info.read().await.clone();
+        if let Some((task_id, _)) = preview_info {
+            let scroll_result = {
+                let mut tinymist_guard = self.state.tinymist.write().await;
+                if let Some(proxy) = tinymist_guard.as_mut() {
+                    proxy
+                        .send_request(
+                            "workspace/executeCommand",
+                            serde_json::json!({
+                                "command": "tinymist.scrollPreview",
+                                "arguments": [task_id, {
+                                    "event": "panelScrollTo",
+                                    "filepath": filepath,
+                                    "line": typ_line_0based,
+                                    "character": 0,
+                                }]
+                            }),
+                        )
+                        .await
+                } else {
+                    Ok(serde_json::Value::Null)
+                }
+            };
+            if let Err(e) = scroll_result {
+                log::warn!("[syncForward] scroll failed: {e}");
+            }
+        }
 
         Ok(serde_json::json!({
             "status": "ok",
