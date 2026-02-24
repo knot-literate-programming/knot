@@ -122,7 +122,7 @@ impl KnotLanguageServer {
                             "--task-id", TASK_ID,
                             "--data-plane-host", "127.0.0.1:0",
                             "--static-file-host", "127.0.0.1:0",
-                            "--dont-open-in-browser",
+                            "--no-open",
                             &main_typ_str,
                         ]]
                     }),
