@@ -8,7 +8,9 @@ use crate::cache::Cache;
 use crate::compiler::pipeline::{ChunkExecutionState, ExecutedNode, ExecutionNeed, PlannedNode};
 use crate::compiler::snapshot_manager::SnapshotManager;
 use crate::config::Config;
-use crate::executors::{ExecutionOutput, ExecutionResult, GraphicsOptions, KnotExecutor};
+use crate::executors::{
+    ExecutionAttempt, ExecutionOutput, ExecutionResult, GraphicsOptions, KnotExecutor,
+};
 use crate::parser::Show;
 use anyhow::{Context, Result};
 use log::info;
@@ -124,38 +126,39 @@ fn process_node(
     }
 
     match &pn.need {
-        ExecutionNeed::CacheHit(output) => {
+        ExecutionNeed::CacheHit(attempt) => {
             let data = pn.chunk_data.as_ref().unwrap();
             info!("  ✓ {} [cached]", data.name);
-            if let Some(error) = &output.error {
-                Ok((
+            match attempt {
+                ExecutionAttempt::RuntimeError(error) => Ok((
                     format_error_block_for_node(&pn.node, ctx.lang, &error.to_string()),
                     true,
-                ))
-            } else {
-                let chunk = match &pn.node {
-                    ExecutableNode::Chunk(c) => c,
-                    _ => unreachable!(),
-                };
-                let content = format_output(
-                    ctx.backend,
-                    chunk,
-                    &data.merged_codly_options,
-                    &data.resolved_options,
-                    output,
-                    state,
-                );
-                {
-                    let cache_guard = ctx.cache.lock().unwrap();
-                    sm.update_after_node(
-                        ctx.lang,
-                        &pn.hash,
-                        &pn.previous_hash,
-                        &cache_guard,
-                        ctx.project_root,
-                    )?;
+                )),
+                ExecutionAttempt::Success(output) => {
+                    let chunk = match &pn.node {
+                        ExecutableNode::Chunk(c) => c,
+                        _ => unreachable!(),
+                    };
+                    let content = format_output(
+                        ctx.backend,
+                        chunk,
+                        &data.merged_codly_options,
+                        &data.resolved_options,
+                        output,
+                        state,
+                    );
+                    {
+                        let cache_guard = ctx.cache.lock().unwrap();
+                        sm.update_after_node(
+                            ctx.lang,
+                            &pn.hash,
+                            &pn.previous_hash,
+                            &cache_guard,
+                            ctx.project_root,
+                        )?;
+                    }
+                    Ok((content, false))
                 }
-                Ok((content, false))
             }
         }
 
@@ -210,106 +213,110 @@ fn handle_must_execute(
         sm.restore_if_needed(ctx.lang, &pn.previous_hash, &cache_guard, ctx.project_root)?;
     }
 
-    match execute_for_node(pn, sm.executor_mut(), ctx.cache) {
-        Err(e) => Ok((
-            format_error_block_for_node(&pn.node, ctx.lang, &e.to_string()),
+    // Infrastructure failure (process crash, unsupported language, timeout…):
+    // display an error block and cascade Inert — but do NOT cache (not deterministic).
+    let attempt = match execute_for_node(pn, sm.executor_mut(), ctx.cache) {
+        Err(e) => {
+            return Ok((
+                format_error_block_for_node(&pn.node, ctx.lang, &e.to_string()),
+                true,
+            ));
+        }
+        Ok(a) => a,
+    };
+
+    // Runtime error → cache it, then cascade Inert.
+    let output = match attempt {
+        ExecutionAttempt::RuntimeError(error) => {
+            cache_chunk_error(pn, &error, ctx.cache)?;
+            return Ok((
+                format_error_block_for_node(&pn.node, ctx.lang, &error.to_string()),
+                true,
+            ));
+        }
+        ExecutionAttempt::Success(output) => output,
+    };
+
+    // Successful execution: register freeze objects if declared.
+    if let ExecutableNode::Chunk(chunk) = &pn.node
+        && !chunk.options.freeze.is_empty()
+    {
+        register_freeze_objects(chunk, sm.executor_mut(), ctx.cache, ctx.project_root)?;
+    }
+
+    // Check freeze contract.
+    // IMPORTANT: save_result is only called when the contract passes.
+    // A violating chunk must NOT be cached as success — if it were,
+    // the check would be bypassed (CacheHit path) on every subsequent run.
+    if let Some(violation) = check_freeze_contract(pn, sm.executor_mut(), ctx.cache)? {
+        // Contract violated: cache as error so LSP shows full details, then cascade.
+        cache_chunk_error(pn, &violation, ctx.cache)?;
+        return Ok((
+            format_error_block_for_node(&pn.node, ctx.lang, &violation.to_string()),
             true,
-        )),
+        ));
+    }
 
-        Ok(output) => {
-            if let Some(error) = &output.error {
-                // Runtime error: persist to cache, then cascade.
-                if let ExecutableNode::Chunk(chunk) = &pn.node {
-                    let data = pn.chunk_data.as_ref().unwrap();
-                    if data.resolved_options.cache {
-                        ctx.cache.lock().unwrap().save_error(
-                            chunk.index,
-                            chunk.name.clone(),
-                            chunk.language.clone(),
-                            pn.hash.clone(),
-                            error.clone(),
-                            data.chunk_options.depends.clone(),
-                        )?;
-                    }
-                }
-                return Ok((
-                    format_error_block_for_node(&pn.node, ctx.lang, &error.to_string()),
-                    true,
-                ));
-            }
+    // Contract OK: persist result to cache, advance snapshot pointer.
+    cache_chunk_result(pn, &output, ctx.cache)?;
+    {
+        let cache_guard = ctx.cache.lock().unwrap();
+        sm.update_after_node(
+            ctx.lang,
+            &pn.hash,
+            &pn.previous_hash,
+            &cache_guard,
+            ctx.project_root,
+        )?;
+    }
+    Ok((
+        format_executed_node(pn, &output, ctx.backend, &ChunkExecutionState::Ready),
+        false,
+    ))
+}
 
-            // Successful execution: register freeze objects if declared.
-            if let ExecutableNode::Chunk(chunk) = &pn.node
-                && !chunk.options.freeze.is_empty()
-            {
-                register_freeze_objects(chunk, sm.executor_mut(), ctx.cache, ctx.project_root)?;
-            }
-
-            // Check freeze contract.
-            // IMPORTANT: save_result is only called when the contract passes.
-            // A violating chunk must NOT be cached as success — if it were,
-            // the check would be bypassed (CacheHit path) on every subsequent run.
-            match check_freeze_contract(pn, sm.executor_mut(), ctx.cache) {
-                Err(e) => Ok((
-                    format_error_block_for_node(&pn.node, ctx.lang, &e.to_string()),
-                    true,
-                )),
-
-                Ok(Some(violation)) => {
-                    // Contract violated: cache the error so LSP shows full
-                    // details (detailed_message), then cascade.
-                    if let ExecutableNode::Chunk(chunk) = &pn.node {
-                        let data = pn.chunk_data.as_ref().unwrap();
-                        if data.resolved_options.cache {
-                            ctx.cache.lock().unwrap().save_error(
-                                chunk.index,
-                                chunk.name.clone(),
-                                chunk.language.clone(),
-                                pn.hash.clone(),
-                                violation.clone(),
-                                data.chunk_options.depends.clone(),
-                            )?;
-                        }
-                    }
-                    Ok((
-                        format_error_block_for_node(&pn.node, ctx.lang, &violation.to_string()),
-                        true,
-                    ))
-                }
-
-                Ok(None) => {
-                    // Contract OK: persist result to cache.
-                    if let ExecutableNode::Chunk(chunk) = &pn.node {
-                        let data = pn.chunk_data.as_ref().unwrap();
-                        if data.resolved_options.cache {
-                            ctx.cache.lock().unwrap().save_result(
-                                chunk.index,
-                                chunk.name.clone(),
-                                chunk.language.clone(),
-                                pn.hash.clone(),
-                                &output,
-                                data.chunk_options.depends.clone(),
-                            )?;
-                        }
-                    }
-                    {
-                        let cache_guard = ctx.cache.lock().unwrap();
-                        sm.update_after_node(
-                            ctx.lang,
-                            &pn.hash,
-                            &pn.previous_hash,
-                            &cache_guard,
-                            ctx.project_root,
-                        )?;
-                    }
-                    Ok((
-                        format_executed_node(pn, &output, ctx.backend, &ChunkExecutionState::Ready),
-                        false,
-                    ))
-                }
-            }
+/// Persist a runtime error to the cache (if caching is enabled for this node).
+fn cache_chunk_error(
+    pn: &PlannedNode,
+    error: &crate::executors::RuntimeError,
+    cache: &Arc<Mutex<Cache>>,
+) -> Result<()> {
+    if let ExecutableNode::Chunk(chunk) = &pn.node {
+        let data = pn.chunk_data.as_ref().unwrap();
+        if data.resolved_options.cache {
+            cache.lock().unwrap().save_error(
+                chunk.index,
+                chunk.name.clone(),
+                chunk.language.clone(),
+                pn.hash.clone(),
+                error.clone(),
+                data.chunk_options.depends.clone(),
+            )?;
         }
     }
+    Ok(())
+}
+
+/// Persist a successful execution result to the cache (if caching is enabled).
+fn cache_chunk_result(
+    pn: &PlannedNode,
+    output: &ExecutionOutput,
+    cache: &Arc<Mutex<Cache>>,
+) -> Result<()> {
+    if let ExecutableNode::Chunk(chunk) = &pn.node {
+        let data = pn.chunk_data.as_ref().unwrap();
+        if data.resolved_options.cache {
+            cache.lock().unwrap().save_result(
+                chunk.index,
+                chunk.name.clone(),
+                chunk.language.clone(),
+                pn.hash.clone(),
+                output,
+                data.chunk_options.depends.clone(),
+            )?;
+        }
+    }
+    Ok(())
 }
 
 /// Execute the node's code and return the raw output.
@@ -325,7 +332,7 @@ fn execute_for_node(
     pn: &PlannedNode,
     exec: &mut Option<Box<dyn KnotExecutor>>,
     cache: &Arc<Mutex<Cache>>,
-) -> Result<ExecutionOutput> {
+) -> Result<ExecutionAttempt> {
     match &pn.node {
         ExecutableNode::Chunk(chunk) => {
             let data = pn.chunk_data.as_ref().unwrap();
@@ -366,11 +373,10 @@ fn execute_for_node(
                 .unwrap()
                 .save_inline_result(pn.hash.clone(), &final_result)?;
 
-            Ok(ExecutionOutput {
+            Ok(ExecutionAttempt::Success(ExecutionOutput {
                 result: ExecutionResult::Text(final_result),
                 warnings: vec![],
-                error: None,
-            })
+            }))
         }
     }
 }

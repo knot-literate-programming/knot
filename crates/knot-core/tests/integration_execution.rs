@@ -12,7 +12,9 @@
 // Note: These tests are ignored by default.
 // Run with: cargo test --test integration_execution -- --ignored
 
-use knot_core::executors::{ExecutionResult, GraphicsOptions, LanguageExecutor, r::RExecutor};
+use knot_core::executors::{
+    ExecutionAttempt, ExecutionResult, GraphicsOptions, LanguageExecutor, r::RExecutor,
+};
 use std::fs;
 use tempfile::TempDir;
 
@@ -37,6 +39,14 @@ fn setup_executor() -> (TempDir, RExecutor) {
     (temp_dir, executor)
 }
 
+/// Unwrap a successful `ExecutionAttempt`, panicking on runtime errors.
+fn unwrap_success(attempt: ExecutionAttempt) -> knot_core::executors::ExecutionOutput {
+    match attempt {
+        ExecutionAttempt::Success(o) => o,
+        ExecutionAttempt::RuntimeError(e) => panic!("Expected Success, got RuntimeError: {}", e),
+    }
+}
+
 #[test]
 #[ignore] // Requires R
 fn test_simple_r_execution() {
@@ -44,9 +54,11 @@ fn test_simple_r_execution() {
     let graphics = default_graphics();
 
     let code = "x <- 1 + 1\nprint(x)";
-    let output = executor
-        .execute(code, &graphics)
-        .expect("Failed to execute R code");
+    let output = unwrap_success(
+        executor
+            .execute(code, &graphics)
+            .expect("Failed to execute R code"),
+    );
 
     match output.result {
         ExecutionResult::Text(output) => {
@@ -67,15 +79,21 @@ fn test_r_error_handling() {
     let graphics = default_graphics();
 
     let code = "stop('This is an error')";
-    let result = executor.execute(code, &graphics);
+    let attempt = executor
+        .execute(code, &graphics)
+        .expect("execute() itself must not fail for a runtime error");
 
-    assert!(result.is_err(), "Should return error for R error");
-    let err_msg = result.unwrap_err().to_string();
-    assert!(
-        err_msg.contains("error") || err_msg.contains("Error") || err_msg.contains("Erreur"),
-        "Error message should mention 'error', got: {}",
-        err_msg
-    );
+    match attempt {
+        ExecutionAttempt::RuntimeError(e) => {
+            let msg = e.to_string();
+            assert!(
+                msg.contains("error") || msg.contains("Error") || msg.contains("Erreur"),
+                "Error message should mention 'error', got: {}",
+                msg
+            );
+        }
+        ExecutionAttempt::Success(_) => panic!("Expected RuntimeError for stop(), got Success"),
+    }
 }
 
 #[test]
@@ -89,16 +107,16 @@ typst(df)
 "#;
     let graphics = default_graphics();
 
-    let output = executor
-        .execute(code, &graphics)
-        .expect("Failed to execute");
+    let output = unwrap_success(
+        executor
+            .execute(code, &graphics)
+            .expect("Failed to execute"),
+    );
 
     match output.result {
         ExecutionResult::DataFrame(path) => {
             assert!(path.exists(), "DataFrame CSV should exist");
             let content = fs::read_to_string(&path).expect("Failed to read CSV");
-            // CSV format from write.csv includes column names
-            // Format: "",x,y or "x","y" depending on row.names setting
             assert!(
                 content.contains("x") && content.contains("y"),
                 "CSV should contain column data, got: {}",
@@ -122,9 +140,11 @@ typst(gg)
 "#;
     let graphics = default_graphics();
 
-    let output = executor
-        .execute(code, &graphics)
-        .expect("Failed to execute");
+    let output = unwrap_success(
+        executor
+            .execute(code, &graphics)
+            .expect("Failed to execute"),
+    );
 
     match output.result {
         ExecutionResult::Plot(path) => {
@@ -160,9 +180,11 @@ typst(gg)
 "#;
     let graphics = default_graphics();
 
-    let output = executor
-        .execute(code, &graphics)
-        .expect("Failed to execute");
+    let output = unwrap_success(
+        executor
+            .execute(code, &graphics)
+            .expect("Failed to execute"),
+    );
 
     match output.result {
         ExecutionResult::DataFrameAndPlot { dataframe, plot } => {
@@ -186,15 +208,15 @@ fn test_r_session_persistence() {
     let (_temp, mut executor) = setup_executor();
     let graphics = default_graphics();
 
-    // Set a variable in first execution
     executor
         .execute("x <- 42", &graphics)
         .expect("Failed to set variable");
 
-    // Use the variable in second execution
-    let output = executor
-        .execute("print(x)", &graphics)
-        .expect("Failed to use variable");
+    let output = unwrap_success(
+        executor
+            .execute("print(x)", &graphics)
+            .expect("Failed to use variable"),
+    );
 
     match output.result {
         ExecutionResult::Text(output) => {

@@ -12,7 +12,7 @@ mod formatters;
 mod process;
 
 use super::{
-    ConstantObjectHandler, ExecutionOutput, GraphicsOptions, KnotExecutor, LanguageExecutor,
+    ConstantObjectHandler, ExecutionAttempt, GraphicsOptions, KnotExecutor, LanguageExecutor,
 };
 use anyhow::Result;
 use std::path::{Path, PathBuf};
@@ -47,7 +47,7 @@ impl LanguageExecutor for RExecutor {
         self.process.initialize()
     }
 
-    fn execute(&mut self, code: &str, graphics: &GraphicsOptions) -> Result<ExecutionOutput> {
+    fn execute(&mut self, code: &str, graphics: &GraphicsOptions) -> Result<ExecutionAttempt> {
         execution::execute(&mut self.process, &self.cache_dir, code, graphics)
     }
 
@@ -203,8 +203,11 @@ mod tests {
     #[ignore]
     fn test_execute_simple_expression() {
         let (_temp_dir, mut executor) = setup_executor();
-        let output = executor.execute("1 + 1", &default_graphics()).unwrap();
-        match output.result {
+        let success = match executor.execute("1 + 1", &default_graphics()).unwrap() {
+            ExecutionAttempt::Success(o) => o,
+            ExecutionAttempt::RuntimeError(e) => panic!("Expected Success, got error: {}", e),
+        };
+        match success.result {
             ExecutionResult::Text(output) => assert!(output.contains("2")),
             _ => panic!("Expected Text result"),
         }

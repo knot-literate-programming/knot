@@ -254,7 +254,13 @@ mod tests {
         let result = exec2.execute("print(test_var)", &graphics);
         assert!(result.is_ok());
 
-        if let crate::executors::ExecutionResult::Text(output) = result.unwrap().result {
+        let success = match result.unwrap() {
+            crate::executors::ExecutionAttempt::Success(o) => o,
+            crate::executors::ExecutionAttempt::RuntimeError(e) => {
+                panic!("Expected Success, got error: {}", e)
+            }
+        };
+        if let crate::executors::ExecutionResult::Text(output) = success.result {
             assert!(output.contains("42"));
         } else {
             panic!("Expected Text result");

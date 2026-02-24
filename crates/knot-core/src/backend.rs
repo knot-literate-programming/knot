@@ -392,7 +392,6 @@ mod tests {
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("[1] 2".to_string()),
             warnings: vec![],
-            error: None,
         };
         let resolved = chunk.options.resolve();
 
@@ -409,7 +408,6 @@ mod tests {
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("[1] 5.5".to_string()),
             warnings: vec![],
-            error: None,
         };
         let resolved = chunk.options.resolve();
 
@@ -429,7 +427,6 @@ mod tests {
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("[1] 5.5".to_string()),
             warnings: vec![],
-            error: None,
         };
         let resolved = chunk.options.resolve();
 
@@ -447,7 +444,6 @@ mod tests {
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("".to_string()),
             warnings: vec![],
-            error: None,
         };
         let resolved = chunk.options.resolve();
 
@@ -470,7 +466,6 @@ mod tests {
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("[1] 1  2  3  4  5  6  7  8  9 10".to_string()),
             warnings: vec![],
-            error: None,
         };
         let resolved = chunk.options.resolve();
 
@@ -497,7 +492,6 @@ mod tests {
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("".to_string()),
             warnings: vec![],
-            error: None,
         };
         let resolved = chunk.options.resolve();
 
@@ -517,7 +511,6 @@ mod tests {
         let output_data = ExecutionOutput {
             result: ExecutionResult::Plot(plot_path.clone()),
             warnings: vec![],
-            error: None,
         };
         let resolved = chunk.options.resolve();
 
@@ -536,7 +529,6 @@ mod tests {
         let output_data = ExecutionOutput {
             result: ExecutionResult::DataFrame(csv_path.clone()),
             warnings: vec![],
-            error: None,
         };
         let resolved = chunk.options.resolve();
 
@@ -559,7 +551,6 @@ mod tests {
                 plot: plot_path.clone(),
             },
             warnings: vec![],
-            error: None,
         };
         let resolved = chunk.options.resolve();
 
@@ -584,7 +575,6 @@ mod tests {
                 plot: plot_path.clone(),
             },
             warnings: vec![],
-            error: None,
         };
         let resolved = chunk.options.resolve();
 
@@ -604,7 +594,6 @@ mod tests {
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("[1] 2".to_string()),
             warnings: vec![],
-            error: None,
         };
         let resolved = chunk.options.resolve();
 
@@ -623,7 +612,6 @@ mod tests {
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("".to_string()),
             warnings: vec![],
-            error: None,
         };
         let resolved = chunk.options.resolve();
 
@@ -650,7 +638,6 @@ mod tests {
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("[1] 1  2  3  4  5  6  7  8  9 10".to_string()),
             warnings: vec![],
-            error: None,
         };
         let resolved = chunk.options.resolve();
 
@@ -674,7 +661,6 @@ mod tests {
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("[1] 1  2  3  4  5  6  7  8  9 10".to_string()),
             warnings: vec![],
-            error: None,
         };
         let resolved = chunk.options.resolve();
 

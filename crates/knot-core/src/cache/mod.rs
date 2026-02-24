@@ -13,7 +13,7 @@ mod storage;
 pub use hashing::hash_dependencies;
 pub use metadata::{CacheMetadata, ChunkCacheEntry, FreezeObjectInfo, InlineCacheEntry};
 
-use crate::executors::ExecutionOutput;
+use crate::executors::{ExecutionAttempt, ExecutionOutput};
 use anyhow::{Result, anyhow};
 use chrono::Utc;
 use std::fs;
@@ -127,7 +127,7 @@ impl Cache {
     }
 
     /// Get cached chunk result
-    pub fn get_cached_result(&self, hash: &str) -> Result<ExecutionOutput> {
+    pub fn get_cached_result(&self, hash: &str) -> Result<ExecutionAttempt> {
         storage::get_cached_result(&self.cache_dir, hash, &self.metadata)
     }
 

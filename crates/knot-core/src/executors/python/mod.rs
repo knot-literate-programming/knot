@@ -11,7 +11,7 @@ mod formatters;
 mod process;
 
 use super::{
-    ConstantObjectHandler, ExecutionOutput, ExecutionResult, GraphicsOptions, KnotExecutor,
+    ConstantObjectHandler, ExecutionAttempt, ExecutionResult, GraphicsOptions, KnotExecutor,
     LanguageExecutor,
 };
 use crate::parser::ChunkOptions;
@@ -61,7 +61,7 @@ impl LanguageExecutor for PythonExecutor {
         Ok(())
     }
 
-    fn execute(&mut self, code: &str, graphics: &GraphicsOptions) -> Result<ExecutionOutput> {
+    fn execute(&mut self, code: &str, graphics: &GraphicsOptions) -> Result<ExecutionAttempt> {
         execution::execute(&mut self.process, &self.cache_dir, code, graphics)
     }
 
@@ -79,7 +79,11 @@ impl LanguageExecutor for PythonExecutor {
             },
         )?;
 
-        match output.result {
+        let success = match output {
+            ExecutionAttempt::RuntimeError(e) => anyhow::bail!("{}", e),
+            ExecutionAttempt::Success(o) => o,
+        };
+        match success.result {
             ExecutionResult::Text(t) => formatters::format_inline_output(&t),
             _ => anyhow::bail!(
                 "Inline expression returned a complex object (plot or dataframe).\n\
@@ -248,7 +252,11 @@ mod tests {
             )
             .unwrap();
 
-        if let ExecutionResult::Text(t) = output.result {
+        let success = match output {
+            ExecutionAttempt::Success(o) => o,
+            ExecutionAttempt::RuntimeError(e) => panic!("Expected Success, got error: {}", e),
+        };
+        if let ExecutionResult::Text(t) = success.result {
             assert_eq!(t.trim(), "2");
         } else {
             panic!("Expected Text result");
@@ -355,8 +363,10 @@ mod tests {
             )
             .unwrap();
 
-        assert!(output.error.is_some());
-        let err = output.error.unwrap();
+        let err = match output {
+            ExecutionAttempt::RuntimeError(e) => e,
+            ExecutionAttempt::Success(_) => panic!("Expected RuntimeError, got Success"),
+        };
         let err_msg = err.detailed_message();
         assert!(err_msg.contains("Something went wrong"));
         assert!(err_msg.contains("ValueError"));
@@ -378,9 +388,13 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(output.warnings.len(), 1);
+        let success = match output {
+            ExecutionAttempt::Success(o) => o,
+            ExecutionAttempt::RuntimeError(e) => panic!("Expected Success, got error: {}", e),
+        };
+        assert_eq!(success.warnings.len(), 1);
         assert!(
-            output.warnings[0]
+            success.warnings[0]
                 .message
                 .to_string()
                 .contains("A little warning")

@@ -49,7 +49,6 @@ pub(super) fn inert_output(pn: &PlannedNode, backend: &TypstBackend, config: &Co
             let empty = ExecutionOutput {
                 result: ExecutionResult::Text(String::new()),
                 warnings: vec![],
-                error: None,
             };
             format_output(
                 backend,
@@ -81,7 +80,6 @@ pub(super) fn skip_output(
             let empty = ExecutionOutput {
                 result: ExecutionResult::Text(String::new()),
                 warnings: vec![],
-                error: None,
             };
             format_output(
                 backend,

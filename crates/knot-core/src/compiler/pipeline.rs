@@ -19,7 +19,7 @@
 //! background.
 
 use crate::compiler::ExecutableNode;
-use crate::executors::ExecutionOutput;
+use crate::executors::ExecutionAttempt;
 use crate::parser::{ChunkOptions, ResolvedChunkOptions};
 use std::collections::HashMap;
 
@@ -38,8 +38,8 @@ pub enum ChunkExecutionState {
 
 /// What the execution phase must do with this node.
 pub enum ExecutionNeed {
-    /// Cache hit for a code chunk — `ExecutionOutput` already retrieved.
-    CacheHit(ExecutionOutput),
+    /// Cache hit for a code chunk — `ExecutionAttempt` already retrieved.
+    CacheHit(ExecutionAttempt),
     /// Cache hit for an inline expression — text result already retrieved.
     CacheHitInline(String),
     /// Cache miss — the node must be executed (slow path).

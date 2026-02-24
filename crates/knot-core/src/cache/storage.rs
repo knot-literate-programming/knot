@@ -6,7 +6,7 @@
 // - Loading cached results from files
 
 use super::metadata::CacheMetadata;
-use crate::executors::{ExecutionOutput, ExecutionResult};
+use crate::executors::{ExecutionAttempt, ExecutionOutput, ExecutionResult};
 use anyhow::{Result, anyhow};
 use log::warn;
 use std::fs;
@@ -61,27 +61,33 @@ pub fn save_metadata(cache_dir: &Path, metadata: &CacheMetadata) -> Result<()> {
     Ok(())
 }
 
-/// Retrieves cached chunk result from disk
+/// Retrieves cached chunk result from disk.
 ///
-/// Verifies that all referenced files exist before reconstructing the result
+/// Returns `ExecutionAttempt::RuntimeError` if the cached entry recorded an
+/// error, or `ExecutionAttempt::Success` otherwise.
+/// Verifies that all referenced files exist before reconstructing the result.
 pub fn get_cached_result(
     cache_dir: &Path,
     hash: &str,
     metadata: &CacheMetadata,
-) -> Result<ExecutionOutput> {
+) -> Result<ExecutionAttempt> {
     let entry = metadata
         .chunks
         .iter()
         .find(|e| e.hash == hash)
         .ok_or_else(|| anyhow!("Cache entry with hash {} not found", hash))?;
 
+    // Cached runtime error — no output files to read.
+    if let Some(error) = entry.error.clone() {
+        return Ok(ExecutionAttempt::RuntimeError(error));
+    }
+
     // Handle chunks with no output files (e.g., assignments without print)
     if entry.files.is_empty() {
-        return Ok(ExecutionOutput {
+        return Ok(ExecutionAttempt::Success(ExecutionOutput {
             result: ExecutionResult::Text(String::new()),
             warnings: entry.warnings.clone(),
-            error: entry.error.clone(),
-        });
+        }));
     }
 
     // Verify all files exist
@@ -141,11 +147,10 @@ pub fn get_cached_result(
         files => return Err(anyhow!("Unexpected number of cache files: {}", files.len())),
     };
 
-    Ok(ExecutionOutput {
+    Ok(ExecutionAttempt::Success(ExecutionOutput {
         result,
         warnings: entry.warnings.clone(),
-        error: entry.error.clone(),
-    })
+    }))
 }
 
 /// Saves chunk execution result to cache
