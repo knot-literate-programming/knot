@@ -13,4 +13,5 @@ pub mod text_document {
 pub mod window {
     pub const SHOW_MESSAGE: &str = "window/showMessage";
     pub const LOG_MESSAGE: &str = "window/logMessage";
+    pub const SHOW_DOCUMENT: &str = "window/showDocument";
 }

@@ -162,6 +162,15 @@ impl TinymistProxy {
         pending_requests: &PendingRequests,
         notification_tx: &mpsc::Sender<Value>,
     ) {
+        // Server-initiated request: has both "method" and "id" (e.g. window/showDocument).
+        // Also handles plain notifications (has "method", no "id").
+        // Both are routed to the notification channel so the server can handle them.
+        if message.get("method").is_some() {
+            let _ = notification_tx.send(message).await;
+            return;
+        }
+
+        // Response to one of our requests: has "id", no "method".
         if let Some(id) = message.get("id") {
             if let Some(id_val) = id.as_u64() {
                 let mut map = pending_requests.lock().await;
@@ -174,8 +183,6 @@ impl TinymistProxy {
                     }
                 }
             }
-        } else {
-            let _ = notification_tx.send(message).await;
         }
     }
 
@@ -268,6 +275,17 @@ impl TinymistProxy {
                 ))
             }
         }
+    }
+
+    /// Send a raw JSON-RPC response back to tinymist (e.g. to acknowledge a
+    /// server-initiated request such as `window/showDocument`).
+    pub async fn send_raw_response(&mut self, id: &Value, result: Value) -> Result<()> {
+        let response = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": result,
+        });
+        self.write_message(&response).await
     }
 
     pub async fn send_notification(&mut self, method: &str, params: Value) -> Result<()> {

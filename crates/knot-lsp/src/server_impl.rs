@@ -195,23 +195,20 @@ impl KnotLanguageServer {
             .to_string_lossy()
             .to_string();
 
-        // params.line is 0-based (VSCode); map_knot_line_to_typ expects 1-based.
-        let knot_line_1based = params.line as usize + 1;
-        let Some(typ_line) =
-            knot_core::sync::map_knot_line_to_typ(&knot_rel, knot_line_1based, &blocks, &knot_path)
+        // Both params.line (VSCode) and map_knot_line_to_typ input/output are 0-based.
+        let knot_line_0based = params.line as usize;
+        let Some(typ_line_0based) =
+            knot_core::sync::map_knot_line_to_typ(&knot_rel, knot_line_0based, &blocks, &knot_path)
         else {
             // Cursor is in a Typst-only region — no mapping available.
             return Ok(serde_json::json!({"status": "unmapped"}));
         };
-
-        // map_knot_line_to_typ returns a 1-based line; VSCode/Tinymist expect 0-based.
-        let typ_line_0based = typ_line.saturating_sub(1);
         let filepath = main_typ_path.to_string_lossy().to_string();
 
         log::info!(
             "[syncForward] {}:{} → {}:{}",
             knot_rel,
-            knot_line_1based,
+            knot_line_0based,
             filepath,
             typ_line_0based
         );
@@ -402,6 +399,7 @@ impl KnotLanguageServer {
             win::SHOW_MESSAGE | win::LOG_MESSAGE => {
                 self.handle_tinymist_message(method, &msg).await;
             }
+            win::SHOW_DOCUMENT => self.handle_tinymist_show_document(&msg).await,
             _ => {}
         }
     }
@@ -435,6 +433,92 @@ impl KnotLanguageServer {
             drop(docs);
             self.publish_combined_diagnostics(&uri).await;
         }
+    }
+
+    /// Handle a `window/showDocument` request sent by the Tinymist subprocess when the
+    /// user clicks in the browser preview (backward sync: preview → .knot source).
+    ///
+    /// Flow:
+    /// 1. Immediately acknowledge the request to tinymist.
+    /// 2. Parse the .typ URI and line from the request params.
+    /// 3. Map the .typ line → .knot file + line via the sync markers.
+    /// 4. Ask VS Code to open the .knot file at the mapped position.
+    async fn handle_tinymist_show_document(&self, msg: &serde_json::Value) {
+        use tower_lsp::lsp_types::{Position, Range, ShowDocumentParams};
+
+        // 1. Acknowledge tinymist immediately (it's a request, not a notification).
+        let id = msg.get("id").cloned().unwrap_or(serde_json::Value::Null);
+        {
+            let mut tinymist_guard = self.state.tinymist.write().await;
+            if let Some(proxy) = tinymist_guard.as_mut() {
+                let _ = proxy
+                    .send_raw_response(&id, serde_json::json!({"success": true}))
+                    .await;
+            }
+        }
+
+        // 2. Extract the URI and line number from the request.
+        let Some(params) = msg.get("params") else { return };
+        let Some(uri_str) = params.get("uri").and_then(|u| u.as_str()) else { return };
+        let Ok(uri) = Url::parse(uri_str) else { return };
+
+        // The selection in the .typ file (start line, 0-based).
+        let typ_line = params
+            .get("selection")
+            .and_then(|s| s.get("start"))
+            .and_then(|s| s.get("line"))
+            .and_then(|l| l.as_u64())
+            .unwrap_or(0) as usize;
+
+        // 3. Resolve the file path and load sync markers.
+        // The URI may be the disk .typ file (from preview) or a virtual .knot.typ URI.
+        let typ_path = match uri.to_file_path() {
+            Ok(p) => p,
+            Err(_) => return,
+        };
+
+        let project_root = match knot_core::config::Config::find_project_root(&typ_path) {
+            Ok(r) => r,
+            Err(_) => return,
+        };
+
+        let typ_content = match std::fs::read_to_string(&typ_path) {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+
+        let blocks = knot_core::sync::parse_knot_markers(&typ_content);
+
+        let Some((knot_path, knot_line_0based)) =
+            knot_core::sync::map_typ_line_to_knot(typ_line, &blocks, &project_root)
+        else {
+            log::debug!("[showDocument] No .knot mapping for {uri_str}:{typ_line}");
+            return;
+        };
+
+        log::info!(
+            "[showDocument] {}:{} → {}:{}",
+            uri_str,
+            typ_line,
+            knot_path.display(),
+            knot_line_0based
+        );
+
+        // 4. Ask VS Code to open the .knot file and jump to the mapped line.
+        let Ok(knot_uri) = Url::from_file_path(&knot_path) else { return };
+        let pos = Position {
+            line: knot_line_0based as u32,
+            character: 0,
+        };
+        let _ = self
+            .client
+            .show_document(ShowDocumentParams {
+                uri: knot_uri,
+                external: Some(false),
+                take_focus: Some(true),
+                selection: Some(Range { start: pos, end: pos }),
+            })
+            .await;
     }
 
     async fn handle_tinymist_message(&self, method: &str, msg: &serde_json::Value) {
