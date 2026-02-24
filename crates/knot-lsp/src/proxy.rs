@@ -226,6 +226,15 @@ impl TinymistProxy {
     }
 
     pub async fn send_request(&mut self, method: &str, params: Value) -> Result<Value> {
+        self.send_request_timeout(method, params, 10).await
+    }
+
+    pub async fn send_request_timeout(
+        &mut self,
+        method: &str,
+        params: Value,
+        timeout_secs: u64,
+    ) -> Result<Value> {
         let id = self.request_id.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
 
@@ -247,15 +256,14 @@ impl TinymistProxy {
             return Err(e);
         }
 
-        match tokio::time::timeout(std::time::Duration::from_secs(10), rx).await {
+        match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), rx).await {
             Ok(Ok(result)) => result,
             Ok(Err(_)) => Err(anyhow::anyhow!("Tinymist connection closed")),
             Err(_) => {
-                // Timeout: clean up the pending request
                 let mut map = self.pending_requests.lock().await;
                 map.remove(&id);
                 Err(anyhow::anyhow!(
-                    "Tinymist request '{}' timed out after 10s",
+                    "Tinymist request '{}' timed out after {timeout_secs}s",
                     method
                 ))
             }

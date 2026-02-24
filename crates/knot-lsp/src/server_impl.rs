@@ -103,22 +103,30 @@ impl KnotLanguageServer {
 
         const TASK_ID: &str = "knot-preview";
 
+        // Pass --static-file-host 127.0.0.1:0 so older tinymist versions (which
+        // have a separate static file server) don't default to fixed port 23627
+        // (already in use by the tinymist VS Code extension). Passing 0 for both
+        // hosts is also accepted by newer tinymist (they're treated as the same
+        // server when equal). --dont-open-in-browser: the extension opens it.
         let response = {
             let mut tinymist_guard = self.state.tinymist.write().await;
             let proxy = tinymist_guard
                 .as_mut()
                 .ok_or_else(|| anyhow::anyhow!("Tinymist not ready"))?;
             proxy
-                .send_request(
+                .send_request_timeout(
                     "workspace/executeCommand",
                     serde_json::json!({
                         "command": "tinymist.doStartPreview",
                         "arguments": [[
                             "--task-id", TASK_ID,
                             "--data-plane-host", "127.0.0.1:0",
+                            "--static-file-host", "127.0.0.1:0",
+                            "--dont-open-in-browser",
                             &main_typ_str,
                         ]]
                     }),
+                    30,
                 )
                 .await?
         };
