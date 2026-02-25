@@ -8,7 +8,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 pub mod formatters;
-pub mod inline_processor;
 pub mod pipeline;
 pub mod snapshot_manager;
 pub mod sync;
@@ -364,22 +363,6 @@ fn build_executable_nodes(doc: &Document) -> Vec<ExecutableNode> {
 
 #[cfg(test)]
 pub(super) mod test_helpers {
-    use crate::cache::Cache;
-    use crate::executors::ExecutorManager;
-    use tempfile::TempDir;
-
-    pub fn setup_test_cache() -> (TempDir, Cache) {
-        let temp_dir = TempDir::new().unwrap();
-        let cache = Cache::new(temp_dir.path().to_path_buf()).unwrap();
-        (temp_dir, cache)
-    }
-
-    pub fn setup_test_manager() -> (TempDir, ExecutorManager) {
-        let temp_dir = TempDir::new().unwrap();
-        let manager = ExecutorManager::new(temp_dir.path().to_path_buf());
-        (temp_dir, manager)
-    }
-
     /// Creates a minimal test chunk for use in unit tests.
     pub fn create_test_chunk(
         language: &str,

@@ -81,11 +81,12 @@ impl Encoder<Value> for LspCodec {
 }
 
 /// A proxy to a tinymist LSP subprocess
+#[derive(Clone)]
 pub struct TinymistProxy {
     /// Writer to send data to tinymist's stdin
-    stdin: ChildStdin,
+    stdin: Arc<Mutex<ChildStdin>>,
     /// Handle to the child process (kept for shutdown)
-    child: Option<Child>,
+    child: Arc<Mutex<Option<Child>>>,
     /// Counter for request IDs
     request_id: Arc<AtomicU64>,
     /// Map of pending requests (ID -> Sender)
@@ -134,6 +135,9 @@ impl TinymistProxy {
             while let Some(res) = framed_read.next().await {
                 match res {
                     Ok(message) => {
+                        if let Ok(json) = serde_json::to_string(&message) {
+                            log::info!("LSP IN: {}", json);
+                        }
                         Self::dispatch_message(message, &pending_requests_clone, &notification_tx)
                             .await;
                     }
@@ -145,9 +149,9 @@ impl TinymistProxy {
             }
         });
 
-        let mut proxy = Self {
-            stdin,
-            child: Some(child),
+        let proxy = Self {
+            stdin: Arc::new(Mutex::new(stdin)),
+            child: Arc::new(Mutex::new(Some(child))),
             request_id: Arc::new(AtomicU64::new(1)),
             pending_requests,
         };
@@ -162,11 +166,11 @@ impl TinymistProxy {
         pending_requests: &PendingRequests,
         notification_tx: &mpsc::Sender<Value>,
     ) {
-        // Server-initiated request: has both "method" and "id" (e.g. window/showDocument).
-        // Also handles plain notifications (has "method", no "id").
-        // Both are routed to the notification channel so the server can handle them.
+        // Server-initiated request or notification
         if message.get("method").is_some() {
-            let _ = notification_tx.send(message).await;
+            if let Err(e) = notification_tx.try_send(message) {
+                log::warn!("Dropped Tinymist notification: {}", e);
+            }
             return;
         }
 
@@ -187,11 +191,11 @@ impl TinymistProxy {
     }
 
     /// Shutdown the tinymist subprocess gracefully
-    pub async fn shutdown(&mut self) -> Result<()> {
+    pub async fn shutdown(&self) -> Result<()> {
         let _ = self.send_request("shutdown", Value::Null).await;
         let _ = self.send_notification("exit", Value::Null).await;
 
-        if let Some(mut child) = self.child.take() {
+        if let Some(mut child) = self.child.lock().await.take() {
             let _ =
                 tokio::time::timeout(std::time::Duration::from_millis(1000), child.wait()).await;
         }
@@ -205,7 +209,7 @@ impl TinymistProxy {
 // ============================================================================
 
 impl TinymistProxy {
-    async fn initialize(&mut self, root_uri: Option<Url>) -> Result<()> {
+    async fn initialize(&self, root_uri: Option<Url>) -> Result<()> {
         let init_params = serde_json::json!({
             "processId": std::process::id(),
             "clientInfo": {
@@ -232,12 +236,12 @@ impl TinymistProxy {
         Ok(())
     }
 
-    pub async fn send_request(&mut self, method: &str, params: Value) -> Result<Value> {
+    pub async fn send_request(&self, method: &str, params: Value) -> Result<Value> {
         self.send_request_timeout(method, params, 10).await
     }
 
     pub async fn send_request_timeout(
-        &mut self,
+        &self,
         method: &str,
         params: Value,
         timeout_secs: u64,
@@ -279,7 +283,7 @@ impl TinymistProxy {
 
     /// Send a raw JSON-RPC response back to tinymist (e.g. to acknowledge a
     /// server-initiated request such as `window/showDocument`).
-    pub async fn send_raw_response(&mut self, id: &Value, result: Value) -> Result<()> {
+    pub async fn send_raw_response(&self, id: &Value, result: Value) -> Result<()> {
         let response = serde_json::json!({
             "jsonrpc": "2.0",
             "id": id,
@@ -288,7 +292,7 @@ impl TinymistProxy {
         self.write_message(&response).await
     }
 
-    pub async fn send_notification(&mut self, method: &str, params: Value) -> Result<()> {
+    pub async fn send_notification(&self, method: &str, params: Value) -> Result<()> {
         let notification = serde_json::json!({
             "jsonrpc": "2.0",
             "method": method,
@@ -298,12 +302,19 @@ impl TinymistProxy {
         self.write_message(&notification).await
     }
 
-    async fn write_message(&mut self, message: &Value) -> Result<()> {
+    async fn write_message(&self, message: &Value) -> Result<()> {
         let mut dst = BytesMut::new();
         let mut codec = LspCodec;
         codec.encode(message.clone(), &mut dst)?;
-        self.stdin.write_all(&dst).await?;
-        self.stdin.flush().await?;
+        
+        // Log the raw message for debugging
+        if let Ok(json) = serde_json::to_string(message) {
+            log::info!("LSP OUT: {}", json);
+        }
+
+        let mut stdin = self.stdin.lock().await;
+        stdin.write_all(&dst).await?;
+        stdin.flush().await?;
         Ok(())
     }
 }

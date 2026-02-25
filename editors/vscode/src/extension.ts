@@ -343,7 +343,8 @@ async function openPreview(outputChannel: any): Promise<void> {
                     uri: knotUri.toString(),
                 });
                 if (result?.status === 'ok' && result?.staticServerPort) {
-                    await env.openExternal(Uri.parse(`http://127.0.0.1:${result.staticServerPort}`));
+                    // Use the dynamic port returned by Tinymist
+                    await env.openExternal(Uri.parse(`http://127.0.0.1:${result.staticServerPort}/?task=knot-preview`));
                 } else {
                     outputChannel.appendLine(`[preview] startPreview returned: ${JSON.stringify(result)}`);
                     window.showErrorMessage(`Failed to start preview: ${result?.message ?? 'unknown error'}`);

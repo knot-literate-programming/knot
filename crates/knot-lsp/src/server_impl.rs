@@ -65,10 +65,14 @@ impl KnotLanguageServer {
         &self,
         params: StartPreviewParams,
     ) -> tower_lsp::jsonrpc::Result<serde_json::Value> {
+        log::info!("[startPreview] Request received for URI: {}", params.uri);
         match self.do_start_preview(&params).await {
-            Ok(result) => Ok(result),
+            Ok(result) => {
+                log::info!("[startPreview] Success: {:?}", result);
+                Ok(result)
+            },
             Err(e) => {
-                log::warn!("[startPreview] {e}");
+                log::warn!("[startPreview] Error: {e}");
                 Ok(serde_json::json!({"status": "error", "message": e.to_string()}))
             }
         }
@@ -103,16 +107,29 @@ impl KnotLanguageServer {
 
         const TASK_ID: &str = "knot-preview";
 
-        // Pass --static-file-host 127.0.0.1:0 so older tinymist versions (which
-        // have a separate static file server) don't default to fixed port 23627
-        // (already in use by the tinymist VS Code extension). Passing 0 for both
-        // hosts is also accepted by newer tinymist (they're treated as the same
-        // server when equal). --dont-open-in-browser: the extension opens it.
+        // Pass --data-plane-host 127.0.0.1:0 so we don't conflict with other instances.
+        // --no-open: the extension opens it.
         let response = {
-            let mut tinymist_guard = self.state.tinymist.write().await;
+            let tinymist_guard = self.state.tinymist.read().await;
             let proxy = tinymist_guard
-                .as_mut()
+                .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("Tinymist not ready"))?;
+
+            // 1. Explicitly 'open' the main typ file in tinymist.
+            if let Ok(main_typ_uri) = Url::from_file_path(&main_typ_path) {
+                let _ = proxy.send_notification(
+                    lsp::DID_OPEN,
+                    serde_json::json!({
+                        "textDocument": {
+                            "uri": main_typ_uri,
+                            "languageId": "typst",
+                            "version": 1,
+                            "text": std::fs::read_to_string(&main_typ_path).unwrap_or_default(),
+                        }
+                    })
+                ).await;
+            }
+
             proxy
                 .send_request_timeout(
                     "workspace/executeCommand",
@@ -121,6 +138,7 @@ impl KnotLanguageServer {
                         "arguments": [[
                             "--task-id", TASK_ID,
                             "--data-plane-host", "127.0.0.1:0",
+                            "--control-plane-host", "127.0.0.1:0",
                             "--static-file-host", "127.0.0.1:0",
                             "--no-open",
                             &main_typ_str,
@@ -141,6 +159,7 @@ impl KnotLanguageServer {
             .ok_or_else(|| anyhow::anyhow!("Missing staticServerPort in: {result:?}"))?
             as u16;
 
+        log::info!("[startPreview] Setting preview_info: task={}, port={}", TASK_ID, static_server_port);
         *self.state.preview_info.write().await = Some((TASK_ID.to_string(), static_server_port));
 
         log::info!("[startPreview] Preview started on port {static_server_port} (task={TASK_ID})");
@@ -183,6 +202,7 @@ impl KnotLanguageServer {
             .and_then(|s| s.to_str())
             .unwrap_or("main");
         let main_typ_path = project_root.join(format!("{main_stem}.typ"));
+        let filepath = main_typ_path.to_string_lossy().to_string();
 
         let typ_content = std::fs::read_to_string(&main_typ_path)
             .with_context(|| format!("Could not read {}", main_typ_path.display()))?;
@@ -203,7 +223,6 @@ impl KnotLanguageServer {
             // Cursor is in a Typst-only region — no mapping available.
             return Ok(serde_json::json!({"status": "unmapped"}));
         };
-        let filepath = main_typ_path.to_string_lossy().to_string();
 
         log::info!(
             "[syncForward] {}:{} → {}:{}",
@@ -213,36 +232,36 @@ impl KnotLanguageServer {
             typ_line_0based
         );
 
-        // Scroll the preview if one is running in our tinymist subprocess.
-        let preview_info = self.state.preview_info.read().await.clone();
-        if let Some((task_id, _)) = preview_info {
-            let scroll_result = {
-                let mut tinymist_guard = self.state.tinymist.write().await;
-                if let Some(proxy) = tinymist_guard.as_mut() {
-                    proxy
-                        .send_request(
+                // Scroll the preview if one is running in our tinymist subprocess.
+                let preview_info = self.state.preview_info.read().await.clone();
+                if let Some((task_id, _)) = preview_info {
+                    let proxy = self.state.tinymist.read().await.as_ref().cloned();
+                    
+                    if let Some(proxy) = proxy {
+                        log::info!("[syncForward] Sending scroll to main.typ (line={})", typ_line_0based);
+                        
+                        let uri_main = Url::from_file_path(&main_typ_path)
+                            .map(|u| u.to_string())
+                            .unwrap_or_else(|_| main_typ_path.to_string_lossy().to_string());
+        
+                        // The magic combination: target main.typ and put the URI in 'filepath'
+                        let _ = proxy.send_request(
                             "workspace/executeCommand",
                             serde_json::json!({
                                 "command": "tinymist.scrollPreview",
                                 "arguments": [task_id, {
                                     "event": "panelScrollTo",
-                                    "filepath": filepath,
-                                    "line": typ_line_0based,
-                                    "character": 0,
+                                    "filepath": uri_main,
+                                    "line": typ_line_0based as u32,
+                                    "character": 0u32,
                                 }]
                             }),
-                        )
-                        .await
+                        ).await;
+                    }
                 } else {
-                    Ok(serde_json::Value::Null)
+                    log::info!("[syncForward] No preview running, skipping scroll");
                 }
-            };
-            if let Err(e) = scroll_result {
-                log::warn!("[syncForward] scroll failed: {e}");
-            }
-        }
-
-        Ok(serde_json::json!({
+                Ok(serde_json::json!({
             "status": "ok",
             "filepath": filepath,
             "typ_line": typ_line_0based,
@@ -358,8 +377,8 @@ impl KnotLanguageServer {
 
         // 2. Send to Tinymist (no state locks held)
         let send_result = {
-            let mut tinymist_guard = self.state.tinymist.write().await;
-            if let Some(proxy) = tinymist_guard.as_mut() {
+            let tinymist_guard = self.state.tinymist.read().await;
+            if let Some(proxy) = tinymist_guard.as_ref() {
                 proxy.send_notification(actual_method, params).await
             } else {
                 return;
@@ -376,8 +395,8 @@ impl KnotLanguageServer {
         }
 
         if warm_up {
-            let mut tinymist_guard = self.state.tinymist.write().await;
-            if let Some(proxy) = tinymist_guard.as_mut() {
+            let tinymist_guard = self.state.tinymist.read().await;
+            if let Some(proxy) = tinymist_guard.as_ref() {
                 let _ = proxy
                     .send_request(
                         lsp::DOCUMENT_SYMBOL,
@@ -449,8 +468,8 @@ impl KnotLanguageServer {
         // 1. Acknowledge tinymist immediately (it's a request, not a notification).
         let id = msg.get("id").cloned().unwrap_or(serde_json::Value::Null);
         {
-            let mut tinymist_guard = self.state.tinymist.write().await;
-            if let Some(proxy) = tinymist_guard.as_mut() {
+            let tinymist_guard = self.state.tinymist.read().await;
+            if let Some(proxy) = tinymist_guard.as_ref() {
                 let _ = proxy
                     .send_raw_response(&id, serde_json::json!({"success": true}))
                     .await;
