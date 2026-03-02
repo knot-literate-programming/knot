@@ -175,16 +175,14 @@ impl TinymistProxy {
         }
 
         // Response to one of our requests: has "id", no "method".
-        if let Some(id) = message.get("id") {
-            if let Some(id_val) = id.as_u64() {
-                let mut map = pending_requests.lock().await;
-                if let Some(sender) = map.remove(&id_val) {
-                    if message.get("error").is_some() {
-                        let _ =
-                            sender.send(Err(anyhow::anyhow!("LSP Error: {:?}", message["error"])));
-                    } else {
-                        let _ = sender.send(Ok(message));
-                    }
+        if let Some(id_val) = message.get("id").and_then(|id| id.as_u64()) {
+            let mut map = pending_requests.lock().await;
+            if let Some(sender) = map.remove(&id_val) {
+                if message.get("error").is_some() {
+                    let _ =
+                        sender.send(Err(anyhow::anyhow!("LSP Error: {:?}", message["error"])));
+                } else {
+                    let _ = sender.send(Ok(message));
                 }
             }
         }
@@ -306,7 +304,7 @@ impl TinymistProxy {
         let mut dst = BytesMut::new();
         let mut codec = LspCodec;
         codec.encode(message.clone(), &mut dst)?;
-        
+
         // Log the raw message for debugging
         if let Ok(json) = serde_json::to_string(message) {
             log::info!("LSP OUT: {}", json);
@@ -333,7 +331,7 @@ mod tests {
     async fn test_spawn_tinymist() {
         let result = TinymistProxy::spawn(None, None).await;
         match result {
-            Ok((mut proxy, _notification_rx)) => {
+            Ok((proxy, _notification_rx)) => {
                 println!("tinymist spawned successfully");
                 let _ = proxy.shutdown().await;
             }
@@ -346,7 +344,7 @@ mod tests {
     #[tokio::test]
     #[ignore] // Only run if tinymist is installed
     async fn test_send_notification() {
-        let (mut proxy, _notification_rx) = match TinymistProxy::spawn(None, None).await {
+        let (proxy, _notification_rx) = match TinymistProxy::spawn(None, None).await {
             Ok((p, rx)) => (p, rx),
             Err(_) => {
                 eprintln!("tinymist not available, skipping test");

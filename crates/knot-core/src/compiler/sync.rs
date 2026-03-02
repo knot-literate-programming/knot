@@ -90,9 +90,22 @@ pub fn parse_knot_markers(content: &str) -> Vec<FileBlock> {
         }
 
         if line.trim_end() == "// #KNOT-INJECTION-END" {
-            if let (Some(block), Some(mut chunk)) = (block_stack.last_mut(), current_chunk.take()) {
-                chunk.end_line = i;
-                block.chunks.push(chunk);
+            if let Some(block) = block_stack.last_mut() {
+                if let Some(mut chunk) = current_chunk.take() {
+                    chunk.end_line = i;
+                    block.chunks.push(chunk);
+                } else {
+                    // A BEGIN-FILE inside this injection already took the chunk from
+                    // current_chunk and pushed it with end_line=0. Fix it now.
+                    if let Some(inj) = block
+                        .chunks
+                        .iter_mut()
+                        .rev()
+                        .find(|c| c.source == "INJECTION" && c.end_line == 0)
+                    {
+                        inj.end_line = i;
+                    }
+                }
             }
             continue;
         }
@@ -229,7 +242,7 @@ pub fn map_knot_line_to_typ(
         };
 
         if knot_line <= close_fence {
-            return Some(chunks[k].start_line);
+            return Some(chunks[k].start_line.saturating_add(1));
         }
 
         let verbatim_start = close_fence.saturating_add(1);

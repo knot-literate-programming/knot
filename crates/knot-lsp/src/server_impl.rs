@@ -70,7 +70,7 @@ impl KnotLanguageServer {
             Ok(result) => {
                 log::info!("[startPreview] Success: {:?}", result);
                 Ok(result)
-            },
+            }
             Err(e) => {
                 log::warn!("[startPreview] Error: {e}");
                 Ok(serde_json::json!({"status": "error", "message": e.to_string()}))
@@ -85,7 +85,14 @@ impl KnotLanguageServer {
         use anyhow::Context as _;
 
         // Return cached info if the preview is already running.
-        if let Some(port) = self.state.preview_info.read().await.as_ref().map(|(_, p)| *p) {
+        if let Some(port) = self
+            .state
+            .preview_info
+            .read()
+            .await
+            .as_ref()
+            .map(|(_, p)| *p)
+        {
             return Ok(serde_json::json!({"status": "ok", "staticServerPort": port}));
         }
 
@@ -109,15 +116,16 @@ impl KnotLanguageServer {
 
         // Pass --data-plane-host 127.0.0.1:0 so we don't conflict with other instances.
         // --no-open: the extension opens it.
-        let response = {
-            let tinymist_guard = self.state.tinymist.read().await;
-            let proxy = tinymist_guard
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("Tinymist not ready"))?;
+        let response =
+            {
+                let tinymist_guard = self.state.tinymist.read().await;
+                let proxy = tinymist_guard
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("Tinymist not ready"))?;
 
-            // 1. Explicitly 'open' the main typ file in tinymist.
-            if let Ok(main_typ_uri) = Url::from_file_path(&main_typ_path) {
-                let _ = proxy.send_notification(
+                // 1. Explicitly 'open' the main typ file in tinymist.
+                if let Ok(main_typ_uri) = Url::from_file_path(&main_typ_path) {
+                    let _ = proxy.send_notification(
                     lsp::DID_OPEN,
                     serde_json::json!({
                         "textDocument": {
@@ -128,30 +136,30 @@ impl KnotLanguageServer {
                         }
                     })
                 ).await;
-            }
+                }
 
-            proxy
-                .send_request_timeout(
-                    "workspace/executeCommand",
-                    serde_json::json!({
-                        "command": "tinymist.doStartPreview",
-                        "arguments": [[
-                            "--task-id", TASK_ID,
-                            "--data-plane-host", "127.0.0.1:0",
-                            "--control-plane-host", "127.0.0.1:0",
-                            "--static-file-host", "127.0.0.1:0",
-                            "--no-open",
-                            &main_typ_str,
-                        ]]
-                    }),
-                    30,
-                )
-                .await?
-        };
+                proxy
+                    .send_request_timeout(
+                        "workspace/executeCommand",
+                        serde_json::json!({
+                            "command": "tinymist.doStartPreview",
+                            "arguments": [[
+                                "--task-id", TASK_ID,
+                                "--data-plane-host", "127.0.0.1:0",
+                                "--control-plane-host", "127.0.0.1:0",
+                                "--static-file-host", "127.0.0.1:0",
+                                "--no-open",
+                                &main_typ_str,
+                            ]]
+                        }),
+                        30,
+                    )
+                    .await?
+            };
 
-        let result = response
-            .get("result")
-            .ok_or_else(|| anyhow::anyhow!("No result from tinymist.doStartPreview: {response:?}"))?;
+        let result = response.get("result").ok_or_else(|| {
+            anyhow::anyhow!("No result from tinymist.doStartPreview: {response:?}")
+        })?;
 
         let static_server_port = result
             .get("staticServerPort")
@@ -159,7 +167,11 @@ impl KnotLanguageServer {
             .ok_or_else(|| anyhow::anyhow!("Missing staticServerPort in: {result:?}"))?
             as u16;
 
-        log::info!("[startPreview] Setting preview_info: task={}, port={}", TASK_ID, static_server_port);
+        log::info!(
+            "[startPreview] Setting preview_info: task={}, port={}",
+            TASK_ID,
+            static_server_port
+        );
         *self.state.preview_info.write().await = Some((TASK_ID.to_string(), static_server_port));
 
         log::info!("[startPreview] Preview started on port {static_server_port} (task={TASK_ID})");
@@ -232,36 +244,80 @@ impl KnotLanguageServer {
             typ_line_0based
         );
 
-                // Scroll the preview if one is running in our tinymist subprocess.
-                let preview_info = self.state.preview_info.read().await.clone();
-                if let Some((task_id, _)) = preview_info {
-                    let proxy = self.state.tinymist.read().await.as_ref().cloned();
-                    
-                    if let Some(proxy) = proxy {
-                        log::info!("[syncForward] Sending scroll to main.typ (line={})", typ_line_0based);
-                        
-                        let uri_main = Url::from_file_path(&main_typ_path)
-                            .map(|u| u.to_string())
-                            .unwrap_or_else(|_| main_typ_path.to_string_lossy().to_string());
-        
-                        // The magic combination: target main.typ and put the URI in 'filepath'
-                        let _ = proxy.send_request(
-                            "workspace/executeCommand",
-                            serde_json::json!({
-                                "command": "tinymist.scrollPreview",
-                                "arguments": [task_id, {
-                                    "event": "panelScrollTo",
-                                    "filepath": uri_main,
-                                    "line": typ_line_0based as u32,
-                                    "character": 0u32,
-                                }]
-                            }),
-                        ).await;
-                    }
-                } else {
-                    log::info!("[syncForward] No preview running, skipping scroll");
+        // Find the best scrollable line: the mapped line if it contains Typst text,
+        // otherwise scan backwards for the nearest preceding text line.
+        //
+        // `jump_from_cursor` in tinymist uses `leaf_at(cursor, Side::Before)`:
+        // - At column 0, it finds the node BEFORE the cursor (previous line) → fails.
+        // - On `#func(...)` or `// comment` lines, there is no Text node → fails.
+        // We fix both by (a) using col+1 to be inside a Text node, and (b) scanning
+        // back past code chunks / markers to the nearest real text line.
+        let (scroll_line, character) = {
+            let lines: Vec<&str> = typ_content.lines().collect();
+            let scan_from = typ_line_0based.min(lines.len().saturating_sub(1));
+
+            let mut found = None;
+            for i in (0..=scan_from).rev() {
+                let Some(line) = lines.get(i) else { break };
+                let trimmed = line.trim_start();
+                // Stop at file-block boundaries (don't cross into another file).
+                if trimmed.starts_with("// BEGIN-FILE") || trimmed.starts_with("// END-FILE") {
+                    break;
                 }
-                Ok(serde_json::json!({
+                // Skip comments, Typst function calls (#...), and empty lines —
+                // none of these contain a Text AST node.
+                if trimmed.is_empty() || trimmed.starts_with("//") || trimmed.starts_with('#') {
+                    continue;
+                }
+                // Headings in Typst look like `== Title`. The `=` chars
+                // form a HeadingMarker AST node, not a Text node.
+                // jump_from_cursor only accepts Text/MathText nodes, so we
+                // must land the cursor inside the title text, not on the `=`.
+                let col = if trimmed.starts_with('=') {
+                    line.find(|c: char| c != '=' && !c.is_whitespace())
+                        .unwrap_or(3)
+                } else {
+                    line.find(|c: char| !c.is_whitespace()).unwrap_or(0)
+                };
+                found = Some((i, (col + 1) as u32));
+                break;
+            }
+
+            found.unwrap_or((scan_from, 1))
+        };
+
+        // Scroll the preview if one is running in our tinymist subprocess.
+        let preview_info = self.state.preview_info.read().await.clone();
+        if let Some((task_id, _)) = preview_info {
+            let proxy = self.state.tinymist.read().await.as_ref().cloned();
+
+            if let Some(proxy) = proxy {
+                log::info!(
+                    "[syncForward] Sending scroll: knot→typ:{} → scroll_line={} character={}",
+                    typ_line_0based,
+                    scroll_line,
+                    character
+                );
+
+                let _ = proxy
+                    .send_request(
+                        "workspace/executeCommand",
+                        serde_json::json!({
+                            "command": "tinymist.scrollPreview",
+                            "arguments": [task_id, {
+                                "event": "panelScrollTo",
+                                "filepath": filepath,
+                                "line": scroll_line as u32,
+                                "character": character,
+                            }]
+                        }),
+                    )
+                    .await;
+            }
+        } else {
+            log::info!("[syncForward] No preview running, skipping scroll");
+        }
+        Ok(serde_json::json!({
             "status": "ok",
             "filepath": filepath,
             "typ_line": typ_line_0based,
@@ -477,8 +533,12 @@ impl KnotLanguageServer {
         }
 
         // 2. Extract the URI and line number from the request.
-        let Some(params) = msg.get("params") else { return };
-        let Some(uri_str) = params.get("uri").and_then(|u| u.as_str()) else { return };
+        let Some(params) = msg.get("params") else {
+            return;
+        };
+        let Some(uri_str) = params.get("uri").and_then(|u| u.as_str()) else {
+            return;
+        };
         let Ok(uri) = Url::parse(uri_str) else { return };
 
         // The selection in the .typ file (start line, 0-based).
@@ -524,7 +584,9 @@ impl KnotLanguageServer {
         );
 
         // 4. Ask VS Code to open the .knot file and jump to the mapped line.
-        let Ok(knot_uri) = Url::from_file_path(&knot_path) else { return };
+        let Ok(knot_uri) = Url::from_file_path(&knot_path) else {
+            return;
+        };
         let pos = Position {
             line: knot_line_0based as u32,
             character: 0,
@@ -535,7 +597,10 @@ impl KnotLanguageServer {
                 uri: knot_uri,
                 external: Some(false),
                 take_focus: Some(true),
-                selection: Some(Range { start: pos, end: pos }),
+                selection: Some(Range {
+                    start: pos,
+                    end: pos,
+                }),
             })
             .await;
     }
