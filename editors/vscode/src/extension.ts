@@ -7,6 +7,7 @@ import {
     ExtensionContext,
     window,
     commands,
+    env,
     Uri,
     ProgressLocation,
     StatusBarAlignment,
@@ -34,6 +35,7 @@ let watchProcesses: Map<string, ChildProcess> = new Map();
 let compilationStatusBar: StatusBarItem;
 let suppressAutoSync = false;
 let syncDebounceTimer: ReturnType<typeof setTimeout> | undefined;
+let forwardSyncTimer: ReturnType<typeof setTimeout> | undefined;
 
 /**
  * Handles URIs in the form of vscode://knot-dev.knot/jump?file=...&line=...
@@ -127,6 +129,36 @@ export async function activate(context: ExtensionContext) {
                     outputChannel.appendLine(`[auto-sync] Error: ${e}`);
                 }
             }, 50);
+        })
+    );
+
+    // Auto forward sync: when cursor moves in a .knot file, scroll Tinymist preview.
+    context.subscriptions.push(
+        window.onDidChangeTextEditorSelection((event) => {
+            const doc = event.textEditor.document;
+            if (doc.languageId !== 'knot') return;
+            if (!client) return;
+            if (event.selections.length !== 1 || !event.selections[0].isEmpty) return;
+
+            const pos = event.selections[0].active;
+            const uri = doc.uri.toString();
+
+            if (forwardSyncTimer) clearTimeout(forwardSyncTimer);
+            forwardSyncTimer = setTimeout(async () => {
+                forwardSyncTimer = undefined;
+                try {
+                    // knot/syncForward maps the knot line to the corresponding typ line
+                    // and scrolls the preview by calling tinymist.scrollPreview on our
+                    // tinymist subprocess. Fire-and-forget — result is not used here.
+                    await client!.sendRequest('knot/syncForward', {
+                        uri,
+                        line: pos.line,
+                        character: pos.character,
+                    });
+                } catch (_) {
+                    // Silently ignore — knot-lsp may not be ready yet.
+                }
+            }, 150);
         })
     );
 
@@ -263,6 +295,7 @@ async function openPreview(outputChannel: any): Promise<void> {
     if (!editor || editor.document.languageId !== 'knot') return;
 
     const knotPath = editor.document.uri.fsPath;
+    const knotUri = Uri.file(knotPath);
     const projectRoot = findProjectRoot(path.dirname(knotPath));
     if (!projectRoot) {
         window.showErrorMessage('Could not find knot.toml');
@@ -284,7 +317,7 @@ async function openPreview(outputChannel: any): Promise<void> {
                 const watchProcess = spawn(knotBinary, ['watch'], { cwd: projectRoot, stdio: ['ignore', 'pipe', 'pipe'] });
                 watchProcess.on('exit', () => watchProcesses.delete(projectRoot));
                 watchProcesses.set(projectRoot, watchProcess);
-                
+
                 progress.report({ message: 'Waiting for Typst output...' });
                 let attempts = 0;
                 while (!fs.existsSync(mainTypPath) && attempts < 20) {
@@ -293,23 +326,39 @@ async function openPreview(outputChannel: any): Promise<void> {
                 }
             }
 
-            progress.report({ message: 'Opening Tinymist Preview...' });
-            
-            const mainTypUri = Uri.file(mainTypPath);
-            const knotUri = Uri.file(knotPath);
-
-            suppressAutoSync = true;
-            try {
-                const mainTypDoc = await workspace.openTextDocument(mainTypUri);
-                await window.showTextDocument(mainTypDoc, { viewColumn: ViewColumn.One, preserveFocus: false });
-                await commands.executeCommand('typst-preview.preview');
-                const knotDoc = await workspace.openTextDocument(knotUri);
-                await window.showTextDocument(knotDoc, { viewColumn: ViewColumn.One, preserveFocus: false });
-            } catch (e) {
-                outputChannel.appendLine(`[preview] Failed: ${e}`);
-            } finally {
-                setTimeout(() => { suppressAutoSync = false; }, 1000);
+            if (!fs.existsSync(mainTypPath)) {
+                window.showErrorMessage(`Compiled file not found: ${mainTypPath}`);
+                return;
             }
+
+            progress.report({ message: 'Starting preview...' });
+
+            if (!client) {
+                window.showErrorMessage('LSP not connected — cannot start preview');
+                return;
+            }
+
+            try {
+                const result: any = await client.sendRequest('knot/startPreview', {
+                    uri: knotUri.toString(),
+                });
+                if (result?.status === 'ok' && result?.staticServerPort) {
+                    // Use the dynamic port returned by Tinymist
+                    await env.openExternal(Uri.parse(`http://127.0.0.1:${result.staticServerPort}/?task=knot-preview`));
+                } else {
+                    outputChannel.appendLine(`[preview] startPreview returned: ${JSON.stringify(result)}`);
+                    window.showErrorMessage(`Failed to start preview: ${result?.message ?? 'unknown error'}`);
+                    return;
+                }
+            } catch (e) {
+                outputChannel.appendLine(`[preview] startPreview failed: ${e}`);
+                window.showErrorMessage(`Failed to start preview: ${e}`);
+                return;
+            }
+
+            // Keep focus on the .knot editor
+            const knotDoc = await workspace.openTextDocument(knotUri);
+            await window.showTextDocument(knotDoc, { viewColumn: ViewColumn.One, preserveFocus: false });
 
             compilationStatusBar.text = '$(check) Preview ready!';
             setTimeout(() => compilationStatusBar.hide(), 2000);

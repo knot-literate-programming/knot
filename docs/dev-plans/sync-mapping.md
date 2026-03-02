@@ -81,7 +81,7 @@ impl Backend for TypstBackend {
 Décider si on les marque aussi (probablement oui pour un mapping complet) :
 
 ```rust
-// Dans inline_processor.rs
+// Dans execution.rs
 format!("// #BEGIN-INLINE {} {}\n// #END-INLINE {}\n",
         inline_id, formatted_result, inline_id)
 ```
