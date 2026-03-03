@@ -33,6 +33,8 @@
   align: none,
   is-inert: false,
   is-pending: false,
+  is-modified: false,
+  is-modified-cascade: false,
   ..rest,
 ) = {
   // Ensure warnings and errors are arrays (defensive check)
@@ -46,8 +48,8 @@
 
   // Wrap code in styled block
   let code-block = if code != none {
-    // Pending chunks get an orange border to signal "not yet executed".
-    let effective-stroke = if is-pending { 2pt + rgb("#f97316") } else { code-stroke }
+    // Visual state borders: Pending (orange) > Modified (amber strong) > ModifiedCascade (amber muted) > default.
+    let effective-stroke = if is-pending { 2pt + rgb("#f97316") } else if is-modified { 2pt + rgb("#d97706") } else if is-modified-cascade { 1pt + rgb("#fcd34d") } else { code-stroke }
     let b = block(
       fill: code-background,
       stroke: effective-stroke,

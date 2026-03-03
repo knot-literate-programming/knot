@@ -94,6 +94,14 @@ fn push_base_args(chunk: &Chunk, state: &ChunkExecutionState, args: &mut Vec<Str
         args.push("is-pending: true".to_string());
     }
 
+    if matches!(state, ChunkExecutionState::Modified) {
+        args.push("is-modified: true".to_string());
+    }
+
+    if matches!(state, ChunkExecutionState::ModifiedCascade) {
+        args.push("is-modified-cascade: true".to_string());
+    }
+
     if !chunk.errors.is_empty() {
         let mut error_list = chunk
             .errors

@@ -166,7 +166,7 @@ impl KnotLanguageServer {
             log::info!("[startPreview] main.typ not found — running Phase 0");
             let output = tokio::task::spawn_blocking({
                 let path = knot_path.clone();
-                move || knot_core::compile_project_phase0(&path)
+                move || knot_core::compile_project_phase0(&path, knot_core::Phase0Mode::Pending)
             })
             .await
             .map_err(|_| anyhow::anyhow!("Phase 0 panicked"))?
@@ -484,7 +484,7 @@ impl KnotLanguageServer {
         // ── Phase 0 ──────────────────────────────────────────────────────────
         let phase0 = tokio::task::spawn_blocking({
             let path = knot_path.clone();
-            move || knot_core::compile_project_phase0(&path)
+            move || knot_core::compile_project_phase0(&path, knot_core::Phase0Mode::Pending)
         })
         .await;
 
@@ -589,9 +589,14 @@ impl KnotLanguageServer {
             move || match text {
                 // Use the in-memory buffer so unsaved edits are visible
                 // immediately (without waiting for an explicit save).
-                Some(t) => knot_core::compile_project_phase0_unsaved(&path, &path, &t),
+                Some(t) => knot_core::compile_project_phase0_unsaved(
+                    &path,
+                    &path,
+                    &t,
+                    knot_core::Phase0Mode::Modified,
+                ),
                 // Fallback: document not in state yet, read from disk.
-                None => knot_core::compile_project_phase0(&path),
+                None => knot_core::compile_project_phase0(&path, knot_core::Phase0Mode::Modified),
             }
         })
         .await;

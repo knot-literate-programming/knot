@@ -25,15 +25,20 @@ use std::collections::HashMap;
 
 /// Execution lifecycle state of a chunk within the compilation pipeline.
 ///
-/// - `Ready`   : cache valid or execution just succeeded — full output available.
-/// - `Inert`   : follows an upstream error; rendered as raw code without execution.
-/// - `Pending` : cache invalidated, not yet executed (reserved for progressive
-///   compilation: first-pass placeholder before execution completes).
+/// - `Ready`           : cache valid or execution just succeeded — full output available.
+/// - `Inert`           : follows an upstream error; rendered as raw code without execution.
+/// - `Pending`         : compilation in progress (`do_compile` Phase 0) — orange border.
+/// - `Modified`        : first `MustExecute` in a language chain; user directly edited
+///   this chunk — amber border (strong).
+/// - `ModifiedCascade` : subsequent `MustExecute` in the same chain; hash-invalidated
+///   downstream chunk — amber border (muted).
 #[derive(Debug, Clone, PartialEq)]
 pub enum ChunkExecutionState {
     Ready,
     Inert,
     Pending,
+    Modified,
+    ModifiedCascade,
 }
 
 /// What the execution phase must do with this node.

@@ -97,6 +97,54 @@ pub(super) fn phase0_inert_output(pn: &PlannedNode, backend: &TypstBackend) -> S
     }
 }
 
+/// Format a MustExecute node that the user directly edited (first in its language chain).
+///
+/// Used in Phase-0 `Modified` mode (`do_phase0_only`): the chunk's code changed
+/// directly — rendered with an amber border (strong) to signal a pending edit.
+pub(super) fn modified_output(pn: &PlannedNode, backend: &TypstBackend) -> String {
+    match &pn.kind {
+        PlannedNodeKind::Chunk { node: chunk, data } => {
+            let empty = ExecutionOutput {
+                result: ExecutionResult::Text(String::new()),
+                warnings: vec![],
+            };
+            format_output(
+                backend,
+                chunk,
+                &data.merged_codly_options,
+                &data.resolved_options,
+                &empty,
+                &ChunkExecutionState::Modified,
+            )
+        }
+        PlannedNodeKind::Inline { .. } => String::new(),
+    }
+}
+
+/// Format a MustExecute node invalidated by hash cascade (not directly edited).
+///
+/// Used in Phase-0 `Modified` mode: a downstream chunk whose hash changed
+/// because an upstream chunk changed — rendered with a muted amber border.
+pub(super) fn modified_cascade_output(pn: &PlannedNode, backend: &TypstBackend) -> String {
+    match &pn.kind {
+        PlannedNodeKind::Chunk { node: chunk, data } => {
+            let empty = ExecutionOutput {
+                result: ExecutionResult::Text(String::new()),
+                warnings: vec![],
+            };
+            format_output(
+                backend,
+                chunk,
+                &data.merged_codly_options,
+                &data.resolved_options,
+                &empty,
+                &ChunkExecutionState::ModifiedCascade,
+            )
+        }
+        PlannedNodeKind::Inline { .. } => String::new(),
+    }
+}
+
 /// Format a node that is pending execution (placeholder: code shown, empty output).
 ///
 /// Used during progressive compilation (Phase 0): the node is known to need

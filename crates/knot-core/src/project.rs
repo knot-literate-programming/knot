@@ -25,7 +25,7 @@ use crate::compiler::Compiler;
 use crate::config::Config;
 use crate::defaults::Defaults;
 use crate::parser::Document;
-use crate::{ProgressEvent, assemble_pass, planned_to_partial_nodes};
+use crate::{Phase0Mode, ProgressEvent, assemble_pass, planned_to_partial_nodes};
 use anyhow::{Context, Result};
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -54,13 +54,14 @@ pub struct ProjectOutput {
 /// Phase 0: plan all project files without executing any chunks.
 ///
 /// Reads all files from disk.  Cache hits render with their real output;
-/// `MustExecute` chunks render as pending placeholders.  The result is
-/// written to `main.typ` on disk.
+/// `MustExecute` chunks render according to `mode` — orange (`Pending`) when
+/// a compile is in progress, or amber (`Modified`) when the user is editing
+/// without triggering a compile.  The result is written to `main.typ` on disk.
 ///
 /// This is near-instant (no subprocess spawning) and suitable for giving the
 /// user an immediate preview after a save.
-pub fn compile_project_phase0(start_path: &Path) -> Result<ProjectOutput> {
-    compile_phase0_inner(start_path, None)
+pub fn compile_project_phase0(start_path: &Path, mode: Phase0Mode) -> Result<ProjectOutput> {
+    compile_phase0_inner(start_path, None, mode)
 }
 
 /// Phase 0 with one file's content supplied in-memory.
@@ -77,8 +78,9 @@ pub fn compile_project_phase0_unsaved(
     start_path: &Path,
     unsaved_path: &Path,
     unsaved_content: &str,
+    mode: Phase0Mode,
 ) -> Result<ProjectOutput> {
-    compile_phase0_inner(start_path, Some((unsaved_path, unsaved_content)))
+    compile_phase0_inner(start_path, Some((unsaved_path, unsaved_content)), mode)
 }
 
 /// Full compilation with optional per-chunk streaming.
@@ -100,7 +102,8 @@ pub fn compile_project_full(
     let main_typ_path = project_root.join(format!("{main_stem}.typ"));
 
     // Compile all includes fully first (sequential, usually all cache hits).
-    let includes_content = compile_includes(&config, &project_root, false, None)?;
+    let includes_content =
+        compile_includes(&config, &project_root, false, None, Phase0Mode::Pending)?;
 
     // Read and parse the main file.
     let main_source = fs::read_to_string(&main_file)
@@ -115,11 +118,12 @@ pub fn compile_project_full(
         // ----------------------------------------------------------------
 
         let backend = TypstBackend::new();
-        let (planned, cache, _) = main_compiler.plan_and_partial(&doc, &main_file_name)?;
+        let (planned, cache, _) =
+            main_compiler.plan_and_partial(&doc, &main_file_name, Phase0Mode::Pending)?;
 
         // Initialise the partial buffer: cache hits → real content,
-        // MustExecute → pending placeholder.
-        let mut partial = planned_to_partial_nodes(&planned, &backend);
+        // MustExecute → pending placeholder (orange — compilation in progress).
+        let mut partial = planned_to_partial_nodes(&planned, &backend, Phase0Mode::Pending);
 
         // Internal channel: execute thread → this thread.
         let (prog_tx, mut prog_rx) = tokio::sync::mpsc::unbounded_channel::<ProgressEvent>();
@@ -202,18 +206,19 @@ pub fn compile_project_full(
 fn compile_phase0_inner(
     start_path: &Path,
     unsaved: Option<(&Path, &str)>,
+    mode: Phase0Mode,
 ) -> Result<ProjectOutput> {
     let (config, project_root) = Config::find_and_load(start_path)?;
     let (main_file, main_file_name, main_stem) = resolve_main_file(&config, &project_root)?;
     let main_typ_path = project_root.join(format!("{main_stem}.typ"));
 
-    let includes_content = compile_includes(&config, &project_root, true, unsaved)?;
+    let includes_content = compile_includes(&config, &project_root, true, unsaved, mode)?;
 
     let main_source = read_or_override(&main_file, unsaved)
         .with_context(|| format!("Cannot read main file: {}", main_file.display()))?;
     let doc = Document::parse(main_source.clone());
     let mut compiler = Compiler::new(&main_file)?;
-    let (_, _, phase0_main) = compiler.plan_and_partial(&doc, &main_file_name)?;
+    let (_, _, phase0_main) = compiler.plan_and_partial(&doc, &main_file_name, mode)?;
     let phase0_main_fixed = fix_paths_in_typst(&phase0_main, &main_typ_path)?;
 
     let placeholder_line = find_placeholder_line(&main_source);
@@ -281,11 +286,13 @@ fn resolve_main_file(config: &Config, project_root: &Path) -> Result<(PathBuf, S
 /// When `phase0 = true`, uses [`Compiler::plan_and_partial`] (no execution).
 /// When `phase0 = false`, uses [`Compiler::compile`] (full execution).
 /// `unsaved` optionally overrides one file's disk content.
+/// `mode` controls how `MustExecute` chunks are rendered in Phase 0.
 fn compile_includes(
     config: &Config,
     project_root: &Path,
     phase0: bool,
     unsaved: Option<(&Path, &str)>,
+    mode: Phase0Mode,
 ) -> Result<String> {
     let includes = match &config.document.includes {
         Some(inc) if !inc.is_empty() => inc,
@@ -327,7 +334,7 @@ fn compile_includes(
 
         let mut compiler = Compiler::new(&include_path)?;
         let chapter_content = if phase0 {
-            let (_, _, phase0_typ) = compiler.plan_and_partial(&doc, &source_file)?;
+            let (_, _, phase0_typ) = compiler.plan_and_partial(&doc, &source_file, mode)?;
             fix_paths_in_typst(&phase0_typ, &typ_anchor)?
         } else {
             let full_typ = compiler.compile(&doc, &source_file)?;
