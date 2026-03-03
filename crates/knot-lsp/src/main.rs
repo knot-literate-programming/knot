@@ -171,12 +171,37 @@ impl LanguageServer for KnotLanguageServer {
             self.publish_combined_diagnostics(&uri).await;
             self.forward_to_tinymist(lsp::DID_CHANGE, &uri).await;
         }
+
+        // Debounce a Phase-0-only compile: cancel the previous handle and
+        // schedule a new one.  After 300 ms of inactivity the plan pass runs
+        // (no execution — safe even with mid-typing incomplete chunk code).
+        {
+            let mut handles = self.state.debounce_handles.lock().await;
+            if let Some(h) = handles.remove(&uri) {
+                h.abort();
+            }
+        }
+        let this = self.clone_for_task();
+        let uri_clone = uri.clone();
+        let handle = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            this.do_phase0_only(&uri_clone).await;
+        });
+        self.state.debounce_handles.lock().await.insert(uri, handle);
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         use std::sync::atomic::Ordering;
 
         let uri = params.text_document.uri;
+
+        // Cancel any pending Phase-0 debounce — do_compile covers Phase 0 too.
+        {
+            let mut handles = self.state.debounce_handles.lock().await;
+            if let Some(h) = handles.remove(&uri) {
+                h.abort();
+            }
+        }
 
         // Forward the syntactic mask to Tinymist (hover, completion, etc.).
         self.forward_to_tinymist(lsp::DID_SAVE, &uri).await;

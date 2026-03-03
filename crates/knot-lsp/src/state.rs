@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use tower_lsp::lsp_types::{Diagnostic, Url};
 
 /// In-memory overlay state for `main.typ` in the Tinymist subprocess.
@@ -94,6 +94,11 @@ pub struct ServerState {
     /// Background compile tasks skip stale preview writes when this has changed.
     pub compile_generation: Arc<AtomicU64>,
 
+    /// Per-document debounce handles for the Phase-0-only compile triggered by
+    /// `did_change`.  The previous handle is aborted on each new keystroke so
+    /// only the last one (after the typing pause) actually fires.
+    pub debounce_handles: Arc<Mutex<HashMap<Url, tokio::task::JoinHandle<()>>>>,
+
     /// Global configuration and caches
     pub air_path_override: Arc<RwLock<Option<PathBuf>>>,
     pub ruff_path_override: Arc<RwLock<Option<PathBuf>>>,
@@ -111,6 +116,7 @@ impl ServerState {
             preview_info: Arc::new(RwLock::new(None)),
             tinymist_overlay: Arc::new(RwLock::new(TinymistOverlay::Inactive)),
             compile_generation: Arc::new(AtomicU64::new(0)),
+            debounce_handles: Arc::new(Mutex::new(HashMap::new())),
             air_path_override: Arc::new(RwLock::new(None)),
             ruff_path_override: Arc::new(RwLock::new(None)),
             tinymist_path_override: Arc::new(RwLock::new(None)),

@@ -485,6 +485,58 @@ impl KnotLanguageServer {
             self.publish_combined_diagnostics(uri).await;
         }
     }
+
+    /// Phase-0-only compile triggered by `did_change` debounce.
+    ///
+    /// Runs the planning pass only — **no chunk execution**.  Cache hits are
+    /// rendered with their real output; modified chunks appear as placeholders.
+    /// This is safe to call while the user is actively typing (including inside
+    /// a code chunk with syntactically incomplete code) because nothing is
+    /// executed and the cache is never written.
+    pub(crate) async fn do_phase0_only(&self, uri: &Url) {
+        let knot_path = match uri.to_file_path() {
+            Ok(p) => p,
+            Err(_) => return,
+        };
+
+        let result = tokio::task::spawn_blocking({
+            let path = knot_path.clone();
+            move || knot_core::compile_project_phase0(&path)
+        })
+        .await;
+
+        let Ok(Ok(output)) = result else { return };
+
+        // Write to disk + send didChange to Tinymist overlay if active.
+        // No generation guard: Phase 0 is idempotent and never corrupts state.
+        let _ = std::fs::write(&output.main_typ_path, &output.typ_content);
+
+        let version_opt = {
+            let mut overlay = self.state.tinymist_overlay.write().await;
+            if let TinymistOverlay::Active { next_version } = &mut *overlay {
+                let v = *next_version;
+                *next_version += 1;
+                Some(v)
+            } else {
+                None
+            }
+        };
+
+        if let (Some(v), Ok(typ_uri)) = (version_opt, Url::from_file_path(&output.main_typ_path)) {
+            let tinymist_guard = self.state.tinymist.read().await;
+            if let Some(proxy) = tinymist_guard.as_ref() {
+                let _ = proxy
+                    .send_notification(
+                        lsp::DID_CHANGE,
+                        serde_json::json!({
+                            "textDocument": { "uri": typ_uri, "version": v },
+                            "contentChanges": [{ "text": &output.typ_content }],
+                        }),
+                    )
+                    .await;
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
