@@ -155,7 +155,7 @@ Two compilation paths run in the LSP:
 
 ### LSP/VS Code sync
 - **Forward sync** ✅ (`knot/syncForward`): cursor position in `.knot` editor → maps to `.typ` line → calls `tinymist.scrollPreview` on **our own** Tinymist subprocess. The key: using our subprocess (not the VS Code extension's) gives us the task ID and port.
-- **Backward sync** (WIP): click in PDF → Tinymist sends `window/showDocument` with a `.typ` location → map back to `.knot` coordinates and move the editor cursor.
+- **Backward sync** ✅ (`window/showDocument`): click in PDF → Tinymist sends `window/showDocument` to our LSP → `handle_tinymist_show_document` maps `.typ` line → `.knot` line → VS Code opens the `.knot` file at the right position. The extension also handles auto-redirect when a `.typ` file is opened in the editor (via `knot jump-to-source`).
 
 ## Chunk Options
 
