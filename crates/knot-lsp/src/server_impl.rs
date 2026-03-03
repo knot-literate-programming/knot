@@ -20,7 +20,7 @@ use crate::lsp_methods::{text_document as lsp, window as win};
 use crate::position_mapper::PositionMapper;
 use crate::transform;
 use crate::transform::transform_to_typst;
-use crate::{FormatChunkParams, KnotLanguageServer};
+use crate::{FormatChunkParams, KnotLanguageServer, StartPreviewParams, SyncForwardParams};
 
 // ---------------------------------------------------------------------------
 // Custom request handling
@@ -54,6 +54,274 @@ impl KnotLanguageServer {
             Ok(None) => Ok(serde_json::json!({"status": "no_changes"})),
             Err(_) => Err(tower_lsp::jsonrpc::Error::internal_error()),
         }
+    }
+
+    /// Start a preview task in our tinymist subprocess and return the static server port.
+    ///
+    /// On the first call, sends `tinymist.doStartPreview` to our subprocess with a
+    /// fixed task ID ("knot-preview") and stores `(task_id, port)` for reuse by
+    /// `do_sync_forward`. On subsequent calls the cached port is returned immediately.
+    pub(crate) async fn handle_start_preview(
+        &self,
+        params: StartPreviewParams,
+    ) -> tower_lsp::jsonrpc::Result<serde_json::Value> {
+        log::info!("[startPreview] Request received for URI: {}", params.uri);
+        match self.do_start_preview(&params).await {
+            Ok(result) => {
+                log::info!("[startPreview] Success: {:?}", result);
+                Ok(result)
+            }
+            Err(e) => {
+                log::warn!("[startPreview] Error: {e}");
+                Ok(serde_json::json!({"status": "error", "message": e.to_string()}))
+            }
+        }
+    }
+
+    async fn do_start_preview(
+        &self,
+        params: &StartPreviewParams,
+    ) -> anyhow::Result<serde_json::Value> {
+        use anyhow::Context as _;
+
+        // Return cached info if the preview is already running.
+        if let Some(port) = self
+            .state
+            .preview_info
+            .read()
+            .await
+            .as_ref()
+            .map(|(_, p)| *p)
+        {
+            return Ok(serde_json::json!({"status": "ok", "staticServerPort": port}));
+        }
+
+        let knot_path = params
+            .uri
+            .to_file_path()
+            .map_err(|_| anyhow::anyhow!("Invalid URI: {}", params.uri))?;
+
+        let (config, project_root) = knot_core::config::Config::find_and_load(&knot_path)
+            .context("Could not find knot.toml")?;
+
+        let main_file = config.document.main.as_deref().unwrap_or("main.knot");
+        let main_stem = std::path::Path::new(main_file)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("main");
+        let main_typ_path = project_root.join(format!("{main_stem}.typ"));
+        let main_typ_str = main_typ_path.to_string_lossy().to_string();
+
+        const TASK_ID: &str = "knot-preview";
+
+        // Pass --data-plane-host 127.0.0.1:0 so we don't conflict with other instances.
+        // --no-open: the extension opens it.
+        let response =
+            {
+                let tinymist_guard = self.state.tinymist.read().await;
+                let proxy = tinymist_guard
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("Tinymist not ready"))?;
+
+                // 1. Explicitly 'open' the main typ file in tinymist.
+                if let Ok(main_typ_uri) = Url::from_file_path(&main_typ_path) {
+                    let _ = proxy.send_notification(
+                    lsp::DID_OPEN,
+                    serde_json::json!({
+                        "textDocument": {
+                            "uri": main_typ_uri,
+                            "languageId": "typst",
+                            "version": 1,
+                            "text": std::fs::read_to_string(&main_typ_path).unwrap_or_default(),
+                        }
+                    })
+                ).await;
+                }
+
+                proxy
+                    .send_request_timeout(
+                        "workspace/executeCommand",
+                        serde_json::json!({
+                            "command": "tinymist.doStartPreview",
+                            "arguments": [[
+                                "--task-id", TASK_ID,
+                                "--data-plane-host", "127.0.0.1:0",
+                                "--control-plane-host", "127.0.0.1:0",
+                                "--static-file-host", "127.0.0.1:0",
+                                "--no-open",
+                                &main_typ_str,
+                            ]]
+                        }),
+                        30,
+                    )
+                    .await?
+            };
+
+        let result = response.get("result").ok_or_else(|| {
+            anyhow::anyhow!("No result from tinymist.doStartPreview: {response:?}")
+        })?;
+
+        let static_server_port = result
+            .get("staticServerPort")
+            .and_then(|v| v.as_u64())
+            .ok_or_else(|| anyhow::anyhow!("Missing staticServerPort in: {result:?}"))?
+            as u16;
+
+        log::info!(
+            "[startPreview] Setting preview_info: task={}, port={}",
+            TASK_ID,
+            static_server_port
+        );
+        *self.state.preview_info.write().await = Some((TASK_ID.to_string(), static_server_port));
+
+        log::info!("[startPreview] Preview started on port {static_server_port} (task={TASK_ID})");
+
+        Ok(serde_json::json!({"status": "ok", "staticServerPort": static_server_port}))
+    }
+
+    /// Forward sync: map a `.knot` cursor position to the corresponding `.typ` line
+    /// and scroll the tinymist preview to that position.
+    pub(crate) async fn handle_sync_forward(
+        &self,
+        params: SyncForwardParams,
+    ) -> tower_lsp::jsonrpc::Result<serde_json::Value> {
+        match self.do_sync_forward(&params).await {
+            Ok(result) => Ok(result),
+            Err(e) => {
+                log::warn!("[syncForward] {e}");
+                Ok(serde_json::json!({"status": "error", "message": e.to_string()}))
+            }
+        }
+    }
+
+    async fn do_sync_forward(
+        &self,
+        params: &SyncForwardParams,
+    ) -> anyhow::Result<serde_json::Value> {
+        use anyhow::Context as _;
+
+        let knot_path = params
+            .uri
+            .to_file_path()
+            .map_err(|_| anyhow::anyhow!("Invalid URI: {}", params.uri))?;
+
+        let (config, project_root) = knot_core::config::Config::find_and_load(&knot_path)
+            .context("Could not find knot.toml")?;
+
+        let main_file = config.document.main.as_deref().unwrap_or("main.knot");
+        let main_stem = std::path::Path::new(main_file)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("main");
+        let main_typ_path = project_root.join(format!("{main_stem}.typ"));
+        let filepath = main_typ_path.to_string_lossy().to_string();
+
+        let typ_content = std::fs::read_to_string(&main_typ_path)
+            .with_context(|| format!("Could not read {}", main_typ_path.display()))?;
+
+        let blocks = knot_core::sync::parse_knot_markers(&typ_content);
+
+        let knot_rel = knot_path
+            .strip_prefix(&project_root)
+            .unwrap_or(&knot_path)
+            .to_string_lossy()
+            .to_string();
+
+        // Both params.line (VSCode) and map_knot_line_to_typ input/output are 0-based.
+        let knot_line_0based = params.line as usize;
+        let Some(typ_line_0based) =
+            knot_core::sync::map_knot_line_to_typ(&knot_rel, knot_line_0based, &blocks, &knot_path)
+        else {
+            // Cursor is in a Typst-only region — no mapping available.
+            return Ok(serde_json::json!({"status": "unmapped"}));
+        };
+
+        log::info!(
+            "[syncForward] {}:{} → {}:{}",
+            knot_rel,
+            knot_line_0based,
+            filepath,
+            typ_line_0based
+        );
+
+        // Find the best scrollable line: the mapped line if it contains Typst text,
+        // otherwise scan backwards for the nearest preceding text line.
+        //
+        // `jump_from_cursor` in tinymist uses `leaf_at(cursor, Side::Before)`:
+        // - At column 0, it finds the node BEFORE the cursor (previous line) → fails.
+        // - On `#func(...)` or `// comment` lines, there is no Text node → fails.
+        // We fix both by (a) using col+1 to be inside a Text node, and (b) scanning
+        // back past code chunks / markers to the nearest real text line.
+        let (scroll_line, character) = {
+            let lines: Vec<&str> = typ_content.lines().collect();
+            let scan_from = typ_line_0based.min(lines.len().saturating_sub(1));
+
+            let mut found = None;
+            for i in (0..=scan_from).rev() {
+                let Some(line) = lines.get(i) else { break };
+                let trimmed = line.trim_start();
+                // Stop at file-block boundaries (don't cross into another file).
+                if trimmed.starts_with("// BEGIN-FILE") || trimmed.starts_with("// END-FILE") {
+                    break;
+                }
+                // Skip comments, Typst function calls (#...), and empty lines —
+                // none of these contain a Text AST node.
+                if trimmed.is_empty() || trimmed.starts_with("//") || trimmed.starts_with('#') {
+                    continue;
+                }
+                // Headings in Typst look like `== Title`. The `=` chars
+                // form a HeadingMarker AST node, not a Text node.
+                // jump_from_cursor only accepts Text/MathText nodes, so we
+                // must land the cursor inside the title text, not on the `=`.
+                let col = if trimmed.starts_with('=') {
+                    line.find(|c: char| c != '=' && !c.is_whitespace())
+                        .unwrap_or(3)
+                } else {
+                    line.find(|c: char| !c.is_whitespace()).unwrap_or(0)
+                };
+                found = Some((i, (col + 1) as u32));
+                break;
+            }
+
+            found.unwrap_or((scan_from, 1))
+        };
+
+        // Scroll the preview if one is running in our tinymist subprocess.
+        let preview_info = self.state.preview_info.read().await.clone();
+        if let Some((task_id, _)) = preview_info {
+            let proxy = self.state.tinymist.read().await.as_ref().cloned();
+
+            if let Some(proxy) = proxy {
+                log::info!(
+                    "[syncForward] Sending scroll: knot→typ:{} → scroll_line={} character={}",
+                    typ_line_0based,
+                    scroll_line,
+                    character
+                );
+
+                let _ = proxy
+                    .send_request(
+                        "workspace/executeCommand",
+                        serde_json::json!({
+                            "command": "tinymist.scrollPreview",
+                            "arguments": [task_id, {
+                                "event": "panelScrollTo",
+                                "filepath": filepath,
+                                "line": scroll_line as u32,
+                                "character": character,
+                            }]
+                        }),
+                    )
+                    .await;
+            }
+        } else {
+            log::info!("[syncForward] No preview running, skipping scroll");
+        }
+        Ok(serde_json::json!({
+            "status": "ok",
+            "filepath": filepath,
+            "typ_line": typ_line_0based,
+        }))
     }
 
     /// Create a clonable `Arc` handle to `self` for use in `tokio::spawn` tasks.
@@ -165,8 +433,8 @@ impl KnotLanguageServer {
 
         // 2. Send to Tinymist (no state locks held)
         let send_result = {
-            let mut tinymist_guard = self.state.tinymist.write().await;
-            if let Some(proxy) = tinymist_guard.as_mut() {
+            let tinymist_guard = self.state.tinymist.read().await;
+            if let Some(proxy) = tinymist_guard.as_ref() {
                 proxy.send_notification(actual_method, params).await
             } else {
                 return;
@@ -183,8 +451,8 @@ impl KnotLanguageServer {
         }
 
         if warm_up {
-            let mut tinymist_guard = self.state.tinymist.write().await;
-            if let Some(proxy) = tinymist_guard.as_mut() {
+            let tinymist_guard = self.state.tinymist.read().await;
+            if let Some(proxy) = tinymist_guard.as_ref() {
                 let _ = proxy
                     .send_request(
                         lsp::DOCUMENT_SYMBOL,
@@ -206,6 +474,7 @@ impl KnotLanguageServer {
             win::SHOW_MESSAGE | win::LOG_MESSAGE => {
                 self.handle_tinymist_message(method, &msg).await;
             }
+            win::SHOW_DOCUMENT => self.handle_tinymist_show_document(&msg).await,
             _ => {}
         }
     }
@@ -239,6 +508,101 @@ impl KnotLanguageServer {
             drop(docs);
             self.publish_combined_diagnostics(&uri).await;
         }
+    }
+
+    /// Handle a `window/showDocument` request sent by the Tinymist subprocess when the
+    /// user clicks in the browser preview (backward sync: preview → .knot source).
+    ///
+    /// Flow:
+    /// 1. Immediately acknowledge the request to tinymist.
+    /// 2. Parse the .typ URI and line from the request params.
+    /// 3. Map the .typ line → .knot file + line via the sync markers.
+    /// 4. Ask VS Code to open the .knot file at the mapped position.
+    async fn handle_tinymist_show_document(&self, msg: &serde_json::Value) {
+        use tower_lsp::lsp_types::{Position, Range, ShowDocumentParams};
+
+        // 1. Acknowledge tinymist immediately (it's a request, not a notification).
+        let id = msg.get("id").cloned().unwrap_or(serde_json::Value::Null);
+        {
+            let tinymist_guard = self.state.tinymist.read().await;
+            if let Some(proxy) = tinymist_guard.as_ref() {
+                let _ = proxy
+                    .send_raw_response(&id, serde_json::json!({"success": true}))
+                    .await;
+            }
+        }
+
+        // 2. Extract the URI and line number from the request.
+        let Some(params) = msg.get("params") else {
+            return;
+        };
+        let Some(uri_str) = params.get("uri").and_then(|u| u.as_str()) else {
+            return;
+        };
+        let Ok(uri) = Url::parse(uri_str) else { return };
+
+        // The selection in the .typ file (start line, 0-based).
+        let typ_line = params
+            .get("selection")
+            .and_then(|s| s.get("start"))
+            .and_then(|s| s.get("line"))
+            .and_then(|l| l.as_u64())
+            .unwrap_or(0) as usize;
+
+        // 3. Resolve the file path and load sync markers.
+        // The URI may be the disk .typ file (from preview) or a virtual .knot.typ URI.
+        let typ_path = match uri.to_file_path() {
+            Ok(p) => p,
+            Err(_) => return,
+        };
+
+        let project_root = match knot_core::config::Config::find_project_root(&typ_path) {
+            Ok(r) => r,
+            Err(_) => return,
+        };
+
+        let typ_content = match std::fs::read_to_string(&typ_path) {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+
+        let blocks = knot_core::sync::parse_knot_markers(&typ_content);
+
+        let Some((knot_path, knot_line_0based)) =
+            knot_core::sync::map_typ_line_to_knot(typ_line, &blocks, &project_root)
+        else {
+            log::debug!("[showDocument] No .knot mapping for {uri_str}:{typ_line}");
+            return;
+        };
+
+        log::info!(
+            "[showDocument] {}:{} → {}:{}",
+            uri_str,
+            typ_line,
+            knot_path.display(),
+            knot_line_0based
+        );
+
+        // 4. Ask VS Code to open the .knot file and jump to the mapped line.
+        let Ok(knot_uri) = Url::from_file_path(&knot_path) else {
+            return;
+        };
+        let pos = Position {
+            line: knot_line_0based as u32,
+            character: 0,
+        };
+        let _ = self
+            .client
+            .show_document(ShowDocumentParams {
+                uri: knot_uri,
+                external: Some(false),
+                take_focus: Some(true),
+                selection: Some(Range {
+                    start: pos,
+                    end: pos,
+                }),
+            })
+            .await;
     }
 
     async fn handle_tinymist_message(&self, method: &str, msg: &serde_json::Value) {

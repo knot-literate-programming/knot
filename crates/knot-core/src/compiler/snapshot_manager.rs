@@ -2,10 +2,15 @@
 //!
 //! Handles loading, saving, and restoring language runtime state (snapshots)
 //! to enable incremental compilation and state persistence across chunks.
+//!
+//! The `SnapshotManager` owns the executor for its language chain, so that
+//! snapshot operations (`restore_if_needed`, `update_after_node`) can access
+//! the executor directly without requiring it to be threaded through every
+//! call site as a `&mut Option<Box<dyn KnotExecutor>>`.
 
 use crate::cache::Cache;
 use crate::defaults::Defaults;
-use crate::executors::ExecutorManager;
+use crate::executors::KnotExecutor;
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::path::Path;
@@ -15,26 +20,53 @@ fn short_hash(h: &str) -> &str {
     &h[..h.len().min(8)]
 }
 
-#[derive(Default)]
 pub struct SnapshotManager {
-    /// Tracks the hash of the snapshot currently loaded in EACH executor
+    /// Tracks the hash of the snapshot currently loaded in the executor.
     loaded_snapshot_per_lang: HashMap<String, String>,
+    /// The executor owned by this manager (one per language chain).
+    exec: Option<Box<dyn KnotExecutor>>,
 }
 
 impl SnapshotManager {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(exec: Option<Box<dyn KnotExecutor>>) -> Self {
+        Self {
+            loaded_snapshot_per_lang: HashMap::new(),
+            exec,
+        }
     }
 
-    /// Ensure the executor for the given language is in the state corresponding to `previous_hash`
+    /// Consume the manager and return the executor back to the caller.
+    ///
+    /// Called at the end of a language chain so the executor can be returned
+    /// to the `ExecutorManager`.
+    pub fn into_executor(self) -> Option<Box<dyn KnotExecutor>> {
+        self.exec
+    }
+
+    /// Returns a mutable reference to the executor box, or `None` if the
+    /// language is not supported.  Callers that require an executor handle the
+    /// `None` case once; method calls on the box are auto-dereffed through
+    /// `Box<dyn KnotExecutor>` transparently.
+    pub fn executor_mut(&mut self) -> Option<&mut Box<dyn KnotExecutor>> {
+        self.exec.as_mut()
+    }
+
+    /// Ensure the executor is in the state corresponding to `previous_hash`.
+    ///
+    /// If the executor is `None` (language not started), returns `Ok(())`
+    /// immediately.
     pub fn restore_if_needed(
         &mut self,
         lang: &str,
         previous_hash: &str,
-        executor_manager: &mut ExecutorManager,
         cache: &Cache,
         project_root: &Path,
     ) -> Result<()> {
+        let exec = match self.exec.as_deref_mut() {
+            Some(e) => e,
+            None => return Ok(()),
+        };
+
         if previous_hash.is_empty() {
             return Ok(());
         }
@@ -46,7 +78,6 @@ impl SnapshotManager {
             .unwrap_or_default();
 
         if current_loaded != previous_hash {
-            let exec = executor_manager.get_executor(lang)?;
             let ext = exec.snapshot_extension();
             let snapshot_path = cache.get_snapshot_path(previous_hash, ext);
 
@@ -61,14 +92,13 @@ impl SnapshotManager {
                     }
                 );
 
-                // Load the session snapshot
                 exec.load_session(&snapshot_path).context(format!(
                     "Failed to restore {} session snapshot for hash {}",
                     lang,
                     short_hash(previous_hash)
                 ))?;
 
-                // Also restore constant objects for this language
+                // Also restore constant objects for this language.
                 let cache_dir = project_root.join(Defaults::CACHE_DIR_NAME);
                 for info in cache.metadata.freeze_objects.values() {
                     if info.language == lang {
@@ -88,17 +118,24 @@ impl SnapshotManager {
         Ok(())
     }
 
-    /// Update the snapshot state after execution or cache hit
+    /// Update the snapshot state after execution or cache hit.
+    ///
+    /// If the executor is `None`, returns `Ok(())` immediately — for
+    /// cache-hit-only chains the snapshot already exists on disk and no
+    /// executor operations are needed.
     pub fn update_after_node(
         &mut self,
         lang: &str,
         node_hash: &str,
         previous_hash: &str,
-        executor_manager: &mut ExecutorManager,
         cache: &Cache,
         project_root: &Path,
     ) -> Result<()> {
-        let exec = executor_manager.get_executor(lang)?;
+        let exec = match self.exec.as_deref_mut() {
+            Some(e) => e,
+            None => return Ok(()),
+        };
+
         let ext = exec.snapshot_extension();
         let snapshot_path = cache.get_snapshot_path(node_hash, ext);
         let snapshot_exists = cache.has_snapshot(node_hash, ext);
@@ -108,7 +145,7 @@ impl SnapshotManager {
             // CASE 1: Cache Miss (Executed)
             // The executor has just run the code. It is in state `node_hash`.
 
-            // Temporarily remove constant objects to keep the snapshot lightweight
+            // Temporarily remove constant objects to keep the snapshot lightweight.
             for info in cache.metadata.freeze_objects.values() {
                 if info.language == lang {
                     exec.remove_from_env(&info.name).context(format!(
@@ -118,14 +155,13 @@ impl SnapshotManager {
                 }
             }
 
-            // Save the session snapshot
             exec.save_session(&snapshot_path).context(format!(
                 "Failed to save {} session snapshot for hash {}",
                 lang,
                 short_hash(node_hash)
             ))?;
 
-            // Restore constant objects to environment
+            // Restore constant objects to environment.
             for info in cache.metadata.freeze_objects.values() {
                 if info.language == lang {
                     exec.load_constant(&info.name, &info.hash, &cache_dir)
@@ -146,7 +182,6 @@ impl SnapshotManager {
                 lang
             );
 
-            // Update tracked state
             self.loaded_snapshot_per_lang
                 .insert(lang.to_string(), node_hash.to_string());
         } else {
@@ -171,7 +206,7 @@ impl SnapshotManager {
         Ok(())
     }
 
-    /// Mark a language state as potentially dirty or reset it
+    /// Mark a language state as potentially dirty or reset it.
     pub fn reset_loaded_state(&mut self, lang: &str) {
         self.loaded_snapshot_per_lang.remove(lang);
     }

@@ -88,12 +88,23 @@ pub enum ExecutionResult {
     DataFrameAndPlot { dataframe: PathBuf, plot: PathBuf },
 }
 
-/// Aggregated output of a code execution
+/// Aggregated output of a successful code execution (no runtime error).
 #[derive(Debug)]
 pub struct ExecutionOutput {
     pub result: ExecutionResult,
     pub warnings: Vec<RuntimeWarning>,
-    pub error: Option<RuntimeError>,
+}
+
+/// Outcome of a code execution attempt.
+///
+/// - `Ok(Success(output))` — code ran without error.
+/// - `Ok(RuntimeError(error))` — code ran but raised a deterministic error
+///   (cacheable; triggers Inert cascade).
+/// - `Err(e)` — infrastructure failure (process crash, timeout…); not cacheable.
+#[derive(Debug)]
+pub enum ExecutionAttempt {
+    Success(ExecutionOutput),
+    RuntimeError(RuntimeError),
 }
 
 /// Graphics options for code execution
@@ -108,52 +119,43 @@ pub struct GraphicsOptions {
 /// Process execution output: check for errors, then convert metadata.
 ///
 /// Shared post-execution logic for all language executors:
-/// 1. Structured error from side-channel metadata (most precise)
-/// 2. Stderr fallback for errors not caught by the wrapper (e.g. syntax errors)
-/// 3. Successful result via `metadata_to_execution_result`
+/// 1. Structured error from side-channel metadata (most precise) → `RuntimeError`
+/// 2. Stderr fallback logging for failures not caught by the wrapper
+/// 3. Successful result via `metadata_to_execution_result` → `Success`
 ///
 /// `traceback_skip` lets each language skip its own wrapper frames from the
-/// traceback (R skips 3: tryCatch/withCallingHandlers/withVisible; Python: 1).
+/// traceback (R skips 4: tryCatch/withCallingHandlers/withVisible/eval; Python: 1).
 pub fn process_execution_output(
     _code: &str,
     mut metadata: side_channel::KnotMetadata,
     stdout: &str,
     stderr: &str,
     traceback_skip: usize,
-) -> Result<ExecutionOutput> {
+) -> Result<ExecutionAttempt> {
     // Check for structured errors first (most precise)
-    if let Some(error) = &mut metadata.error {
+    if let Some(mut error) = metadata.error.take() {
         // Clean up traceback by skipping internal wrapper frames
         if traceback_skip > 0 && error.traceback.len() >= traceback_skip {
             error.traceback = error.traceback.drain(traceback_skip..).collect();
         }
 
-        let error_msg = error
-            .message
-            .as_ref()
-            .map(|m| m.to_string())
-            .unwrap_or_else(|| "Unknown error".to_string());
-
-        // For CLI/Bailing out, we still want a nice error message (log it instead of bailing here)
         log::debug!(
             "Execution failed structured: Error: {}, Call: {}",
-            error_msg,
-            error
-                .call
-                .as_ref()
-                .map(|c| c.to_string())
-                .unwrap_or_else(|| "unknown".to_string())
+            error.message.as_deref().unwrap_or("Unknown error"),
+            error.call.as_deref().unwrap_or("unknown"),
         );
 
-        return metadata_to_execution_result(metadata, stdout);
+        return Ok(ExecutionAttempt::RuntimeError(error));
     }
 
-    // Fallback: check stderr for catastrophic failures not caught by the wrapper.
+    // Fallback: log stderr for catastrophic failures not caught by the wrapper.
     if !stderr.trim().is_empty() {
         log::debug!("Executor stderr (non-fatal): {}", stderr.trim());
     }
 
-    metadata_to_execution_result(metadata, stdout)
+    Ok(ExecutionAttempt::Success(metadata_to_execution_result(
+        metadata, stdout,
+    )?))
 }
 
 /// Convert side-channel metadata to ExecutionOutput
@@ -227,13 +229,12 @@ pub fn metadata_to_execution_result(
     Ok(ExecutionOutput {
         result,
         warnings: metadata.warnings,
-        error: metadata.error,
     })
 }
 
 pub trait LanguageExecutor: Send + Sync {
     fn initialize(&mut self) -> Result<()>;
-    fn execute(&mut self, code: &str, graphics: &GraphicsOptions) -> Result<ExecutionOutput>;
+    fn execute(&mut self, code: &str, graphics: &GraphicsOptions) -> Result<ExecutionAttempt>;
     fn execute_inline(&mut self, code: &str) -> Result<String>;
     /// Execute a lightweight query and return raw stdout (no formatting)
     fn query(&mut self, code: &str) -> Result<String>;

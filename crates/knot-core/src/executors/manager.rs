@@ -103,6 +103,16 @@ impl ExecutorManager {
         Ok(executor.as_mut())
     }
 
+    /// Move an executor out of the manager for exclusive use in a task.
+    pub fn take(&mut self, lang: &str) -> Option<Box<dyn KnotExecutor>> {
+        self.executors.remove(lang)
+    }
+
+    /// Return an executor to the manager after use.
+    pub fn put_back(&mut self, lang: String, executor: Box<dyn KnotExecutor>) {
+        self.executors.insert(lang, executor);
+    }
+
     /// Check if a language is supported
     pub fn is_supported(&self, lang: &str) -> bool {
         crate::defaults::Defaults::SUPPORTED_LANGUAGES.contains(&lang)
@@ -244,7 +254,13 @@ mod tests {
         let result = exec2.execute("print(test_var)", &graphics);
         assert!(result.is_ok());
 
-        if let crate::executors::ExecutionResult::Text(output) = result.unwrap().result {
+        let success = match result.unwrap() {
+            crate::executors::ExecutionAttempt::Success(o) => o,
+            crate::executors::ExecutionAttempt::RuntimeError(e) => {
+                panic!("Expected Success, got error: {}", e)
+            }
+        };
+        if let crate::executors::ExecutionResult::Text(output) = success.result {
             assert!(output.contains("42"));
         } else {
             panic!("Expected Text result");

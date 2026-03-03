@@ -18,15 +18,28 @@
 //! nodes can be rendered immediately while the pending ones run in the
 //! background.
 
-use crate::compiler::ExecutableNode;
-use crate::executors::ExecutionOutput;
+use crate::executors::ExecutionAttempt;
+use crate::parser::ast::{Chunk, InlineExpr};
 use crate::parser::{ChunkOptions, ResolvedChunkOptions};
 use std::collections::HashMap;
 
+/// Execution lifecycle state of a chunk within the compilation pipeline.
+///
+/// - `Ready`   : cache valid or execution just succeeded — full output available.
+/// - `Inert`   : follows an upstream error; rendered as raw code without execution.
+/// - `Pending` : cache invalidated, not yet executed (reserved for progressive
+///   compilation: first-pass placeholder before execution completes).
+#[derive(Debug, Clone, PartialEq)]
+pub enum ChunkExecutionState {
+    Ready,
+    Inert,
+    Pending,
+}
+
 /// What the execution phase must do with this node.
 pub enum ExecutionNeed {
-    /// Cache hit for a code chunk — `ExecutionOutput` already retrieved.
-    CacheHit(ExecutionOutput),
+    /// Cache hit for a code chunk — `ExecutionAttempt` already retrieved.
+    CacheHit(ExecutionAttempt),
     /// Cache hit for an inline expression — text result already retrieved.
     CacheHitInline(String),
     /// Cache miss — the node must be executed (slow path).
@@ -43,16 +56,29 @@ pub struct ChunkPlanData {
     pub name: String,
 }
 
+/// The node-type-specific part of a planned node.
+///
+/// The compiler guarantees that `ChunkPlanData` is always present for chunk
+/// nodes and absent for inline expressions — this invariant is encoded in the
+/// type rather than relying on `Option::unwrap`.
+pub enum PlannedNodeKind {
+    Chunk {
+        node: Box<Chunk>,
+        data: Box<ChunkPlanData>,
+    },
+    Inline {
+        node: InlineExpr,
+    },
+}
+
 /// A node after the planning phase: hash computed, cache checked, no code executed yet.
-pub struct PlannedNode<'a> {
-    pub node: ExecutableNode<'a>,
+pub struct PlannedNode {
+    pub kind: PlannedNodeKind,
     pub lang: String,
     pub hash: String,
     pub previous_hash: String,
     pub source_start: usize,
     pub source_end: usize,
-    /// Present for chunk nodes; `None` for inline expressions.
-    pub chunk_data: Option<ChunkPlanData>,
     /// What the execution phase must do with this node.
     pub need: ExecutionNeed,
 }
@@ -60,6 +86,7 @@ pub struct PlannedNode<'a> {
 /// A node after the execution phase: Typst output is fully determined.
 ///
 /// Owns all its data — no lifetime dependency on the source document.
+#[derive(Clone)]
 pub struct ExecutedNode {
     pub lang: String,
     pub hash: String,
