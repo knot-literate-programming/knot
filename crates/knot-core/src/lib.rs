@@ -6,6 +6,7 @@ pub mod defaults;
 pub mod executors;
 pub mod graphics;
 pub mod parser;
+pub mod project;
 
 pub use backend::{format_codly_call, format_local_call};
 pub use compiler::Compiler;
@@ -18,6 +19,7 @@ pub use config::{ChunkDefaults, Config};
 pub use defaults::Defaults;
 pub use graphics::{GraphicsDefaults, ResolvedGraphicsOptions, resolve_graphics_options};
 pub use parser::{Chunk, ChunkOptions, Document, InlineExpr, ResolvedChunkOptions};
+pub use project::{ProjectOutput, compile_project_full, compile_project_phase0};
 
 // R helper scripts (loaded in order)
 pub const R_HELPERS: &[(&str, &str)] = &[
