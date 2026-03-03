@@ -5,8 +5,29 @@ use knot_core::executors::ExecutorManager;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 use tokio::sync::RwLock;
 use tower_lsp::lsp_types::{Diagnostic, Url};
+
+/// In-memory overlay state for `main.typ` in the Tinymist subprocess.
+///
+/// The overlay allows Tinymist to update the browser preview instantly (without
+/// waiting for macOS FSEvents debouncing) by keeping the file content in memory.
+///
+/// Transition: `Inactive → Active` when `textDocument/didOpen` is sent.
+/// The overlay becomes `Active` in `do_start_preview` after the first preview
+/// starts; it stays `Active` for the lifetime of the LSP session.
+pub enum TinymistOverlay {
+    /// `textDocument/didOpen` not yet sent.
+    /// Tinymist monitors the disk file (normal mode).
+    Inactive,
+
+    /// `textDocument/didOpen` sent with version = 1.
+    /// Tinymist holds the file in memory.
+    /// `next_version`: version number for the next `textDocument/didChange`.
+    /// Starts at 2 (1 is reserved for `didOpen`).
+    Active { next_version: u64 },
+}
 
 /// State specific to a single opened document
 pub struct DocumentState {
@@ -45,10 +66,12 @@ pub struct DocumentState {
 /// required acquisition order is:
 ///
 /// ```text
-/// documents → tinymist → executors → formatter → (path overrides)
+/// documents → tinymist_overlay → tinymist → executors → formatter → (path overrides)
 /// ```
 ///
 /// Always acquire locks in this order and release them in reverse order.
+/// In practice: acquire `tinymist_overlay` (write, get/increment version, release),
+/// **then** acquire `tinymist` (read, get proxy, release). Never hold both simultaneously.
 #[derive(Clone)]
 pub struct ServerState {
     /// Per-document state
@@ -62,6 +85,14 @@ pub struct ServerState {
     /// Active preview task managed by our tinymist subprocess.
     /// Stores `(task_id, static_server_port)` once `knot/startPreview` succeeds.
     pub preview_info: Arc<RwLock<Option<(String, u16)>>>,
+
+    /// In-memory overlay state for `main.typ` in Tinymist.
+    /// See [`TinymistOverlay`] for the state machine.
+    pub tinymist_overlay: Arc<RwLock<TinymistOverlay>>,
+
+    /// Monotonic counter incremented on every `did_save`.
+    /// Background compile tasks skip stale preview writes when this has changed.
+    pub compile_generation: Arc<AtomicU64>,
 
     /// Global configuration and caches
     pub air_path_override: Arc<RwLock<Option<PathBuf>>>,
@@ -78,6 +109,8 @@ impl ServerState {
             executors: Arc::new(RwLock::new(HashMap::new())),
             formatter: Arc::new(RwLock::new(None)),
             preview_info: Arc::new(RwLock::new(None)),
+            tinymist_overlay: Arc::new(RwLock::new(TinymistOverlay::Inactive)),
+            compile_generation: Arc::new(AtomicU64::new(0)),
             air_path_override: Arc::new(RwLock::new(None)),
             ruff_path_override: Arc::new(RwLock::new(None)),
             tinymist_path_override: Arc::new(RwLock::new(None)),

@@ -8,7 +8,9 @@
 //!   routing notification messages from the Tinymist subprocess.
 //! - **Cache/snapshot sync**: loading executor sessions from the on-disk cache.
 
+use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use knot_core::cache::Cache;
 use knot_core::config::Config;
@@ -18,6 +20,7 @@ use tower_lsp::lsp_types::{MessageType, Range, Url};
 use crate::diagnostics::get_diagnostics;
 use crate::lsp_methods::{text_document as lsp, window as win};
 use crate::position_mapper::PositionMapper;
+use crate::state::TinymistOverlay;
 use crate::transform;
 use crate::transform::transform_to_typst;
 use crate::{FormatChunkParams, KnotLanguageServer, StartPreviewParams, SyncForwardParams};
@@ -101,81 +104,102 @@ impl KnotLanguageServer {
             .to_file_path()
             .map_err(|_| anyhow::anyhow!("Invalid URI: {}", params.uri))?;
 
-        let (config, project_root) = knot_core::config::Config::find_and_load(&knot_path)
-            .context("Could not find knot.toml")?;
+        // ── 1. Phase 0 compilation (blocking) ─────────────────────────────────
+        // Produces main.typ on disk and returns its content.
+        log::info!("[startPreview] Running Phase 0 for {}", knot_path.display());
+        let output = tokio::task::spawn_blocking({
+            let path = knot_path.clone();
+            move || knot_core::compile_project_phase0(&path)
+        })
+        .await
+        .map_err(|_| anyhow::anyhow!("Phase 0 panicked"))?
+        .context("compile_project_phase0 failed")?;
 
-        let main_file = config.document.main.as_deref().unwrap_or("main.knot");
-        let main_stem = std::path::Path::new(main_file)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("main");
-        let main_typ_path = project_root.join(format!("{main_stem}.typ"));
+        let main_typ_path = output.main_typ_path.clone();
+        let typ_content = output.typ_content;
+        let main_typ_uri = Url::from_file_path(&main_typ_path)
+            .map_err(|_| anyhow::anyhow!("Cannot build URI for {}", main_typ_path.display()))?;
         let main_typ_str = main_typ_path.to_string_lossy().to_string();
 
         const TASK_ID: &str = "knot-preview";
 
-        // Pass --data-plane-host 127.0.0.1:0 so we don't conflict with other instances.
-        // --no-open: the extension opens it.
-        let response =
-            {
-                let tinymist_guard = self.state.tinymist.read().await;
-                let proxy = tinymist_guard
-                    .as_ref()
-                    .ok_or_else(|| anyhow::anyhow!("Tinymist not ready"))?;
+        // ── 2. textDocument/didOpen (v=1) + doStartPreview ────────────────────
+        // Hold the tinymist read lock for both to avoid TOCTOU races.
+        let response = {
+            let tinymist_guard = self.state.tinymist.read().await;
+            let proxy = tinymist_guard
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("Tinymist not ready"))?;
 
-                // 1. Explicitly 'open' the main typ file in tinymist.
-                if let Ok(main_typ_uri) = Url::from_file_path(&main_typ_path) {
-                    let _ = proxy.send_notification(
+            // Open the overlay with the Phase 0 content (version = 1).
+            let _ = proxy
+                .send_notification(
                     lsp::DID_OPEN,
                     serde_json::json!({
                         "textDocument": {
                             "uri": main_typ_uri,
                             "languageId": "typst",
                             "version": 1,
-                            "text": std::fs::read_to_string(&main_typ_path).unwrap_or_default(),
+                            "text": &typ_content,
                         }
-                    })
-                ).await;
-                }
+                    }),
+                )
+                .await;
 
-                proxy
-                    .send_request_timeout(
-                        "workspace/executeCommand",
-                        serde_json::json!({
-                            "command": "tinymist.doStartPreview",
-                            "arguments": [[
-                                "--task-id", TASK_ID,
-                                "--data-plane-host", "127.0.0.1:0",
-                                "--control-plane-host", "127.0.0.1:0",
-                                "--static-file-host", "127.0.0.1:0",
-                                "--no-open",
-                                &main_typ_str,
-                            ]]
-                        }),
-                        30,
-                    )
-                    .await?
-            };
+            // Start the preview task. --no-open: the extension opens the browser.
+            proxy
+                .send_request_timeout(
+                    "workspace/executeCommand",
+                    serde_json::json!({
+                        "command": "tinymist.doStartPreview",
+                        "arguments": [[
+                            "--task-id", TASK_ID,
+                            "--data-plane-host", "127.0.0.1:0",
+                            "--control-plane-host", "127.0.0.1:0",
+                            "--static-file-host", "127.0.0.1:0",
+                            "--no-open",
+                            &main_typ_str,
+                        ]]
+                    }),
+                    30,
+                )
+                .await?
+        };
 
+        // ── 3. Store preview_info ──────────────────────────────────────────────
         let result = response.get("result").ok_or_else(|| {
             anyhow::anyhow!("No result from tinymist.doStartPreview: {response:?}")
         })?;
-
         let static_server_port = result
             .get("staticServerPort")
             .and_then(|v| v.as_u64())
             .ok_or_else(|| anyhow::anyhow!("Missing staticServerPort in: {result:?}"))?
             as u16;
 
-        log::info!(
-            "[startPreview] Setting preview_info: task={}, port={}",
-            TASK_ID,
-            static_server_port
-        );
         *self.state.preview_info.write().await = Some((TASK_ID.to_string(), static_server_port));
 
-        log::info!("[startPreview] Preview started on port {static_server_port} (task={TASK_ID})");
+        // ── 4. Activate overlay + send didChange v=2 ──────────────────────────
+        // Set overlay to Active with next_version=3 (v=2 is used right now).
+        *self.state.tinymist_overlay.write().await = TinymistOverlay::Active { next_version: 3 };
 
+        // Send didChange v=2 so Tinymist renders Phase 0 immediately when the
+        // browser opens (bypasses macOS FSEvents debouncing).
+        {
+            let tinymist_guard = self.state.tinymist.read().await;
+            if let Some(proxy) = tinymist_guard.as_ref() {
+                let _ = proxy
+                    .send_notification(
+                        lsp::DID_CHANGE,
+                        serde_json::json!({
+                            "textDocument": { "uri": main_typ_uri, "version": 2 },
+                            "contentChanges": [{ "text": &typ_content }],
+                        }),
+                    )
+                    .await;
+            }
+        }
+
+        log::info!("[startPreview] Preview started on port {static_server_port} (task={TASK_ID})");
         Ok(serde_json::json!({"status": "ok", "staticServerPort": static_server_port}))
     }
 
@@ -331,6 +355,135 @@ impl KnotLanguageServer {
             state: self.state.clone(),
             root_uri: self.root_uri.clone(),
         })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Preview pipeline
+// ---------------------------------------------------------------------------
+
+impl KnotLanguageServer {
+    /// Apply a preview update: write `content` to disk, then (if the Tinymist
+    /// overlay is active) send a `textDocument/didChange` to the subprocess so
+    /// the browser refreshes instantly — without waiting for macOS FSEvents.
+    ///
+    /// Does nothing if `generation` no longer matches `compile_generation`
+    /// (a newer save arrived while this compilation was in progress).
+    pub(crate) async fn apply_update(&self, content: &str, main_typ_path: &Path, generation: u64) {
+        // Guard: abort if a newer save has superseded this compilation.
+        if self.state.compile_generation.load(Ordering::SeqCst) != generation {
+            return;
+        }
+
+        // 1. Write to disk (needed for sync forward, knot watch, typst, etc.)
+        let _ = std::fs::write(main_typ_path, content);
+
+        // 2. Get the next version from the overlay (write lock) + increment.
+        let version_opt = {
+            let mut overlay = self.state.tinymist_overlay.write().await;
+            if let TinymistOverlay::Active { next_version } = &mut *overlay {
+                let v = *next_version;
+                *next_version += 1;
+                Some(v)
+            } else {
+                None // Overlay not yet active (preview not started).
+            }
+        };
+
+        // 3. Send textDocument/didChange to Tinymist (overlay active only).
+        if let (Some(v), Ok(uri)) = (version_opt, Url::from_file_path(main_typ_path)) {
+            let tinymist_guard = self.state.tinymist.read().await;
+            if let Some(proxy) = tinymist_guard.as_ref() {
+                let _ = proxy
+                    .send_notification(
+                        lsp::DID_CHANGE,
+                        serde_json::json!({
+                            "textDocument": { "uri": uri, "version": v },
+                            "contentChanges": [{ "text": content }],
+                        }),
+                    )
+                    .await;
+            }
+        }
+    }
+
+    /// Full compile pipeline triggered on every `did_save`:
+    ///
+    /// 1. **Phase 0** (~instant): plan only, cache hits rendered, MustExecute
+    ///    chunks as placeholders → send to preview immediately.
+    /// 2. **Streaming**: execute chunks one by one; after each, push a partial
+    ///    assembled `.typ` to the preview.
+    /// 3. **Final**: once all chunks are done, send the complete `.typ` and
+    ///    update diagnostics.
+    pub(crate) async fn do_compile(&self, uri: &Url, generation: u64) {
+        let knot_path = match uri.to_file_path() {
+            Ok(p) => p,
+            Err(_) => return,
+        };
+
+        // ── Phase 0 ──────────────────────────────────────────────────────────
+        let phase0 = tokio::task::spawn_blocking({
+            let path = knot_path.clone();
+            move || knot_core::compile_project_phase0(&path)
+        })
+        .await;
+
+        let output = match phase0 {
+            Ok(Ok(o)) => o,
+            Ok(Err(e)) => {
+                log::warn!("[do_compile] Phase 0 failed: {e}");
+                return;
+            }
+            Err(_) => {
+                log::warn!("[do_compile] Phase 0 panicked");
+                return;
+            }
+        };
+
+        let main_typ_path = output.main_typ_path.clone();
+        self.apply_update(&output.typ_content, &main_typ_path, generation)
+            .await;
+
+        // Early exit if a newer save arrived.
+        if self.state.compile_generation.load(Ordering::SeqCst) != generation {
+            return;
+        }
+
+        // ── Full compile with per-chunk streaming ─────────────────────────────
+        let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+
+        let execute_handle = tokio::task::spawn_blocking({
+            let path = knot_path.clone();
+            move || knot_core::compile_project_full(&path, Some(progress_tx))
+        });
+
+        // Receive and apply each partial assembled .typ.
+        while let Some(partial_typ) = progress_rx.recv().await {
+            self.apply_update(&partial_typ, &main_typ_path, generation)
+                .await;
+        }
+
+        // ── Final result ──────────────────────────────────────────────────────
+        let final_output = match execute_handle.await {
+            Ok(Ok(o)) => o,
+            Ok(Err(e)) => {
+                log::warn!("[do_compile] Full compile failed: {e}");
+                return;
+            }
+            Err(_) => {
+                log::warn!("[do_compile] Full compile panicked");
+                return;
+            }
+        };
+
+        self.apply_update(&final_output.typ_content, &main_typ_path, generation)
+            .await;
+
+        // Diagnostics only when this is still the current generation.
+        if self.state.compile_generation.load(Ordering::SeqCst) == generation {
+            self.sync_with_cache(uri).await;
+            self.publish_combined_diagnostics(uri).await;
+        }
     }
 }
 
@@ -634,6 +787,9 @@ impl KnotLanguageServer {
     /// Poll `metadata.json` until its mtime changes (compilation wrote new data),
     /// then re-read diagnostics from the updated cache and publish them.
     ///
+    /// Kept for potential future use (e.g., `knot watch` integration).
+    #[allow(dead_code)]
+    ///
     /// This bridges the gap between `knot build` / `knot watch` updating the
     /// on-disk cache and the LSP client seeing the new errors.  Without this,
     /// errors are only shown after the user next types something in the editor.
@@ -672,6 +828,7 @@ impl KnotLanguageServer {
     }
 
     /// Returns the path to `metadata.json` for the cache associated with `uri`.
+    #[allow(dead_code)]
     fn cache_metadata_path(&self, uri: &Url) -> Option<std::path::PathBuf> {
         let path = uri.to_file_path().ok()?;
         let project_root = Config::find_project_root(&path).ok()?;
