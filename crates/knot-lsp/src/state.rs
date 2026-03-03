@@ -5,6 +5,7 @@ use knot_core::executors::ExecutorManager;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 use tokio::sync::RwLock;
 use tower_lsp::lsp_types::{Diagnostic, Url};
 
@@ -63,6 +64,18 @@ pub struct ServerState {
     /// Stores `(task_id, static_server_port)` once `knot/startPreview` succeeds.
     pub preview_info: Arc<RwLock<Option<(String, u16)>>>,
 
+    /// Monotonically increasing counter bumped on every `did_save`.
+    ///
+    /// Streaming compilation tasks compare their captured `gen` against this
+    /// value to detect superseded saves and skip stale preview writes.
+    pub compile_generation: Arc<AtomicU64>,
+
+    /// Version counter for `textDocument/didChange` sent to tinymist for the
+    /// preview `.typ` file.  Starts at 1 (matching `textDocument/didOpen`).
+    /// Incremented on every write so each notification carries a strictly
+    /// increasing version — a requirement of the LSP specification.
+    pub preview_typ_version: Arc<AtomicU64>,
+
     /// Global configuration and caches
     pub air_path_override: Arc<RwLock<Option<PathBuf>>>,
     pub ruff_path_override: Arc<RwLock<Option<PathBuf>>>,
@@ -78,6 +91,8 @@ impl ServerState {
             executors: Arc::new(RwLock::new(HashMap::new())),
             formatter: Arc::new(RwLock::new(None)),
             preview_info: Arc::new(RwLock::new(None)),
+            compile_generation: Arc::new(AtomicU64::new(0)),
+            preview_typ_version: Arc::new(AtomicU64::new(1)),
             air_path_override: Arc::new(RwLock::new(None)),
             ruff_path_override: Arc::new(RwLock::new(None)),
             tinymist_path_override: Arc::new(RwLock::new(None)),

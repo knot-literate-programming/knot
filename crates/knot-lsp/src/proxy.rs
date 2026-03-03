@@ -179,8 +179,7 @@ impl TinymistProxy {
             let mut map = pending_requests.lock().await;
             if let Some(sender) = map.remove(&id_val) {
                 if message.get("error").is_some() {
-                    let _ =
-                        sender.send(Err(anyhow::anyhow!("LSP Error: {:?}", message["error"])));
+                    let _ = sender.send(Err(anyhow::anyhow!("LSP Error: {:?}", message["error"])));
                 } else {
                     let _ = sender.send(Ok(message));
                 }
