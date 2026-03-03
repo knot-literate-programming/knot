@@ -438,11 +438,17 @@ fn run_event_loop(
                         .and_then(|n| n.to_str())
                         .unwrap_or("unknown");
                     println!("\n📝 Change detected in: {}", changed);
-                    println!("🔨 Rebuilding...");
-                    match build_project(Some(project_root)) {
-                        Ok(_) => println!("✅ Build succeeded\n"),
+                    println!("🔨 Compiling .knot...");
+                    let start = std::time::Instant::now();
+                    // Compile knot → .typ only.  The background `typst watch`
+                    // process picks up the updated .typ and generates the PDF.
+                    match knot_core::compile_project_full(project_root, None) {
+                        Ok(_) => println!(
+                            "✅ .typ updated ({:.0?}) — PDF regenerating...\n",
+                            start.elapsed()
+                        ),
                         Err(e) => {
-                            eprintln!("❌ Build failed: {}\n", e);
+                            eprintln!("❌ Compilation failed: {}\n", e);
                             eprintln!("⚠️  Fix errors and save again to retry.\n");
                         }
                     }
