@@ -14,6 +14,7 @@ use std::sync::atomic::Ordering;
 
 use knot_core::cache::Cache;
 use knot_core::config::Config;
+use knot_core::executors::ExecutorManager;
 use knot_core::get_cache_dir;
 use tower_lsp::lsp_types::{MessageType, Range, Url};
 
@@ -23,7 +24,9 @@ use crate::position_mapper::PositionMapper;
 use crate::state::TinymistOverlay;
 use crate::transform;
 use crate::transform::transform_to_typst;
-use crate::{FormatChunkParams, KnotLanguageServer, StartPreviewParams, SyncForwardParams};
+use crate::{
+    CompileParams, FormatChunkParams, KnotLanguageServer, StartPreviewParams, SyncForwardParams,
+};
 
 // ---------------------------------------------------------------------------
 // Custom request handling
@@ -57,6 +60,34 @@ impl KnotLanguageServer {
             Ok(None) => Ok(serde_json::json!({"status": "no_changes"})),
             Err(_) => Err(tower_lsp::jsonrpc::Error::internal_error()),
         }
+    }
+
+    /// Trigger a full streaming compile explicitly (e.g. from the "Run" button).
+    ///
+    /// Behaves like `did_save` minus the `forward_to_tinymist` call: increments
+    /// the compile generation (cancelling any stale in-flight compile) and spawns
+    /// `do_compile`.  Also aborts any pending Phase-0 debounce so it doesn't
+    /// race with the full compile.
+    pub(crate) async fn handle_compile(
+        &self,
+        params: CompileParams,
+    ) -> tower_lsp::jsonrpc::Result<serde_json::Value> {
+        // Cancel any pending Phase-0 debounce.
+        {
+            let mut handles = self.state.debounce_handles.lock().await;
+            if let Some(h) = handles.remove(&params.uri) {
+                h.abort();
+            }
+        }
+
+        let generation = self.state.compile_generation.fetch_add(1, Ordering::SeqCst) + 1;
+        let this = self.clone_for_task();
+        let uri = params.uri.clone();
+        tokio::spawn(async move {
+            this.do_compile(&uri, generation).await;
+        });
+
+        Ok(serde_json::json!({"status": "ok"}))
     }
 
     /// Start a preview task in our tinymist subprocess and return the static server port.
@@ -878,6 +909,11 @@ impl KnotLanguageServer {
 
 impl KnotLanguageServer {
     /// Load the most recent executor session snapshots from the on-disk cache.
+    ///
+    /// Also ensures an [`ExecutorManager`] exists for this document.  The
+    /// manager is used by hover and completion handlers to query running R /
+    /// Python processes.  The executors themselves are started lazily on the
+    /// first call to `get_executor("r")` / `get_executor("python")`.
     pub(crate) async fn sync_with_cache(&self, uri: &Url) {
         let path = match uri.to_file_path() {
             Ok(p) => p,
@@ -889,6 +925,16 @@ impl KnotLanguageServer {
         };
         let file_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("main");
         let cache_dir = get_cache_dir(&project_root, file_stem);
+
+        // Lazy-init: create an ExecutorManager for this URI if one doesn't
+        // exist yet (hover/completion in R/Python chunks require it).
+        {
+            let mut executors = self.state.executors.write().await;
+            executors
+                .entry(uri.clone())
+                .or_insert_with(|| ExecutorManager::new(cache_dir.clone()));
+        }
+
         if let Ok(cache) = Cache::new(cache_dir) {
             self.try_load_snapshot(uri, &cache, "r", "RData").await;
             self.try_load_snapshot(uri, &cache, "python", "pkl").await;

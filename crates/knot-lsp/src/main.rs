@@ -42,6 +42,11 @@ struct StartPreviewParams {
     uri: Url,
 }
 
+#[derive(Debug, Deserialize)]
+struct CompileParams {
+    uri: Url,
+}
+
 struct KnotLanguageServer {
     client: Client,
     state: ServerState,
@@ -285,6 +290,7 @@ async fn main() {
         "knot/startPreview",
         KnotLanguageServer::handle_start_preview,
     )
+    .custom_method("knot/compile", KnotLanguageServer::handle_compile)
     .finish();
     Server::new(stdin, stdout, socket).serve(service).await;
 }

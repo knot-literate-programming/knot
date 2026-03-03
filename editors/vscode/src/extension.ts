@@ -249,6 +249,27 @@ export async function activate(context: ExtensionContext) {
     );
 
     context.subscriptions.push(
+        commands.registerCommand('knot.runDocument', async () => {
+            const editor = window.activeTextEditor;
+            if (!editor || editor.document.languageId !== 'knot') return;
+            if (!client) {
+                window.showErrorMessage('LSP not connected — cannot run document');
+                return;
+            }
+            if (editor.document.isDirty) {
+                // Saving triggers did_save → do_compile automatically.
+                await editor.document.save();
+            } else {
+                // Document already saved: explicitly trigger a fresh compile
+                // (e.g. user wants to force re-execution of all chunks).
+                await client.sendRequest('knot/compile', {
+                    uri: editor.document.uri.toString(),
+                });
+            }
+        })
+    );
+
+    context.subscriptions.push(
         commands.registerCommand('knot.cleanProject', async (resource?: Uri) => {
             if (!client) return;
             const targetUri = resource?.toString() || window.activeTextEditor?.document.uri.toString();
