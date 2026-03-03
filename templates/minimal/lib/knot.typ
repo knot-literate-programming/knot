@@ -32,6 +32,7 @@
   width-ratio: "1:1",
   align: none,
   is-inert: false,
+  is-pending: false,
   ..rest,
 ) = {
   // Ensure warnings and errors are arrays (defensive check)
@@ -45,14 +46,16 @@
 
   // Wrap code in styled block
   let code-block = if code != none {
+    // Pending chunks get an orange border to signal "not yet executed".
+    let effective-stroke = if is-pending { 2pt + rgb("#f97316") } else { code-stroke }
     let b = block(
       fill: code-background,
-      stroke: code-stroke,
+      stroke: effective-stroke,
       radius: code-radius,
       inset: code-inset,
       width: 100%,
     )[#code]
-    
+
     if is-inert {
       // Use a clipping block to contain the overlay perfectly
       block(width: 100%, clip: true, radius: code-radius)[

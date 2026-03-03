@@ -509,6 +509,14 @@ impl KnotLanguageServer {
             return;
         }
 
+        // Notify the editor that a full compile is starting (enables status bar,
+        // keeps Run button active).
+        self.client
+            .send_notification::<crate::KnotCompilationStarted>(
+                serde_json::json!({"uri": uri.to_string()}),
+            )
+            .await;
+
         // ── Full compile with per-chunk streaming ─────────────────────────────
         let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
 
@@ -526,12 +534,17 @@ impl KnotLanguageServer {
         // ── Final result ──────────────────────────────────────────────────────
         let final_output = match execute_handle.await {
             Ok(Ok(o)) => o,
-            Ok(Err(e)) => {
-                log::warn!("[do_compile] Full compile failed: {e}");
-                return;
-            }
-            Err(_) => {
-                log::warn!("[do_compile] Full compile panicked");
+            result => {
+                if let Ok(Err(e)) = &result {
+                    log::warn!("[do_compile] Full compile failed: {e}");
+                } else {
+                    log::warn!("[do_compile] Full compile panicked");
+                }
+                self.client
+                    .send_notification::<crate::KnotCompilationComplete>(
+                        serde_json::json!({"uri": uri.to_string(), "success": false}),
+                    )
+                    .await;
                 return;
             }
         };
@@ -544,6 +557,12 @@ impl KnotLanguageServer {
             self.sync_with_cache(uri).await;
             self.publish_combined_diagnostics(uri).await;
         }
+
+        self.client
+            .send_notification::<crate::KnotCompilationComplete>(
+                serde_json::json!({"uri": uri.to_string(), "success": true}),
+            )
+            .await;
     }
 
     /// Phase-0-only compile triggered by `did_change` debounce.

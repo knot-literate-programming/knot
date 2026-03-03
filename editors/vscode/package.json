@@ -140,6 +140,7 @@
         {
           "command": "knot.runDocument",
           "when": "resourceLangId == knot",
+          "enablement": "knot.documentHasChanges",
           "group": "navigation@1"
         },
         {

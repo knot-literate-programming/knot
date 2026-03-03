@@ -75,6 +75,27 @@ export async function activate(context: ExtensionContext) {
     const outputChannel = window.createOutputChannel('Knot Extension');
     outputChannel.appendLine('Activating Knot extension...');
 
+    // Initialize: no pending changes yet (grays out the Run button).
+    await commands.executeCommand('setContext', 'knot.documentHasChanges', false);
+
+    // Activate Run button whenever the user edits a .knot document.
+    context.subscriptions.push(
+        workspace.onDidChangeTextDocument((event) => {
+            if (event.document.languageId === 'knot' && event.contentChanges.length > 0) {
+                commands.executeCommand('setContext', 'knot.documentHasChanges', true);
+            }
+        })
+    );
+
+    // Also activate on first open (document not yet compiled in this session).
+    context.subscriptions.push(
+        workspace.onDidOpenTextDocument((doc) => {
+            if (doc.languageId === 'knot') {
+                commands.executeCommand('setContext', 'knot.documentHasChanges', true);
+            }
+        })
+    );
+
     // Register URI handler for clean backward sync
     context.subscriptions.push(
         window.registerUriHandler(new KnotUriHandler(outputChannel))
@@ -237,6 +258,19 @@ export async function activate(context: ExtensionContext) {
         };
 
         client = new LanguageClient('knotLanguageServer', 'Knot Language Server', serverOptions, clientOptions);
+
+        // Compilation lifecycle notifications from knot-lsp.
+        client.onNotification('knot/compilationStarted', (_params: { uri: string }) => {
+            compilationStatusBar.text = '$(sync~spin) Compiling...';
+            compilationStatusBar.show();
+        });
+
+        client.onNotification('knot/compilationComplete', (params: { uri: string; success: boolean }) => {
+            commands.executeCommand('setContext', 'knot.documentHasChanges', false);
+            compilationStatusBar.text = params.success ? '$(check) Up to date' : '$(warning) Compilation failed';
+            setTimeout(() => compilationStatusBar.hide(), 3000);
+        });
+
         client.start();
     }
 

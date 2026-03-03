@@ -47,6 +47,20 @@ struct CompileParams {
     uri: Url,
 }
 
+/// Sent to the editor when a full compile starts (after Phase 0 succeeds).
+pub(crate) enum KnotCompilationStarted {}
+impl tower_lsp::lsp_types::notification::Notification for KnotCompilationStarted {
+    type Params = serde_json::Value;
+    const METHOD: &'static str = "knot/compilationStarted";
+}
+
+/// Sent to the editor when a full compile finishes (success or failure).
+pub(crate) enum KnotCompilationComplete {}
+impl tower_lsp::lsp_types::notification::Notification for KnotCompilationComplete {
+    type Params = serde_json::Value;
+    const METHOD: &'static str = "knot/compilationComplete";
+}
+
 struct KnotLanguageServer {
     client: Client,
     state: ServerState,
