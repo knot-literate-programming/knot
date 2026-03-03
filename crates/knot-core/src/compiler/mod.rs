@@ -22,6 +22,18 @@ pub use pipeline::{
     ChunkExecutionState, ExecutedNode, ExecutionNeed, PlannedNode, PlannedNodeKind,
 };
 
+/// Controls how `MustExecute` chunks are rendered in Phase 0 (before execution).
+#[derive(Clone, Copy)]
+pub enum Phase0Mode {
+    /// A full compile is in progress (`do_compile`): show orange border on all
+    /// `MustExecute` chunks to signal that execution is underway.
+    Pending,
+    /// The user edited the file without triggering a compile (`do_phase0_only`):
+    /// show amber (strong) on the first `MustExecute` per language chain and
+    /// amber (muted) on downstream hash-invalidated chunks.
+    Modified,
+}
+
 use crate::backend::TypstBackend;
 use crate::compiler::pipeline::ChunkPlanData;
 use crate::get_cache_dir;
@@ -29,7 +41,10 @@ use anyhow::Result;
 use log::info;
 
 use execution::{ChainOutput, group_by_language, run_language_chain};
-use node_output::{format_error_block_for_node, format_executed_node, pending_output, skip_output};
+use node_output::{
+    format_error_block_for_node, format_executed_node, modified_cascade_output, modified_output,
+    pending_output, phase0_inert_output, skip_output,
+};
 use options::{compute_hash, resolve_options};
 
 /// Represents a node in the document that can be executed.
@@ -97,6 +112,7 @@ impl Compiler {
         &mut self,
         doc: &Document,
         source_file: &str,
+        mode: Phase0Mode,
     ) -> Result<(Vec<PlannedNode>, Arc<Mutex<Cache>>, String)> {
         let cache = Arc::new(Mutex::new(Cache::new(self.cache_dir.clone())?));
         let backend = TypstBackend::new();
@@ -104,7 +120,7 @@ impl Compiler {
         let nodes = build_executable_nodes(doc);
         let planned = self.plan_pass(nodes, &cache)?;
 
-        let phase0_typ = assemble_partial(&planned, &doc.source, source_file, &backend);
+        let phase0_typ = assemble_partial(&planned, &doc.source, source_file, &backend, mode);
         Ok((planned, cache, phase0_typ))
     }
 
@@ -399,8 +415,12 @@ pub fn assemble_pass(executed: &[ExecutedNode], source: &str, source_file: &str)
 /// Convert planned nodes to partial executed nodes without running any code.
 ///
 /// For each [`PlannedNode`]:
-/// - `Skip` / `CacheHit` → rendered with real content (same as the final output).
-/// - `MustExecute`        → rendered as a pending placeholder (code shown, output empty).
+/// - `Skip` / `CacheHit(Success)` → rendered with real content.
+/// - `CacheHit(RuntimeError)`     → rendered as an error block; language marked Inert.
+/// - `MustExecute`                → rendered according to `mode`:
+///   - [`Phase0Mode::Pending`]   → orange border (`is-pending`) for all.
+///   - [`Phase0Mode::Modified`]  → amber strong (`is-modified`) for the first in
+///     each language chain, amber muted (`is-modified-cascade`) for the rest.
 ///
 /// The returned `Vec<ExecutedNode>` can be fed directly to [`assemble_pass`].
 /// In a streaming compilation loop, replace individual entries as [`ProgressEvent`]s
@@ -408,55 +428,98 @@ pub fn assemble_pass(executed: &[ExecutedNode], source: &str, source_file: &str)
 pub fn planned_to_partial_nodes(
     planned: &[PlannedNode],
     backend: &TypstBackend,
+    mode: Phase0Mode,
 ) -> Vec<ExecutedNode> {
-    planned
-        .iter()
-        .map(|pn| {
-            let (is_chunk, source_line) = match &pn.kind {
-                PlannedNodeKind::Chunk { node, .. } => (true, (node.range.start.line + 1) as u32),
-                PlannedNodeKind::Inline { .. } => (false, 0),
-            };
+    // Track which languages have a cached runtime error so that subsequent
+    // MustExecute nodes in the same language chain are rendered as Inert.
+    let mut inert_langs: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // Track which languages have already seen a MustExecute node (Modified mode):
+    // the first MustExecute per language = direct edit (Modified),
+    // subsequent ones = hash cascade (ModifiedCascade).
+    let mut must_execute_langs: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+    let mut result = Vec::with_capacity(planned.len());
 
-            let (typst_content, errored) = match &pn.need {
-                ExecutionNeed::Skip => {
-                    (skip_output(pn, backend, &ChunkExecutionState::Ready), false)
-                }
-                ExecutionNeed::CacheHit(crate::executors::ExecutionAttempt::Success(output)) => (
+    for pn in planned {
+        let (is_chunk, source_line) = match &pn.kind {
+            PlannedNodeKind::Chunk { node, .. } => (true, (node.range.start.line + 1) as u32),
+            PlannedNodeKind::Inline { .. } => (false, 0),
+        };
+
+        let (typst_content, errored) = match &pn.need {
+            ExecutionNeed::Skip => {
+                must_execute_langs.remove(&pn.lang);
+                (skip_output(pn, backend, &ChunkExecutionState::Ready), false)
+            }
+            ExecutionNeed::CacheHit(crate::executors::ExecutionAttempt::Success(output)) => {
+                must_execute_langs.remove(&pn.lang);
+                (
                     format_executed_node(pn, output, backend, &ChunkExecutionState::Ready),
                     false,
-                ),
-                ExecutionNeed::CacheHit(crate::executors::ExecutionAttempt::RuntimeError(e)) => (
+                )
+            }
+            ExecutionNeed::CacheHit(crate::executors::ExecutionAttempt::RuntimeError(e)) => {
+                // Mark this language as errored so downstream MustExecute nodes
+                // in the same chain are shown as Inert in Phase 0.
+                inert_langs.insert(pn.lang.clone());
+                must_execute_langs.remove(&pn.lang);
+                (
                     format_error_block_for_node(&pn.kind, &pn.lang, &e.to_string()),
                     true,
-                ),
-                ExecutionNeed::CacheHitInline(text) => (text.clone(), false),
-                ExecutionNeed::MustExecute => (pending_output(pn, backend), false),
-            };
-
-            ExecutedNode {
-                lang: pn.lang.clone(),
-                hash: pn.hash.clone(),
-                source_start: pn.source_start,
-                source_end: pn.source_end,
-                typst_content,
-                is_chunk,
-                source_line,
-                errored,
+                )
             }
-        })
-        .collect()
+            ExecutionNeed::CacheHitInline(text) => {
+                must_execute_langs.remove(&pn.lang);
+                (text.clone(), false)
+            }
+            ExecutionNeed::MustExecute => {
+                if inert_langs.contains(&pn.lang) {
+                    // Upstream error cached for this language → will be Inert.
+                    (phase0_inert_output(pn, backend), false)
+                } else {
+                    match mode {
+                        Phase0Mode::Pending => (pending_output(pn, backend), false),
+                        Phase0Mode::Modified => {
+                            if must_execute_langs.contains(&pn.lang) {
+                                // Subsequent MustExecute in the same chain = cascade.
+                                (modified_cascade_output(pn, backend), false)
+                            } else {
+                                // First MustExecute for this language = direct edit.
+                                must_execute_langs.insert(pn.lang.clone());
+                                (modified_output(pn, backend), false)
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+        result.push(ExecutedNode {
+            lang: pn.lang.clone(),
+            hash: pn.hash.clone(),
+            source_start: pn.source_start,
+            source_end: pn.source_end,
+            typst_content,
+            is_chunk,
+            source_line,
+            errored,
+        });
+    }
+
+    result
 }
 
 /// Assemble a Phase-0 Typst string from planned nodes (no execution).
 ///
-/// Equivalent to `assemble_pass(&planned_to_partial_nodes(planned, backend), source, source_file)`.
+/// Equivalent to `assemble_pass(&planned_to_partial_nodes(planned, backend, mode), source, source_file)`.
 pub fn assemble_partial(
     planned: &[PlannedNode],
     source: &str,
     source_file: &str,
     backend: &TypstBackend,
+    mode: Phase0Mode,
 ) -> String {
-    let partial = planned_to_partial_nodes(planned, backend);
+    let partial = planned_to_partial_nodes(planned, backend, mode);
     assemble_pass(&partial, source, source_file)
 }
 

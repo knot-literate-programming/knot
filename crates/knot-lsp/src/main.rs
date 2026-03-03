@@ -42,6 +42,25 @@ struct StartPreviewParams {
     uri: Url,
 }
 
+#[derive(Debug, Deserialize)]
+struct CompileParams {
+    uri: Url,
+}
+
+/// Sent to the editor when a full compile starts (after Phase 0 succeeds).
+pub(crate) enum KnotCompilationStarted {}
+impl tower_lsp::lsp_types::notification::Notification for KnotCompilationStarted {
+    type Params = serde_json::Value;
+    const METHOD: &'static str = "knot/compilationStarted";
+}
+
+/// Sent to the editor when a full compile finishes (success or failure).
+pub(crate) enum KnotCompilationComplete {}
+impl tower_lsp::lsp_types::notification::Notification for KnotCompilationComplete {
+    type Params = serde_json::Value;
+    const METHOD: &'static str = "knot/compilationComplete";
+}
+
 struct KnotLanguageServer {
     client: Client,
     state: ServerState,
@@ -171,22 +190,49 @@ impl LanguageServer for KnotLanguageServer {
             self.publish_combined_diagnostics(&uri).await;
             self.forward_to_tinymist(lsp::DID_CHANGE, &uri).await;
         }
+
+        // Debounce a Phase-0-only compile: cancel the previous handle and
+        // schedule a new one.  After 300 ms of inactivity the plan pass runs
+        // (no execution — safe even with mid-typing incomplete chunk code).
+        {
+            let mut handles = self.state.debounce_handles.lock().await;
+            if let Some(h) = handles.remove(&uri) {
+                h.abort();
+            }
+        }
+        let this = self.clone_for_task();
+        let uri_clone = uri.clone();
+        let handle = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            this.do_phase0_only(&uri_clone).await;
+        });
+        self.state.debounce_handles.lock().await.insert(uri, handle);
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
+        use std::sync::atomic::Ordering;
+
         let uri = params.text_document.uri;
-        let this = self.clone_for_task();
-        let uri_for_cache = uri.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            this.sync_with_cache(&uri_for_cache).await;
-            // Refresh diagnostics as soon as the cache is updated by the compiler.
-            // This picks up runtime errors and freeze violations written by `knot build`
-            // or `knot watch` without waiting for the user to make an edit.
-            this.refresh_diagnostics_on_cache_update(&uri_for_cache)
-                .await;
-        });
+
+        // Cancel any pending Phase-0 debounce — do_compile covers Phase 0 too.
+        {
+            let mut handles = self.state.debounce_handles.lock().await;
+            if let Some(h) = handles.remove(&uri) {
+                h.abort();
+            }
+        }
+
+        // Forward the syntactic mask to Tinymist (hover, completion, etc.).
         self.forward_to_tinymist(lsp::DID_SAVE, &uri).await;
+
+        // Bump the generation counter so any in-progress compilation knows it
+        // is now stale and can skip sending preview updates.
+        let generation = self.state.compile_generation.fetch_add(1, Ordering::SeqCst) + 1;
+
+        let this = self.clone_for_task();
+        tokio::spawn(async move {
+            this.do_compile(&uri, generation).await;
+        });
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
@@ -258,6 +304,7 @@ async fn main() {
         "knot/startPreview",
         KnotLanguageServer::handle_start_preview,
     )
+    .custom_method("knot/compile", KnotLanguageServer::handle_compile)
     .finish();
     Server::new(stdin, stdout, socket).serve(service).await;
 }

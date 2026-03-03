@@ -78,10 +78,16 @@
         "icon": "$(trash)"
       },
       {
-        "command": "knot.stopWatch",
-        "title": "Stop Preview (knot watch)",
+        "command": "knot.runDocument",
+        "title": "Run Document",
         "category": "Knot",
-        "icon": "$(debug-stop)"
+        "icon": "$(play)"
+      },
+      {
+        "command": "knot.buildProject",
+        "title": "Build PDF",
+        "category": "Knot",
+        "icon": "$(file-pdf)"
       },
       {
         "command": "knot.formatChunk",
@@ -132,9 +138,15 @@
           "group": "navigation@0"
         },
         {
-          "command": "knot.stopWatch",
+          "command": "knot.runDocument",
           "when": "resourceLangId == knot",
+          "enablement": "knot.documentHasChanges",
           "group": "navigation@1"
+        },
+        {
+          "command": "knot.buildProject",
+          "when": "resourceLangId == knot",
+          "group": "navigation@2"
         }
       ]
     },
