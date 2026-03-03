@@ -19,7 +19,9 @@ pub use config::{ChunkDefaults, Config};
 pub use defaults::Defaults;
 pub use graphics::{GraphicsDefaults, ResolvedGraphicsOptions, resolve_graphics_options};
 pub use parser::{Chunk, ChunkOptions, Document, InlineExpr, ResolvedChunkOptions};
-pub use project::{ProjectOutput, compile_project_full, compile_project_phase0};
+pub use project::{
+    ProjectOutput, compile_project_full, compile_project_phase0, compile_project_phase0_unsaved,
+};
 
 // R helper scripts (loaded in order)
 pub const R_HELPERS: &[(&str, &str)] = &[

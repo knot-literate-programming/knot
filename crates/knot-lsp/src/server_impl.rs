@@ -499,9 +499,21 @@ impl KnotLanguageServer {
             Err(_) => return,
         };
 
+        // Get the current in-memory text (may differ from disk if unsaved).
+        let text = {
+            let docs = self.state.documents.read().await;
+            docs.get(uri).map(|d| d.text.clone())
+        };
+
         let result = tokio::task::spawn_blocking({
             let path = knot_path.clone();
-            move || knot_core::compile_project_phase0(&path)
+            move || match text {
+                // Use the in-memory buffer so unsaved edits are visible
+                // immediately (without waiting for an explicit save).
+                Some(t) => knot_core::compile_project_phase0_unsaved(&path, &path, &t),
+                // Fallback: document not in state yet, read from disk.
+                None => knot_core::compile_project_phase0(&path),
+            }
         })
         .await;
 

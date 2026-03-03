@@ -5,11 +5,15 @@
 //! assembly — replacing the duplicated logic that previously lived in both
 //! `knot-cli::build_project` and the LSP's `server_impl`.
 //!
-//! # Two entry points
+//! # Entry points
 //!
-//! - [`compile_project_phase0`] — runs the planning pass only (no code
-//!   execution).  Cache hits render with real output; `MustExecute` chunks
-//!   render as placeholders.  Near-instant.
+//! - [`compile_project_phase0`] — planning pass only (no code execution).
+//!   Cache hits render with real output; `MustExecute` chunks render as
+//!   placeholders.  Near-instant.  Reads all files from disk.
+//!
+//! - [`compile_project_phase0_unsaved`] — same as above but substitutes the
+//!   provided in-memory content for one file (main or include).  Used by the
+//!   LSP to show preview updates while the user is typing, before saving.
 //!
 //! - [`compile_project_full`] — full compilation (plan + execute + assemble).
 //!   If an [`tokio::sync::mpsc::UnboundedSender`] is supplied, a fully
@@ -49,43 +53,32 @@ pub struct ProjectOutput {
 
 /// Phase 0: plan all project files without executing any chunks.
 ///
-/// Runs the planning pass for the main file and every include.  Cached chunks
-/// render with their real output; `MustExecute` chunks render as pending
-/// placeholders.  The result is written to `main.typ` on disk.
+/// Reads all files from disk.  Cache hits render with their real output;
+/// `MustExecute` chunks render as pending placeholders.  The result is
+/// written to `main.typ` on disk.
 ///
 /// This is near-instant (no subprocess spawning) and suitable for giving the
 /// user an immediate preview after a save.
 pub fn compile_project_phase0(start_path: &Path) -> Result<ProjectOutput> {
-    let (config, project_root) = Config::find_and_load(start_path)?;
-    let (main_file, main_file_name, main_stem) = resolve_main_file(&config, &project_root)?;
-    let main_typ_path = project_root.join(format!("{main_stem}.typ"));
+    compile_phase0_inner(start_path, None)
+}
 
-    // Compile includes with plan_and_partial (no execution).
-    let includes_content = compile_includes(&config, &project_root, true)?;
-
-    // Compile main with plan_and_partial (no execution).
-    let main_source = fs::read_to_string(&main_file)
-        .with_context(|| format!("Cannot read main file: {}", main_file.display()))?;
-    let doc = Document::parse(main_source.clone());
-    let mut compiler = Compiler::new(&main_file)?;
-    let (_, _, phase0_main) = compiler.plan_and_partial(&doc, &main_file_name)?;
-    let phase0_main_fixed = fix_paths_in_typst(&phase0_main, &main_typ_path)?;
-
-    let placeholder_line = find_placeholder_line(&main_source);
-    let typ_content = assemble_project_typ(
-        &phase0_main_fixed,
-        &main_file_name,
-        &includes_content,
-        placeholder_line,
-        &config,
-    )?;
-
-    fs::write(&main_typ_path, &typ_content)?;
-    Ok(ProjectOutput {
-        typ_content,
-        main_typ_path,
-        project_root,
-    })
+/// Phase 0 with one file's content supplied in-memory.
+///
+/// Identical to [`compile_project_phase0`] except that `unsaved_path` is
+/// read from `unsaved_content` instead of from disk.  Every other project
+/// file (main or includes) is still read from disk.
+///
+/// Used by the LSP to compile the current buffer before the user saves, so
+/// the preview updates as they type (Typst-text changes are visible
+/// instantly; modified chunk code shows as a placeholder instead of
+/// executing potentially incomplete code).
+pub fn compile_project_phase0_unsaved(
+    start_path: &Path,
+    unsaved_path: &Path,
+    unsaved_content: &str,
+) -> Result<ProjectOutput> {
+    compile_phase0_inner(start_path, Some((unsaved_path, unsaved_content)))
 }
 
 /// Full compilation with optional per-chunk streaming.
@@ -107,7 +100,7 @@ pub fn compile_project_full(
     let main_typ_path = project_root.join(format!("{main_stem}.typ"));
 
     // Compile all includes fully first (sequential, usually all cache hits).
-    let includes_content = compile_includes(&config, &project_root, false)?;
+    let includes_content = compile_includes(&config, &project_root, false, None)?;
 
     // Read and parse the main file.
     let main_source = fs::read_to_string(&main_file)
@@ -204,6 +197,60 @@ pub fn compile_project_full(
 // Private helpers
 // ---------------------------------------------------------------------------
 
+/// Core of Phase 0.  `unsaved` overrides one file's disk content with an
+/// in-memory string (used for typing-time preview in the LSP).
+fn compile_phase0_inner(
+    start_path: &Path,
+    unsaved: Option<(&Path, &str)>,
+) -> Result<ProjectOutput> {
+    let (config, project_root) = Config::find_and_load(start_path)?;
+    let (main_file, main_file_name, main_stem) = resolve_main_file(&config, &project_root)?;
+    let main_typ_path = project_root.join(format!("{main_stem}.typ"));
+
+    let includes_content = compile_includes(&config, &project_root, true, unsaved)?;
+
+    let main_source = read_or_override(&main_file, unsaved)
+        .with_context(|| format!("Cannot read main file: {}", main_file.display()))?;
+    let doc = Document::parse(main_source.clone());
+    let mut compiler = Compiler::new(&main_file)?;
+    let (_, _, phase0_main) = compiler.plan_and_partial(&doc, &main_file_name)?;
+    let phase0_main_fixed = fix_paths_in_typst(&phase0_main, &main_typ_path)?;
+
+    let placeholder_line = find_placeholder_line(&main_source);
+    let typ_content = assemble_project_typ(
+        &phase0_main_fixed,
+        &main_file_name,
+        &includes_content,
+        placeholder_line,
+        &config,
+    )?;
+
+    fs::write(&main_typ_path, &typ_content)?;
+    Ok(ProjectOutput {
+        typ_content,
+        main_typ_path,
+        project_root,
+    })
+}
+
+/// Read `path` from disk, or return the override content if `path` matches
+/// the unsaved file.  Uses canonical path comparison where possible.
+fn read_or_override(path: &Path, unsaved: Option<(&Path, &str)>) -> Result<String> {
+    if let Some((unsaved_path, unsaved_content)) = unsaved {
+        let matches = path == unsaved_path || {
+            // Fallback: canonical comparison (handles symlinks, relative paths, etc.)
+            matches!(
+                (path.canonicalize(), unsaved_path.canonicalize()),
+                (Ok(a), Ok(b)) if a == b
+            )
+        };
+        if matches {
+            return Ok(unsaved_content.to_string());
+        }
+    }
+    fs::read_to_string(path).with_context(|| format!("Cannot read file: {}", path.display()))
+}
+
 /// Resolve main file info from config.
 /// Returns `(file_path, file_name, file_stem)`.
 fn resolve_main_file(config: &Config, project_root: &Path) -> Result<(PathBuf, String, String)> {
@@ -233,7 +280,13 @@ fn resolve_main_file(config: &Config, project_root: &Path) -> Result<(PathBuf, S
 ///
 /// When `phase0 = true`, uses [`Compiler::plan_and_partial`] (no execution).
 /// When `phase0 = false`, uses [`Compiler::compile`] (full execution).
-fn compile_includes(config: &Config, project_root: &Path, phase0: bool) -> Result<String> {
+/// `unsaved` optionally overrides one file's disk content.
+fn compile_includes(
+    config: &Config,
+    project_root: &Path,
+    phase0: bool,
+    unsaved: Option<(&Path, &str)>,
+) -> Result<String> {
     let includes = match &config.document.includes {
         Some(inc) if !inc.is_empty() => inc,
         _ => return Ok(String::new()),
@@ -255,7 +308,7 @@ fn compile_includes(config: &Config, project_root: &Path, phase0: bool) -> Resul
             anyhow::bail!("Security: included file '{include_name}' is outside the project root.");
         }
 
-        let source = fs::read_to_string(&include_path)
+        let source = read_or_override(&include_path, unsaved)
             .with_context(|| format!("Cannot read include: {include_name}"))?;
         let doc = Document::parse(source);
 
