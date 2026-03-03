@@ -21,8 +21,8 @@ Knot brings **executable R and Python code** directly into your Typst documents.
 - **Reproducible**: Intelligent SHA256-based caching with sequential invalidation.
 - **Polyglot**: Seamlessly switch between R and Python in the same document.
 - **Rich Output**: Automatic conversion of DataFrames to Typst tables and plots (Matplotlib, ggplot2) to SVG/PNG.
-- **First-class IDE support**: A dedicated VS Code extension providing hover docs, completion, and live diagnostics.
-- **Sync Mapping**: High-fidelity PDF ↔ Source synchronization (PDF to Source is line-perfect; Source to PDF is currently WIP).
+- **First-class IDE support**: A dedicated VS Code extension providing hover docs, completion, live diagnostics, and streaming preview.
+- **Sync Mapping**: Bidirectional PDF ↔ Source synchronization (click in PDF jumps to `.knot` source; cursor in source scrolls the PDF preview).
 
 ---
 
@@ -30,12 +30,20 @@ Knot brings **executable R and Python code** directly into your Typst documents.
 
 ### 1. Installation
 
+**From source (recommended for contributors):**
+```bash
+git clone https://github.com/knot-literate-programming/knot.git
+cd knot
+cargo install --path crates/knot-cli
+cargo install --path crates/knot-lsp
+knot install-vscode   # installs the VS Code extension from the cloned repo
+```
+
 **Using pre-compiled binaries:**
 Download the CLI tools (`knot`, `knot-lsp`) and the VS Code extension (`.vsix`) for your platform from the [latest releases](https://github.com/knot-literate-programming/knot/releases).
-
-**Using Cargo:**
+Install the extension with:
 ```bash
-cargo install --git https://github.com/knot-literate-programming/knot.git knot-cli
+code --install-extension knot-<version>.vsix
 ```
 
 ### 2. Create a Project
@@ -95,7 +103,7 @@ If you use Knot for your research, please cite it as follows:
   month = feb,
   title = {{Knot: A modern literate programming system for Typst}},
   url = {https://github.com/knot-literate-programming/knot},
-  version = {0.2.5},
+  version = {0.3.0},
   year = {2026}
 }
 ```
