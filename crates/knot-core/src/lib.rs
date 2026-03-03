@@ -11,6 +11,9 @@ pub use backend::{format_codly_call, format_local_call};
 pub use compiler::Compiler;
 pub use compiler::formatters::CodeFormatter;
 pub use compiler::sync;
+pub use compiler::{
+    ExecutedNode, PlannedNode, ProgressEvent, assemble_pass, planned_to_partial_nodes,
+};
 pub use config::{ChunkDefaults, Config};
 pub use defaults::Defaults;
 pub use graphics::{GraphicsDefaults, ResolvedGraphicsOptions, resolve_graphics_options};

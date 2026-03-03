@@ -17,6 +17,7 @@ mod freeze;
 mod node_output;
 mod options;
 
+pub use execution::ProgressEvent;
 pub use pipeline::{
     ChunkExecutionState, ExecutedNode, ExecutionNeed, PlannedNode, PlannedNodeKind,
 };
@@ -28,6 +29,7 @@ use anyhow::Result;
 use log::info;
 
 use execution::{ChainOutput, group_by_language, run_language_chain};
+use node_output::{format_error_block_for_node, format_executed_node, pending_output, skip_output};
 use options::{compute_hash, resolve_options};
 
 /// Represents a node in the document that can be executed.
@@ -81,6 +83,53 @@ impl Compiler {
         self.executor_manager.shutdown_all();
     }
 
+    /// Plan phase + Phase-0 assembly for progressive compilation.
+    ///
+    /// Runs Pass 1 (plan) and immediately assembles a partial Typst string where
+    /// cached/skipped nodes are rendered with their real content and `MustExecute`
+    /// nodes are rendered as pending placeholders.
+    ///
+    /// Returns `(planned, cache, phase0_typ)`:
+    /// - `planned`: the full planning result, needed by [`execute_and_assemble_streaming`].
+    /// - `cache`:   shared cache handle (same instance used by the execute pass).
+    /// - `phase0_typ`: a Typst string ready for immediate preview.
+    pub fn plan_and_partial(
+        &mut self,
+        doc: &Document,
+        source_file: &str,
+    ) -> Result<(Vec<PlannedNode>, Arc<Mutex<Cache>>, String)> {
+        let cache = Arc::new(Mutex::new(Cache::new(self.cache_dir.clone())?));
+        let backend = TypstBackend::new();
+
+        let nodes = build_executable_nodes(doc);
+        let planned = self.plan_pass(nodes, &cache)?;
+
+        let phase0_typ = assemble_partial(&planned, &doc.source, source_file, &backend);
+        Ok((planned, cache, phase0_typ))
+    }
+
+    /// Execute phase with per-chunk streaming + final assembly.
+    ///
+    /// Runs Pass 2 (execute) and Pass 3 (assemble). After each node completes,
+    /// a [`ProgressEvent`] is sent via `progress` so the caller can render
+    /// incremental preview updates without waiting for all chunks to finish.
+    ///
+    /// Saves the cache after assembly. Call this after [`plan_and_partial`].
+    pub fn execute_and_assemble_streaming(
+        &mut self,
+        planned: Vec<PlannedNode>,
+        cache: Arc<Mutex<Cache>>,
+        source: &str,
+        source_file: &str,
+        progress: Option<tokio::sync::mpsc::UnboundedSender<ProgressEvent>>,
+    ) -> Result<String> {
+        let backend = TypstBackend::new();
+        let executed = self.execute_pass(planned, Arc::clone(&cache), &backend, progress)?;
+        let typst_output = assemble_pass(&executed, source, source_file);
+        cache.lock().unwrap().save_metadata()?;
+        Ok(typst_output)
+    }
+
     /// Compiles a document by executing its code chunks and generating a Typst source string.
     ///
     /// `source_file` is the filename of the `.knot` source (e.g. `"chapter1.knot"`).
@@ -95,7 +144,7 @@ impl Compiler {
         let planned = self.plan_pass(nodes, &cache)?;
 
         // Pass 2: execute pending nodes in parallel per language, format output.
-        let executed = self.execute_pass(planned, Arc::clone(&cache), &backend)?;
+        let executed = self.execute_pass(planned, Arc::clone(&cache), &backend, None)?;
 
         // Pass 3: interleave node outputs with source text.
         let typst_output = assemble_pass(&executed, &doc.source, source_file);
@@ -196,11 +245,14 @@ impl Compiler {
     ///
     /// Nodes of the same language run sequentially (shared interpreter state);
     /// nodes of different languages run in separate OS threads simultaneously.
+    ///
+    /// When `progress` is `Some`, each completed node emits a [`ProgressEvent`].
     fn execute_pass(
         &mut self,
         planned: Vec<PlannedNode>,
         cache: Arc<Mutex<Cache>>,
         backend: &TypstBackend,
+        progress: Option<tokio::sync::mpsc::UnboundedSender<ProgressEvent>>,
     ) -> Result<Vec<ExecutedNode>> {
         // Step 1: group nodes by language, preserving document order via indices.
         let groups = group_by_language(planned);
@@ -246,6 +298,7 @@ impl Compiler {
                 .into_iter()
                 .map(|(lang, nodes, exec)| {
                     let cache = Arc::clone(&cache);
+                    let chain_progress = progress.clone();
                     s.spawn(move || {
                         run_language_chain(
                             lang,
@@ -255,6 +308,7 @@ impl Compiler {
                             backend,
                             config_ref,
                             project_root_ref,
+                            chain_progress,
                         )
                     })
                 })
@@ -301,7 +355,7 @@ impl Compiler {
 // ---------------------------------------------------------------------------
 
 /// Interleave formatted node outputs with the verbatim source text between nodes.
-fn assemble_pass(executed: &[ExecutedNode], source: &str, source_file: &str) -> String {
+pub fn assemble_pass(executed: &[ExecutedNode], source: &str, source_file: &str) -> String {
     let mut output = String::new();
     let mut last_pos = 0;
 
@@ -336,6 +390,74 @@ fn assemble_pass(executed: &[ExecutedNode], source: &str, source_file: &str) -> 
     }
 
     output
+}
+
+// ---------------------------------------------------------------------------
+// Progressive compilation helpers
+// ---------------------------------------------------------------------------
+
+/// Convert planned nodes to partial executed nodes without running any code.
+///
+/// For each [`PlannedNode`]:
+/// - `Skip` / `CacheHit` → rendered with real content (same as the final output).
+/// - `MustExecute`        → rendered as a pending placeholder (code shown, output empty).
+///
+/// The returned `Vec<ExecutedNode>` can be fed directly to [`assemble_pass`].
+/// In a streaming compilation loop, replace individual entries as [`ProgressEvent`]s
+/// arrive, then call [`assemble_pass`] again to get an updated preview.
+pub fn planned_to_partial_nodes(
+    planned: &[PlannedNode],
+    backend: &TypstBackend,
+) -> Vec<ExecutedNode> {
+    planned
+        .iter()
+        .map(|pn| {
+            let (is_chunk, source_line) = match &pn.kind {
+                PlannedNodeKind::Chunk { node, .. } => (true, (node.range.start.line + 1) as u32),
+                PlannedNodeKind::Inline { .. } => (false, 0),
+            };
+
+            let (typst_content, errored) = match &pn.need {
+                ExecutionNeed::Skip => {
+                    (skip_output(pn, backend, &ChunkExecutionState::Ready), false)
+                }
+                ExecutionNeed::CacheHit(crate::executors::ExecutionAttempt::Success(output)) => (
+                    format_executed_node(pn, output, backend, &ChunkExecutionState::Ready),
+                    false,
+                ),
+                ExecutionNeed::CacheHit(crate::executors::ExecutionAttempt::RuntimeError(e)) => (
+                    format_error_block_for_node(&pn.kind, &pn.lang, &e.to_string()),
+                    true,
+                ),
+                ExecutionNeed::CacheHitInline(text) => (text.clone(), false),
+                ExecutionNeed::MustExecute => (pending_output(pn, backend), false),
+            };
+
+            ExecutedNode {
+                lang: pn.lang.clone(),
+                hash: pn.hash.clone(),
+                source_start: pn.source_start,
+                source_end: pn.source_end,
+                typst_content,
+                is_chunk,
+                source_line,
+                errored,
+            }
+        })
+        .collect()
+}
+
+/// Assemble a Phase-0 Typst string from planned nodes (no execution).
+///
+/// Equivalent to `assemble_pass(&planned_to_partial_nodes(planned, backend), source, source_file)`.
+pub fn assemble_partial(
+    planned: &[PlannedNode],
+    source: &str,
+    source_file: &str,
+    backend: &TypstBackend,
+) -> String {
+    let partial = planned_to_partial_nodes(planned, backend);
+    assemble_pass(&partial, source, source_file)
 }
 
 // ---------------------------------------------------------------------------

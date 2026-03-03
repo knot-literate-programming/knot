@@ -62,6 +62,31 @@ pub(super) fn inert_output(pn: &PlannedNode, backend: &TypstBackend, config: &Co
     }
 }
 
+/// Format a node that is pending execution (placeholder: code shown, empty output).
+///
+/// Used during progressive compilation (Phase 0): the node is known to need
+/// execution but hasn't run yet. Rendered identically to a skipped node —
+/// code visible according to the chunk's `show` option, output empty.
+pub(super) fn pending_output(pn: &PlannedNode, backend: &TypstBackend) -> String {
+    match &pn.kind {
+        PlannedNodeKind::Chunk { node: chunk, data } => {
+            let empty = ExecutionOutput {
+                result: ExecutionResult::Text(String::new()),
+                warnings: vec![],
+            };
+            format_output(
+                backend,
+                chunk,
+                &data.merged_codly_options,
+                &data.resolved_options,
+                &empty,
+                &ChunkExecutionState::Pending,
+            )
+        }
+        PlannedNodeKind::Inline { .. } => String::new(),
+    }
+}
+
 /// Format a node with eval = false (no execution, empty result).
 pub(super) fn skip_output(
     pn: &PlannedNode,

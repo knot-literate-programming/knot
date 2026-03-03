@@ -19,6 +19,17 @@ use log::info;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use tokio::sync::mpsc::UnboundedSender;
+
+/// Emitted after each node completes execution, enabling progressive preview updates.
+///
+/// `doc_idx` is the node's global position in the original planned document order
+/// (same index used by `assemble_pass`). Use it to update a `Vec<ExecutedNode>`
+/// buffer in place, then reassemble the Typst output.
+pub struct ProgressEvent {
+    pub doc_idx: usize,
+    pub executed: ExecutedNode,
+}
 
 use super::freeze::{check_freeze_contract, register_freeze_objects};
 use super::node_output::{
@@ -51,11 +62,16 @@ pub(super) fn group_by_language(
     groups
 }
 
+#[allow(clippy::too_many_arguments)]
 /// Execute all nodes for a single language sequentially, returning results tagged
 /// with their original document indices (for later reassembly in document order).
 ///
 /// Returns `(lang, executor, indexed_nodes)` — the executor is returned so the
 /// caller can put it back into the `ExecutorManager`.
+///
+/// When `progress` is `Some`, a [`ProgressEvent`] is sent after each node
+/// completes. `UnboundedSender::send` is non-blocking and safe to call from
+/// any thread (no tokio runtime required).
 pub(super) fn run_language_chain(
     lang: String,
     nodes: Vec<(usize, PlannedNode)>,
@@ -64,6 +80,7 @@ pub(super) fn run_language_chain(
     backend: &TypstBackend,
     config: &Config,
     project_root: &Path,
+    progress: Option<UnboundedSender<ProgressEvent>>,
 ) -> Result<ChainOutput> {
     let ctx = ChainContext {
         lang: &lang,
@@ -92,19 +109,25 @@ pub(super) fn run_language_chain(
             broken = true;
         }
 
-        indexed.push((
-            doc_idx,
-            ExecutedNode {
-                lang: lang.clone(),
-                hash: pn.hash,
-                source_start: pn.source_start,
-                source_end: pn.source_end,
-                typst_content,
-                is_chunk,
-                source_line,
-                errored,
-            },
-        ));
+        let executed = ExecutedNode {
+            lang: lang.clone(),
+            hash: pn.hash,
+            source_start: pn.source_start,
+            source_end: pn.source_end,
+            typst_content,
+            is_chunk,
+            source_line,
+            errored,
+        };
+
+        if let Some(tx) = &progress {
+            let _ = tx.send(ProgressEvent {
+                doc_idx,
+                executed: executed.clone(),
+            });
+        }
+
+        indexed.push((doc_idx, executed));
     }
 
     Ok((lang, sm.into_executor(), indexed))

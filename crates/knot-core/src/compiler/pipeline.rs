@@ -86,6 +86,7 @@ pub struct PlannedNode {
 /// A node after the execution phase: Typst output is fully determined.
 ///
 /// Owns all its data — no lifetime dependency on the source document.
+#[derive(Clone)]
 pub struct ExecutedNode {
     pub lang: String,
     pub hash: String,
