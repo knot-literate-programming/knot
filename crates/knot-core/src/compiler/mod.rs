@@ -29,7 +29,10 @@ use anyhow::Result;
 use log::info;
 
 use execution::{ChainOutput, group_by_language, run_language_chain};
-use node_output::{format_error_block_for_node, format_executed_node, pending_output, skip_output};
+use node_output::{
+    format_error_block_for_node, format_executed_node, pending_output, phase0_inert_output,
+    skip_output,
+};
 use options::{compute_hash, resolve_options};
 
 /// Represents a node in the document that can be executed.
@@ -409,42 +412,58 @@ pub fn planned_to_partial_nodes(
     planned: &[PlannedNode],
     backend: &TypstBackend,
 ) -> Vec<ExecutedNode> {
-    planned
-        .iter()
-        .map(|pn| {
-            let (is_chunk, source_line) = match &pn.kind {
-                PlannedNodeKind::Chunk { node, .. } => (true, (node.range.start.line + 1) as u32),
-                PlannedNodeKind::Inline { .. } => (false, 0),
-            };
+    // Track which languages have a cached runtime error so that subsequent
+    // MustExecute nodes in the same language chain are rendered as Inert
+    // (white overlay) rather than Pending (orange border) — matching the
+    // visual that execute_pass will produce.
+    let mut inert_langs: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut result = Vec::with_capacity(planned.len());
 
-            let (typst_content, errored) = match &pn.need {
-                ExecutionNeed::Skip => {
-                    (skip_output(pn, backend, &ChunkExecutionState::Ready), false)
-                }
-                ExecutionNeed::CacheHit(crate::executors::ExecutionAttempt::Success(output)) => (
-                    format_executed_node(pn, output, backend, &ChunkExecutionState::Ready),
-                    false,
-                ),
-                ExecutionNeed::CacheHit(crate::executors::ExecutionAttempt::RuntimeError(e)) => (
+    for pn in planned {
+        let (is_chunk, source_line) = match &pn.kind {
+            PlannedNodeKind::Chunk { node, .. } => (true, (node.range.start.line + 1) as u32),
+            PlannedNodeKind::Inline { .. } => (false, 0),
+        };
+
+        let (typst_content, errored) = match &pn.need {
+            ExecutionNeed::Skip => (skip_output(pn, backend, &ChunkExecutionState::Ready), false),
+            ExecutionNeed::CacheHit(crate::executors::ExecutionAttempt::Success(output)) => (
+                format_executed_node(pn, output, backend, &ChunkExecutionState::Ready),
+                false,
+            ),
+            ExecutionNeed::CacheHit(crate::executors::ExecutionAttempt::RuntimeError(e)) => {
+                // Mark this language as errored so downstream MustExecute nodes
+                // in the same chain are shown as Inert in Phase 0.
+                inert_langs.insert(pn.lang.clone());
+                (
                     format_error_block_for_node(&pn.kind, &pn.lang, &e.to_string()),
                     true,
-                ),
-                ExecutionNeed::CacheHitInline(text) => (text.clone(), false),
-                ExecutionNeed::MustExecute => (pending_output(pn, backend), false),
-            };
-
-            ExecutedNode {
-                lang: pn.lang.clone(),
-                hash: pn.hash.clone(),
-                source_start: pn.source_start,
-                source_end: pn.source_end,
-                typst_content,
-                is_chunk,
-                source_line,
-                errored,
+                )
             }
-        })
-        .collect()
+            ExecutionNeed::CacheHitInline(text) => (text.clone(), false),
+            ExecutionNeed::MustExecute => {
+                if inert_langs.contains(&pn.lang) {
+                    // Upstream error cached for this language → will be Inert.
+                    (phase0_inert_output(pn, backend), false)
+                } else {
+                    (pending_output(pn, backend), false)
+                }
+            }
+        };
+
+        result.push(ExecutedNode {
+            lang: pn.lang.clone(),
+            hash: pn.hash.clone(),
+            source_start: pn.source_start,
+            source_end: pn.source_end,
+            typst_content,
+            is_chunk,
+            source_line,
+            errored,
+        });
+    }
+
+    result
 }
 
 /// Assemble a Phase-0 Typst string from planned nodes (no execution).
