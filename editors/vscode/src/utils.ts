@@ -10,9 +10,9 @@ const execFileAsync = promisify(execFile);
 /**
  * Run a knot command and return its stdout
  */
-export async function runKnotCommand(knotPath: string, args: string[], outputChannel?: any): Promise<string> {
+export async function runKnotCommand(knotPath: string, args: string[], outputChannel?: any, cwd?: string): Promise<string> {
     try {
-        const { stdout } = await execFileAsync(knotPath, args);
+        const { stdout } = await execFileAsync(knotPath, args, cwd ? { cwd } : {});
         return stdout.trim();
     } catch (e: any) {
         outputChannel?.appendLine(`Knot command failed: ${knotPath} ${args.join(' ')}\nError: ${e.message}`);

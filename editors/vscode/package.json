@@ -78,10 +78,10 @@
         "icon": "$(trash)"
       },
       {
-        "command": "knot.stopWatch",
-        "title": "Stop Preview (knot watch)",
+        "command": "knot.buildProject",
+        "title": "Build PDF",
         "category": "Knot",
-        "icon": "$(debug-stop)"
+        "icon": "$(file-pdf)"
       },
       {
         "command": "knot.formatChunk",
@@ -132,7 +132,7 @@
           "group": "navigation@0"
         },
         {
-          "command": "knot.stopWatch",
+          "command": "knot.buildProject",
           "when": "resourceLangId == knot",
           "group": "navigation@1"
         }

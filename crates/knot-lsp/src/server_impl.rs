@@ -104,34 +104,55 @@ impl KnotLanguageServer {
             .to_file_path()
             .map_err(|_| anyhow::anyhow!("Invalid URI: {}", params.uri))?;
 
-        // ── 1. Phase 0 compilation (blocking) ─────────────────────────────────
-        // Produces main.typ on disk and returns its content.
-        log::info!("[startPreview] Running Phase 0 for {}", knot_path.display());
-        let output = tokio::task::spawn_blocking({
-            let path = knot_path.clone();
-            move || knot_core::compile_project_phase0(&path)
-        })
-        .await
-        .map_err(|_| anyhow::anyhow!("Phase 0 panicked"))?
-        .context("compile_project_phase0 failed")?;
-
-        let main_typ_path = output.main_typ_path.clone();
-        let typ_content = output.typ_content;
+        // ── 1. Resolve main.typ path from project config ───────────────────────
+        let (config, project_root) = knot_core::config::Config::find_and_load(&knot_path)
+            .context("Could not find knot.toml")?;
+        let main_file_name = config
+            .document
+            .main
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("No 'main' file in knot.toml"))?
+            .to_string();
+        let main_stem = Path::new(&main_file_name)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .ok_or_else(|| anyhow::anyhow!("Invalid main filename: {main_file_name}"))?
+            .to_string();
+        let main_typ_path = project_root.join(format!("{main_stem}.typ"));
         let main_typ_uri = Url::from_file_path(&main_typ_path)
             .map_err(|_| anyhow::anyhow!("Cannot build URI for {}", main_typ_path.display()))?;
         let main_typ_str = main_typ_path.to_string_lossy().to_string();
 
+        // ── 2. Get initial content for the overlay ─────────────────────────────
+        // Re-use the existing main.typ (from a previous compilation) rather than
+        // overwriting it with Phase 0 placeholders — this avoids rolling back a
+        // streaming result that may already be on disk.  Only run Phase 0 when
+        // main.typ does not exist yet (first open, fresh clone, after clean).
+        let typ_content = if main_typ_path.exists() {
+            log::info!("[startPreview] Using existing main.typ");
+            std::fs::read_to_string(&main_typ_path).context("Failed to read existing main.typ")?
+        } else {
+            log::info!("[startPreview] main.typ not found — running Phase 0");
+            let output = tokio::task::spawn_blocking({
+                let path = knot_path.clone();
+                move || knot_core::compile_project_phase0(&path)
+            })
+            .await
+            .map_err(|_| anyhow::anyhow!("Phase 0 panicked"))?
+            .context("compile_project_phase0 failed")?;
+            output.typ_content
+        };
+
         const TASK_ID: &str = "knot-preview";
 
-        // ── 2. textDocument/didOpen (v=1) + doStartPreview ────────────────────
-        // Hold the tinymist read lock for both to avoid TOCTOU races.
+        // ── 3. textDocument/didOpen (v=1) + doStartPreview ────────────────────
         let response = {
             let tinymist_guard = self.state.tinymist.read().await;
             let proxy = tinymist_guard
                 .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("Tinymist not ready"))?;
 
-            // Open the overlay with the Phase 0 content (version = 1).
+            // Open the overlay (version = 1).
             let _ = proxy
                 .send_notification(
                     lsp::DID_OPEN,
@@ -166,7 +187,7 @@ impl KnotLanguageServer {
                 .await?
         };
 
-        // ── 3. Store preview_info ──────────────────────────────────────────────
+        // ── 4. Store preview_info ──────────────────────────────────────────────
         let result = response.get("result").ok_or_else(|| {
             anyhow::anyhow!("No result from tinymist.doStartPreview: {response:?}")
         })?;
@@ -178,12 +199,8 @@ impl KnotLanguageServer {
 
         *self.state.preview_info.write().await = Some((TASK_ID.to_string(), static_server_port));
 
-        // ── 4. Activate overlay + send didChange v=2 ──────────────────────────
-        // Set overlay to Active with next_version=3 (v=2 is used right now).
+        // ── 5. Activate overlay + send didChange v=2 ──────────────────────────
         *self.state.tinymist_overlay.write().await = TinymistOverlay::Active { next_version: 3 };
-
-        // Send didChange v=2 so Tinymist renders Phase 0 immediately when the
-        // browser opens (bypasses macOS FSEvents debouncing).
         {
             let tinymist_guard = self.state.tinymist.read().await;
             if let Some(proxy) = tinymist_guard.as_ref() {
@@ -198,6 +215,18 @@ impl KnotLanguageServer {
                     .await;
             }
         }
+
+        // ── 6. Kick off a streaming compile ───────────────────────────────────
+        // Ensures the browser transitions from the initial state (Phase 0
+        // placeholders or previous result) to fully-executed output without
+        // requiring an explicit save.  Uses the current generation so it
+        // coexists gracefully with any ongoing did_save → do_compile.
+        let generation = self.state.compile_generation.load(Ordering::SeqCst);
+        let this = self.clone_for_task();
+        let uri = params.uri.clone();
+        tokio::spawn(async move {
+            this.do_compile(&uri, generation).await;
+        });
 
         log::info!("[startPreview] Preview started on port {static_server_port} (task={TASK_ID})");
         Ok(serde_json::json!({"status": "ok", "staticServerPort": static_server_port}))

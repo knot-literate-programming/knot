@@ -19,7 +19,6 @@ import {
     Selection,
     TextEditorRevealType,
 } from 'vscode';
-import { ChildProcess, spawn } from 'child_process';
 import {
     LanguageClient,
     LanguageClientOptions,
@@ -31,7 +30,6 @@ import { KnotProjectProvider } from './projectExplorer';
 import { resolveBinaryPath, findProjectRoot, parseMainFromToml, runKnotCommand, isKnotCompiledTyp } from './utils';
 
 let client: LanguageClient | undefined;
-let watchProcesses: Map<string, ChildProcess> = new Map();
 let compilationStatusBar: StatusBarItem;
 let suppressAutoSync = false;
 let syncDebounceTimer: ReturnType<typeof setTimeout> | undefined;
@@ -247,16 +245,7 @@ export async function activate(context: ExtensionContext) {
     );
 
     context.subscriptions.push(
-        commands.registerCommand('knot.stopWatch', async () => {
-            const editor = window.activeTextEditor;
-            if (!editor || editor.document.languageId !== 'knot') return;
-            const projectRoot = findProjectRoot(path.dirname(editor.document.uri.fsPath));
-            if (projectRoot && watchProcesses.has(projectRoot)) {
-                watchProcesses.get(projectRoot)?.kill();
-                watchProcesses.delete(projectRoot);
-                window.showInformationMessage('Knot preview stopped');
-            }
-        })
+        commands.registerCommand('knot.buildProject', () => buildProject(outputChannel))
     );
 
     context.subscriptions.push(
@@ -286,86 +275,83 @@ export async function activate(context: ExtensionContext) {
 
 export async function deactivate(): Promise<void> {
     if (client) await client.stop();
-    for (const p of watchProcesses.values()) p.kill();
-    watchProcesses.clear();
 }
 
 async function openPreview(outputChannel: any): Promise<void> {
     const editor = window.activeTextEditor;
     if (!editor || editor.document.languageId !== 'knot') return;
 
+    if (!client) {
+        window.showErrorMessage('LSP not connected — cannot start preview');
+        return;
+    }
+
+    const knotUri = editor.document.uri;
+
+    compilationStatusBar.text = '$(sync~spin) Starting Knot preview...';
+    compilationStatusBar.show();
+
+    try {
+        await window.withProgress(
+            { location: ProgressLocation.Notification, title: 'Knot Preview', cancellable: false },
+            async (progress) => {
+                progress.report({ message: 'Compiling...' });
+
+                const result: any = await client!.sendRequest('knot/startPreview', {
+                    uri: knotUri.toString(),
+                });
+
+                if (result?.status !== 'ok' || !result?.staticServerPort) {
+                    throw new Error(result?.message ?? 'unknown error from knot/startPreview');
+                }
+
+                await env.openExternal(Uri.parse(`http://127.0.0.1:${result.staticServerPort}/?task=knot-preview`));
+
+                // Keep focus on the .knot editor
+                const knotDoc = await workspace.openTextDocument(knotUri);
+                await window.showTextDocument(knotDoc, { viewColumn: ViewColumn.One, preserveFocus: false });
+
+                compilationStatusBar.text = '$(check) Preview ready!';
+                setTimeout(() => compilationStatusBar.hide(), 2000);
+            }
+        );
+    } catch (e) {
+        compilationStatusBar.hide();
+        outputChannel.appendLine(`[preview] Failed: ${e}`);
+        window.showErrorMessage(`Failed to start preview: ${e}`);
+    }
+}
+
+async function buildProject(outputChannel: any): Promise<void> {
+    const editor = window.activeTextEditor;
+    if (!editor || editor.document.languageId !== 'knot') return;
+
     const knotPath = editor.document.uri.fsPath;
-    const knotUri = Uri.file(knotPath);
     const projectRoot = findProjectRoot(path.dirname(knotPath));
     if (!projectRoot) {
         window.showErrorMessage('Could not find knot.toml');
         return;
     }
 
-    const tomlPath = path.join(projectRoot, 'knot.toml');
-    const mainFile = parseMainFromToml(tomlPath);
-    const mainStem = path.basename(mainFile, path.extname(mainFile));
-    const mainTypPath = path.join(projectRoot, `${mainStem}.typ`);
-
-    compilationStatusBar.text = '$(sync~spin) Starting Knot...';
+    compilationStatusBar.text = '$(sync~spin) Building PDF...';
     compilationStatusBar.show();
 
     try {
-        await window.withProgress({ location: ProgressLocation.Notification, title: 'Knot Preview', cancellable: false }, async (progress) => {
-            if (!watchProcesses.has(projectRoot)) {
+        await window.withProgress(
+            { location: ProgressLocation.Notification, title: 'Knot Build', cancellable: false },
+            async (progress) => {
+                progress.report({ message: 'Compiling to PDF...' });
                 const knotBinary = resolveBinaryPath('knot', outputChannel);
-                const watchProcess = spawn(knotBinary, ['watch'], { cwd: projectRoot, stdio: ['ignore', 'pipe', 'pipe'] });
-                watchProcess.on('exit', () => watchProcesses.delete(projectRoot));
-                watchProcesses.set(projectRoot, watchProcess);
-
-                progress.report({ message: 'Waiting for Typst output...' });
-                let attempts = 0;
-                while (!fs.existsSync(mainTypPath) && attempts < 20) {
-                    await new Promise(r => setTimeout(r, 500));
-                    attempts++;
-                }
+                await runKnotCommand(knotBinary, ['build'], outputChannel, projectRoot);
             }
-
-            if (!fs.existsSync(mainTypPath)) {
-                window.showErrorMessage(`Compiled file not found: ${mainTypPath}`);
-                return;
-            }
-
-            progress.report({ message: 'Starting preview...' });
-
-            if (!client) {
-                window.showErrorMessage('LSP not connected — cannot start preview');
-                return;
-            }
-
-            try {
-                const result: any = await client.sendRequest('knot/startPreview', {
-                    uri: knotUri.toString(),
-                });
-                if (result?.status === 'ok' && result?.staticServerPort) {
-                    // Use the dynamic port returned by Tinymist
-                    await env.openExternal(Uri.parse(`http://127.0.0.1:${result.staticServerPort}/?task=knot-preview`));
-                } else {
-                    outputChannel.appendLine(`[preview] startPreview returned: ${JSON.stringify(result)}`);
-                    window.showErrorMessage(`Failed to start preview: ${result?.message ?? 'unknown error'}`);
-                    return;
-                }
-            } catch (e) {
-                outputChannel.appendLine(`[preview] startPreview failed: ${e}`);
-                window.showErrorMessage(`Failed to start preview: ${e}`);
-                return;
-            }
-
-            // Keep focus on the .knot editor
-            const knotDoc = await workspace.openTextDocument(knotUri);
-            await window.showTextDocument(knotDoc, { viewColumn: ViewColumn.One, preserveFocus: false });
-
-            compilationStatusBar.text = '$(check) Preview ready!';
-            setTimeout(() => compilationStatusBar.hide(), 2000);
-        });
+        );
+        compilationStatusBar.text = '$(check) PDF built!';
+        setTimeout(() => compilationStatusBar.hide(), 3000);
+        window.showInformationMessage('PDF built successfully!');
     } catch (e) {
         compilationStatusBar.hide();
-        window.showErrorMessage(`Failed to start preview: ${e}`);
+        outputChannel.appendLine(`[build] Failed: ${e}`);
+        window.showErrorMessage(`Build failed: ${e}`);
     }
 }
 
