@@ -254,12 +254,15 @@ as the only typesetting target, with reproducibility as a first-class constraint
 
 ### Where Knot makes a different choice
 
-- **Notebook-style execution is not reproducible by default.** In RMarkdown and
-  Quarto, nothing prevents a notebook session from accumulating state across
-  interactive runs. A chunk can depend on an object defined two sessions ago and
-  the document will still compile — until it does not. Knot enforces a strictly
-  linear execution order and a chained cache: every chunk depends on everything
-  before it. Reproducibility is structural, not a convention.
+- **The notebook/render split.** RMarkdown and Quarto have two distinct modes.
+  In the notebook (interactive) session, execution is non-linear: you can run
+  chunks out of order, redefine variables, and accumulate state across runs.
+  At render time, the document is executed linearly from a fresh environment.
+  This split is a frequent source of frustration: code that worked interactively
+  breaks at render because it silently depended on state that no longer exists.
+  Knot has only one mode. Every compilation is a linear execution from a clean
+  state, with the cache as the only shortcut. There is no gap between "works in
+  the session" and "works in the document".
 - **Typst instead of LaTeX.** Typst's syntax is clean, its compilation is fast,
   and its layout model is modern. For users who do not need LaTeX compatibility,
   it removes a significant source of friction.
@@ -273,7 +276,7 @@ as the only typesetting target, with reproducibility as a first-class constraint
 | Maturity | Early | Mature | Mature |
 | Supported languages | R, Python | R (+ reticulate) | R, Python, Julia, others |
 | Output formats | PDF (via Typst) | Many | Many |
-| Execution order | Strictly linear | Notebook (non-deterministic) | Notebook (non-deterministic) |
+| Execution order | Always linear | Linear at render, non-linear interactively | Linear at render, non-linear interactively |
 | Caching | Chained SHA-256 | knitr cache (per chunk) | Freeze / cache |
 | Live preview | Streaming, per-chunk | None / slow | Limited |
 | Bidirectional sync | Yes | No | Partial |
