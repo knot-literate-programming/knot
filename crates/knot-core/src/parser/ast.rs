@@ -231,8 +231,8 @@ macro_rules! define_options {
 
             pub fn extract_codly_options(&mut self) {
                 for (key, value) in &self.other {
-                    if key.starts_with("codly-") {
-                        let codly_key = key.strip_prefix("codly-").unwrap().to_string();
+                    if let Some(codly_key) = key.strip_prefix("codly-") {
+                        let codly_key = codly_key.to_string();
                         let value_str = match value {
                             toml::Value::String(s) => s.clone(),
                             toml::Value::Boolean(b) => b.to_string(),
@@ -427,8 +427,9 @@ impl Chunk {
         codly_keys.sort(); // Deterministic order
         let mut has_options = !options_yaml.is_empty();
         for key in codly_keys {
-            let val = self.codly_options.get(key).unwrap();
-            out.push_str(&format!("#| codly-{}: {}\n", key, val));
+            if let Some(val) = self.codly_options.get(key) {
+                out.push_str(&format!("#| codly-{}: {}\n", key, val));
+            }
             has_options = true;
         }
 

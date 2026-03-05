@@ -343,7 +343,9 @@ impl Compiler {
 
             handles
                 .into_iter()
-                .map(|h| h.join().expect("language chain thread panicked"))
+                // Re-raise the original panic payload rather than wrapping it in a new
+                // string via `.expect()`. This preserves the panic location and backtrace.
+                .map(|h| h.join().unwrap_or_else(|e| std::panic::resume_unwind(e)))
                 .collect()
         });
 
@@ -776,10 +778,10 @@ mod tests {
         fs::write(&dep2, "content2").unwrap();
 
         let mut chunk = test_helpers::create_test_chunk("r", "x <- 1", None, false);
-        chunk.options.depends = vec![dep1.clone()];
+        chunk.options.depends = vec![dep1];
         let hash1 = compute_hash(&chunk.code, &chunk.options, "prev").unwrap();
 
-        chunk.options.depends = vec![dep2.clone()];
+        chunk.options.depends = vec![dep2];
         let hash2 = compute_hash(&chunk.code, &chunk.options, "prev").unwrap();
 
         assert_ne!(hash1, hash2);

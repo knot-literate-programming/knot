@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 // Integration tests for multi-file project builds
 //
 // These tests verify:

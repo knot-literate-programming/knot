@@ -425,7 +425,11 @@ fn fix_paths_in_typst(source: &str, typ_file: &Path) -> Result<String> {
     let result = PATH_REGEX.replace_all(source, |caps: &regex::Captures| {
         let abs_path_str = &caps[1];
         let abs_path = Path::new(abs_path_str);
-        let filename_os = abs_path.file_name().unwrap();
+        // The regex guarantees a non-empty path segment after `.knot_cache/`,
+        // so file_name() is always Some. We skip the copy on the impossible None.
+        let Some(filename_os) = abs_path.file_name() else {
+            return format!("\"{}\"", abs_path_str);
+        };
         let filename = filename_os.to_string_lossy();
 
         if !processed.contains(filename_os) {

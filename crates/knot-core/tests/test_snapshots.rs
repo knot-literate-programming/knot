@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 // Integration test for R session snapshots
 
 use knot_core::executors::{KnotExecutor, LanguageExecutor, r::RExecutor};

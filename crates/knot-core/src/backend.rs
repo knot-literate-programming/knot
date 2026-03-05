@@ -525,7 +525,7 @@ mod tests {
         let chunk = create_test_chunk("r", "plot(1:10)", None, Show::Output, None);
         let plot_path = PathBuf::from("/tmp/plot.svg");
         let output_data = ExecutionOutput {
-            result: ExecutionResult::Plot(plot_path.clone()),
+            result: ExecutionResult::Plot(plot_path),
             warnings: vec![],
         };
         let resolved = chunk.options.resolve();
@@ -543,7 +543,7 @@ mod tests {
         let chunk = create_test_chunk("r", "mtcars", None, Show::Output, None);
         let csv_path = PathBuf::from("/tmp/data.csv");
         let output_data = ExecutionOutput {
-            result: ExecutionResult::DataFrame(csv_path.clone()),
+            result: ExecutionResult::DataFrame(csv_path),
             warnings: vec![],
         };
         let resolved = chunk.options.resolve();
@@ -564,7 +564,7 @@ mod tests {
         let output_data = ExecutionOutput {
             result: ExecutionResult::TextAndPlot {
                 text: "Min: 1\nMax: 10".to_string(),
-                plot: plot_path.clone(),
+                plot: plot_path,
             },
             warnings: vec![],
         };
@@ -587,8 +587,8 @@ mod tests {
         let plot_path = PathBuf::from("/tmp/plot.svg");
         let output_data = ExecutionOutput {
             result: ExecutionResult::DataFrameAndPlot {
-                dataframe: csv_path.clone(),
-                plot: plot_path.clone(),
+                dataframe: csv_path,
+                plot: plot_path,
             },
             warnings: vec![],
         };
