@@ -94,7 +94,9 @@ mod tests {
     use super::*;
 
     #[test]
-    #[allow(clippy::const_is_empty)]
+    // Clippy flags `is_empty()` on `&'static str` constants as always-false, but the
+    // intent here is to guard against accidental empty-string definitions.
+    #[expect(clippy::const_is_empty)]
     fn test_system_constants_not_empty() {
         // Verify constants have expected non-empty values
         assert!(!Defaults::BOUNDARY_MARKER.is_empty());

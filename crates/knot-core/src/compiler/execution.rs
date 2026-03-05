@@ -62,7 +62,6 @@ pub(super) fn group_by_language(
     groups
 }
 
-#[allow(clippy::too_many_arguments)]
 /// Execute all nodes for a single language sequentially, returning results tagged
 /// with their original document indices (for later reassembly in document order).
 ///
@@ -72,6 +71,10 @@ pub(super) fn group_by_language(
 /// When `progress` is `Some`, a [`ProgressEvent`] is sent after each node
 /// completes. `UnboundedSender::send` is non-blocking and safe to call from
 /// any thread (no tokio runtime required).
+// All arguments are required: lang+nodes (chain identity), exec (executor ownership),
+// cache (shared state), backend+config+project_root (render context), progress (streaming).
+// Grouping them into a struct would not reduce coupling and would scatter the call sites.
+#[expect(clippy::too_many_arguments)]
 pub(super) fn run_language_chain(
     lang: String,
     nodes: Vec<(usize, PlannedNode)>,
