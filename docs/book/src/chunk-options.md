@@ -68,13 +68,13 @@ Options prefixed with `codly-` are passed directly to the
 [codly](https://typst.app/universe/package/codly) Typst package for syntax
 highlighting customisation:
 
-```typst
+~~~typst
 ```{r}
 #| codly-stroke: 2pt + red
 #| codly-lang-radius: 8pt
 x <- 1
 ```
-```
+~~~
 
 Refer to the codly documentation for the full list of available options.
 

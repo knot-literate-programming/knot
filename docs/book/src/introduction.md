@@ -140,12 +140,12 @@ are served from cache.
 For large objects — a trained model, a multi-gigabyte dataset — serialising and
 restoring a snapshot may itself be expensive. The `freeze` option addresses this.
 
-```typst
+~~~typst
 ```{r}
 #| freeze: [model, training_data]
 model <- train(training_data)
 ```
-```
+~~~
 
 When you declare `freeze: [model, training_data]`, Knot computes an
 [xxHash64](https://xxhash.com/) fingerprint of each named object immediately after

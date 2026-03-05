@@ -25,7 +25,7 @@ current plot to a file in the cache and tells Knot to embed it.
 
 ### ggplot2
 
-ggplot2 objects must be printed before calling `typst(current_plot())`:
+Use `typst(p)` to plot the ggplot object `p`:
 
 ~~~typst
 ```{r}
@@ -33,8 +33,7 @@ library(ggplot2)
 p <- ggplot(mtcars, aes(wt, mpg)) +
   geom_point() +
   geom_smooth(method = "lm")
-print(p)
-typst(current_plot())
+typst(p)
 ```
 ~~~
 
