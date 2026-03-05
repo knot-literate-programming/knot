@@ -1,110 +1,142 @@
 # Knot
 
-**knot is not knitr** — A modern literate programming system for [Typst](https://typst.app/).
+**knot is not knitr** — Literate programming for [Typst](https://typst.app/), powered by Rust.
 
-> [!IMPORTANT]
-> **Work in Progress**: Knot is currently under intensive development. Many features are in a "preview" state and may change rapidly.
-
+[![CI](https://github.com/knot-literate-programming/knot/actions/workflows/ci.yml/badge.svg)](https://github.com/knot-literate-programming/knot/actions/workflows/ci.yml)
+[![Latest Release](https://img.shields.io/github/v/release/knot-literate-programming/knot)](https://github.com/knot-literate-programming/knot/releases)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.80+-orange.svg)](https://www.rust-lang.org)
-[![GitHub Release](https://img.shields.io/github/v/release/knot-literate-programming/knot)](https://github.com/knot-literate-programming/knot/releases)
+
+Knot lets you write R and Python code directly inside Typst documents. The code executes, and the results — text, plots, tables — flow into your document automatically. Think RMarkdown or Quarto, but with Typst instead of LaTeX and a Rust engine underneath.
+
+<!-- TODO: add demo GIF here -->
 
 ---
 
-## What is Knot?
+## Features
 
-Knot brings **executable R and Python code** directly into your Typst documents. It allows you to weave analysis, visualizations, and text into a single source, providing a modern, fast, and reproducible alternative to RMarkdown or Jupyter, powered by the performance of Rust and the beauty of Typst.
-
-### Key Features
-
-- **Blazing Fast**: Built with Rust, featuring a three-pass compilation pipeline for progressive updates.
-- **Reproducible**: Intelligent SHA256-based caching with sequential invalidation.
-- **Polyglot**: Seamlessly switch between R and Python in the same document.
-- **Rich Output**: Automatic conversion of DataFrames to Typst tables and plots (Matplotlib, ggplot2) to SVG/PNG.
-- **First-class IDE support**: A dedicated VS Code extension providing hover docs, completion, live diagnostics, and streaming preview.
-- **Sync Mapping**: Bidirectional PDF ↔ Source synchronization (click in PDF jumps to `.knot` source; cursor in source scrolls the PDF preview).
+- **Multi-language** — R and Python in the same document, running in parallel
+- **Smart caching** — SHA-256 chained hashes; only changed chunks re-execute
+- **Live preview** — chunk-by-chunk streaming preview in VS Code as code runs
+- **Rich output** — plots (SVG/PNG), DataFrames as Typst tables, inline expressions
+- **Bidirectional sync** — click in the PDF to jump to the source, and vice versa
+- **Full IDE support** — completion, hover docs, diagnostics, formatting (Air + Ruff + Tinymist)
 
 ---
 
-## Quick Start
+## Installation
 
-### 1. Installation
+```bash
+curl -sSf https://raw.githubusercontent.com/knot-literate-programming/knot/master/install.sh | bash
+```
 
-**From source (recommended for contributors):**
+The script downloads the prebuilt binaries for your platform, installs the VS Code extension, and checks that all prerequisites (Typst, Tinymist, R, Python, Air, Ruff) are in place.
+
+**Prerequisites:**
+
+| Tool | Purpose | Required? |
+|---|---|---|
+| [Typst](https://github.com/typst/typst/releases) | Compiles `.typ` → PDF | Yes |
+| [Tinymist](https://github.com/Myriad-Dreamin/tinymist/releases) | Powers the VS Code preview | Yes |
+| [R](https://cran.r-project.org) | Executes R chunks | If using R |
+| [Python](https://www.python.org/downloads) | Executes Python chunks | If using Python |
+| [Air](https://posit-dev.github.io/air) | R code formatter in VS Code | Recommended |
+| [Ruff](https://docs.astral.sh/ruff/installation) | Python code formatter in VS Code | Recommended |
+
+<details>
+<summary>Build from source</summary>
+
 ```bash
 git clone https://github.com/knot-literate-programming/knot.git
 cd knot
 cargo install --path crates/knot-cli
 cargo install --path crates/knot-lsp
-knot install-vscode   # installs the VS Code extension from the cloned repo
 ```
 
-**Using pre-compiled binaries:**
-Download the CLI tools (`knot`, `knot-lsp`) and the VS Code extension (`.vsix`) for your platform from the [latest releases](https://github.com/knot-literate-programming/knot/releases).
-Install the extension with:
+Then install the VS Code extension:
 ```bash
-code --install-extension knot-<version>.vsix
+cd editors/vscode && npm install && npm run package
+code --install-extension knot-*.vsix
 ```
+</details>
 
-### 2. Create a Project
+---
+
+## Quick Start
+
 ```bash
 knot init my-project
 cd my-project
-code . # Open in VS Code
+code .           # open in VS Code, then click "Start Preview"
 ```
 
-### 3. Write and Compile
-Edit `main.knot`:
+A `.knot` file is a Typst document with executable code blocks:
 
 ~~~typst
 #import "lib/knot.typ": *
 
-= Analysis
+= My Analysis
 
 ```{r}
-#| show: "both"
-x <- rnorm(100)
-hist(x, col="steelblue")
-typst(current_plot())
+#| label: summary
+x <- c(2, 4, 6, 8, 10)
+summary(x)
 ```
 
-The average value is `{python} import numpy; print(numpy.mean(numpy.random.randn(100)))`.
+The mean is `{r} mean(x)` and the standard deviation is `{r} round(sd(x), 2)`.
+
+```{python}
+import matplotlib.pyplot as plt
+plt.plot([1, 4, 9, 16])
+plt.title("Growth")
+typst(current_plot())
+```
 ~~~
 
-Compile it:
+Compile to PDF:
 ```bash
-knot watch # Start live preview mode
+knot build       # one-shot PDF
+knot watch       # rebuild on save
 ```
 
 ---
 
-## Project Structure
+## How It Works
 
-- **`knot-core`**: The engine (parser, executors, cache).
-- **`knot-lsp`**: Language Server for IDE features.
-- **`knot-cli`**: Command-line interface.
-- **`editors/vscode`**: VS Code extension source.
+Knot compiles `.knot` files through a three-pass pipeline:
+
+1. **Plan** — parse, compute SHA-256 hashes, classify each chunk as `Skip` / `CacheHit` / `MustExecute`
+2. **Execute** — run R and Python chains in parallel; cache results
+3. **Assemble** — interleave outputs with source text to produce a `.typ` file for Typst
+
+The VS Code extension shows a streaming preview: cache hits appear instantly, and each chunk updates the preview as it finishes executing.
+
+---
+
+## Documentation
+
+Full documentation is coming. In the meantime:
+
+- **Chunk options reference** — see [`CLAUDE.md`](CLAUDE.md) § Chunk Options
+- **Architecture** — see [`CLAUDE.md`](CLAUDE.md) for the full pipeline description
+- **Dev plans** — see [`docs/dev-plans/`](docs/dev-plans/)
 
 ---
 
 ## Contributing
 
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
+We welcome bug reports, feature requests, and pull requests. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions and guidelines.
 
 ---
 
 ## Citing Knot
 
-If you use Knot for your research, please cite it as follows:
-
 ```bibtex
-@software{Klutchnikoff_Knot_A_modern_2026,
-  author = {Klutchnikoff, Nicolas},
-  month = feb,
-  title = {{Knot: A modern literate programming system for Typst}},
-  url = {https://github.com/knot-literate-programming/knot},
+@software{Klutchnikoff_Knot_2026,
+  author  = {Klutchnikoff, Nicolas},
+  title   = {{Knot: Literate programming for Typst}},
+  url     = {https://github.com/knot-literate-programming/knot},
   version = {0.3.0},
-  year = {2026}
+  year    = {2026}
 }
 ```
 
@@ -114,11 +146,5 @@ See [CITATION.cff](CITATION.cff) for full metadata.
 
 ## License
 
-Knot is licensed under the [Apache License, Version 2.0](LICENSE). This matches the license used by Typst.
-
----
-
-## Acknowledgments
-
+Apache License 2.0 — see [LICENSE](LICENSE).
 Inspired by [knitr](https://yihui.org/knitr/), [Quarto](https://quarto.org/), and [Typst](https://typst.app/).
-Developed with the assistance of [Claude](https://claude.ai) as a pair-programming partner.
