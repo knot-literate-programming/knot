@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 // Cache Storage Operations
 //
 // Handles file I/O for cache:

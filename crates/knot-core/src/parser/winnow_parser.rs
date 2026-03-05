@@ -2,6 +2,7 @@
 //!
 //! This module implements a robust line-by-line parsing strategy for chunks.
 //! Indentation is handled globally for each chunk to ensure structural integrity.
+#![allow(missing_docs)]
 
 use super::ast::{Chunk, ChunkError, Document, InlineExpr, InlineOptions, Position, Range, Show};
 use super::indent::dedent;

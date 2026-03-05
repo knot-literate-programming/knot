@@ -2,6 +2,7 @@
 //!
 //! Nodes of the same language run sequentially (shared interpreter state);
 //! nodes of different languages run in separate OS threads simultaneously.
+#![allow(missing_docs)]
 
 use crate::backend::TypstBackend;
 use crate::cache::Cache;
@@ -19,7 +20,7 @@ use log::info;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use tokio::sync::mpsc::UnboundedSender;
+use std::sync::mpsc::Sender;
 
 /// Emitted after each node completes execution, enabling progressive preview updates.
 ///
@@ -62,7 +63,6 @@ pub(super) fn group_by_language(
     groups
 }
 
-#[allow(clippy::too_many_arguments)]
 /// Execute all nodes for a single language sequentially, returning results tagged
 /// with their original document indices (for later reassembly in document order).
 ///
@@ -70,8 +70,11 @@ pub(super) fn group_by_language(
 /// caller can put it back into the `ExecutorManager`.
 ///
 /// When `progress` is `Some`, a [`ProgressEvent`] is sent after each node
-/// completes. `UnboundedSender::send` is non-blocking and safe to call from
-/// any thread (no tokio runtime required).
+/// completes. `Sender::send` is non-blocking and safe to call from any thread.
+// All arguments are required: lang+nodes (chain identity), exec (executor ownership),
+// cache (shared state), backend+config+project_root (render context), progress (streaming).
+// Grouping them into a struct would not reduce coupling and would scatter the call sites.
+#[expect(clippy::too_many_arguments)]
 pub(super) fn run_language_chain(
     lang: String,
     nodes: Vec<(usize, PlannedNode)>,
@@ -80,7 +83,7 @@ pub(super) fn run_language_chain(
     backend: &TypstBackend,
     config: &Config,
     project_root: &Path,
-    progress: Option<UnboundedSender<ProgressEvent>>,
+    progress: Option<Sender<ProgressEvent>>,
 ) -> Result<ChainOutput> {
     let ctx = ChainContext {
         lang: &lang,

@@ -58,7 +58,9 @@ pub fn get_document_symbols(text: &str) -> Option<Vec<DocumentSymbol>> {
             Some(details[0].clone())
         };
 
-        #[allow(deprecated)]
+        // The `deprecated` field on `DocumentSymbol` is itself deprecated in the LSP spec,
+        // but the lsp-types crate still requires it to construct the struct.
+        #[expect(deprecated)]
         symbols.push(DocumentSymbol {
             name,
             detail,

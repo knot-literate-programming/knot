@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 // R Executor - Public API and main struct
 //
 // This module orchestrates R code execution with caching support.

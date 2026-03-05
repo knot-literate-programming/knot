@@ -522,7 +522,14 @@ impl KnotLanguageServer {
 
         let execute_handle = tokio::task::spawn_blocking({
             let path = knot_path.clone();
-            move || knot_core::compile_project_full(&path, Some(progress_tx))
+            move || {
+                knot_core::compile_project_full(
+                    &path,
+                    Some(Box::new(move |typ| {
+                        let _ = progress_tx.send(typ);
+                    })),
+                )
+            }
         });
 
         // Receive and apply each partial assembled .typ.

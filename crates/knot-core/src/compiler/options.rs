@@ -1,4 +1,5 @@
 //! Chunk option resolution and hash computation for the planning phase.
+#![allow(missing_docs)]
 
 use crate::cache::{hash_dependencies, hashing};
 use crate::compiler::pipeline::ChunkExecutionState;

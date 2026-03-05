@@ -90,8 +90,7 @@ fn is_short_vector_output(s: &str) -> bool {
 
     // Check if there are multiple values (not handled by extract_scalar_value)
     let after_prefix = s[3..].trim();
-    let tokens: Vec<&str> = after_prefix.split_whitespace().collect();
-    tokens.len() > 1
+    after_prefix.split_whitespace().nth(1).is_some()
 }
 
 #[cfg(test)]

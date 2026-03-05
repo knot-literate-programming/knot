@@ -1,11 +1,17 @@
+//! Graphics option resolution for R and Python figure output.
+
 use crate::parser::ChunkOptions;
 
 /// Default graphics settings hardcoded in knot
 #[derive(Debug, Clone)]
 pub struct GraphicsDefaults {
+    /// Default figure width in inches.
     pub fig_width: f64,
+    /// Default figure height in inches.
     pub fig_height: f64,
+    /// Default resolution in dots per inch.
     pub dpi: u32,
+    /// Default output format (`"svg"` or `"png"`).
     pub format: String,
 }
 
@@ -24,9 +30,13 @@ impl Default for GraphicsDefaults {
 /// Resolved graphics options for a specific chunk
 #[derive(Debug, Clone)]
 pub struct ResolvedGraphicsOptions {
+    /// Figure width in inches (from chunk option or global default).
     pub width: f64,
+    /// Figure height in inches (from chunk option or global default).
     pub height: f64,
+    /// Resolution in dots per inch (from chunk option or global default).
     pub dpi: u32,
+    /// Output format string, e.g. `"svg"` or `"png"`.
     pub format: String,
 }
 

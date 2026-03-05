@@ -2,6 +2,14 @@
 members = ["crates/*"]
 resolver = "2"
 
+[workspace.lints.rust]
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+redundant_clone = "warn"
+needless_collect = "warn"
+large_enum_variant = "warn"
+
 [workspace.dependencies]
 # Pour le support LSP et le parsing
 anyhow = "1.0"

@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 // Run with: cargo test --test integration_inline -- --ignored
 
 use knot_core::{Compiler, Document};

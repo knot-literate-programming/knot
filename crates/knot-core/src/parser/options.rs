@@ -50,10 +50,10 @@ pub fn parse_options(
             for key_str in keys_to_process {
                 let key_value = serde_yaml::Value::String(key_str.clone());
 
-                if key_str.starts_with("codly-") {
+                if let Some(codly_key) = key_str.strip_prefix("codly-") {
                     // Extract and remove codly-* keys
                     if let Some(value) = map.remove(&key_value) {
-                        let codly_key = key_str.strip_prefix("codly-").unwrap().to_string();
+                        let codly_key = codly_key.to_string();
                         let value_str = match value {
                             serde_yaml::Value::String(s) => s,
                             serde_yaml::Value::Bool(b) => b.to_string(),

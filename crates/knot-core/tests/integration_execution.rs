@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 // Integration tests for R code execution
 //
 // These tests verify end-to-end execution:

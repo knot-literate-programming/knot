@@ -19,10 +19,15 @@
     stroke: 2pt + rgb("#f97316"),
   ),
   modified: (
-    stroke: 5pt + rgb("#fcd34d"),
+    stroke: (
+      thickness: 5pt,
+      paint: rgb("#fcd34d"),
+      dash: "densely-dotted",
+      join: "round",
+    ),
   ),
   "modified-cascade": (
-    stroke: 0.5pt + rgb("#fcd34d"),
+    stroke: (thickness: 1pt, paint: rgb("#fcd34d"), dash: "dashed"),
   ),
   inert: (
     overlay-fill: white.transparentize(40%),

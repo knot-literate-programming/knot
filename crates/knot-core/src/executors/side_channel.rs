@@ -4,6 +4,7 @@
 //! channel: a temporary JSON file whose path is passed via environment variable.
 //!
 //! This is more robust and works identically for R, Python, Julia, etc.
+#![allow(missing_docs)]
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};

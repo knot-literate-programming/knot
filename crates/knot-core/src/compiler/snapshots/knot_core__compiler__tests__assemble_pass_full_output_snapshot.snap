@@ -1,0 +1,12 @@
+---
+source: crates/knot-core/src/compiler/mod.rs
+expression: result
+---
+= Intro
+
+// #KNOT-SYNC source=test.knot line=3
+#code-chunk(lang: "r", code: [```r
+x <- 1```])
+// END-KNOT-SYNC
+
+Result: 1

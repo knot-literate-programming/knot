@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 // Integration tests for basic knot compilation
 //
 // These tests verify end-to-end functionality:

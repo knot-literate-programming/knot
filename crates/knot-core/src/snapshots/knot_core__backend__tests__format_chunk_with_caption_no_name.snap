@@ -1,0 +1,6 @@
+---
+source: crates/knot-core/src/backend.rs
+expression: "backend.format_chunk(&chunk, &chunk.codly_options, &resolved, &output_data,\n&ChunkExecutionState::Ready)"
+---
+#code-chunk(lang: "r", caption: [[My Caption]], code: [```r
+x <- 1:10```], output: none, layout: "horizontal")

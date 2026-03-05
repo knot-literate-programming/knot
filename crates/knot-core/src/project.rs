@@ -16,9 +16,9 @@
 //!   LSP to show preview updates while the user is typing, before saving.
 //!
 //! - [`compile_project_full`] — full compilation (plan + execute + assemble).
-//!   If an [`tokio::sync::mpsc::UnboundedSender`] is supplied, a fully
-//!   assembled `.typ` string is pushed into it after each chunk of the main
-//!   file completes, enabling incremental preview updates.
+//!   If an `on_progress` callback is supplied, a fully assembled `.typ` string
+//!   is passed to it after each chunk of the main file completes, enabling
+//!   incremental preview updates.
 
 use crate::backend::TypstBackend;
 use crate::compiler::Compiler;
@@ -36,6 +36,26 @@ use std::path::{Path, PathBuf};
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
+
+// TODO: typed error hierarchy for the public API.
+//
+// Step 1 — define a `ProjectError` enum in this module (using `thiserror`)
+// with variants for the failure modes callers may want to distinguish
+// (e.g. `ConfigNotFound`, `MainFileNotFound`, `IncludeOutsideRoot`).
+// Internal anyhow errors can be wrapped with `#[error(transparent)]`.
+// Change the return type of the three public entry points to
+// `Result<ProjectOutput, ProjectError>`.
+//
+// Step 2 — propagate typed errors all the way down through `compiler/`,
+// `cache/`, `parser/`, and `executors/`, replacing `anyhow` throughout
+// `knot-core`. Only then does the handbook recommendation
+// ("thiserror for libraries, anyhow for binaries") fully apply.
+//
+// Skipped for now: the only consumers (knot-lsp, knot-cli) do not
+// pattern-match on error variants — they log the display string.
+// The refactor becomes worthwhile once callers need to react differently
+// to specific failure modes (e.g. offer to create knot.toml on
+// ConfigNotFound, or show a targeted diagnostic on SecurityViolation).
 
 /// The output of a project compilation.
 pub struct ProjectOutput {
@@ -87,15 +107,15 @@ pub fn compile_project_phase0_unsaved(
 ///
 /// Includes are compiled fully first (they are usually cache hits).
 /// The main file is compiled with per-chunk streaming: if `on_progress` is
-/// `Some`, a fully assembled `.typ` string is sent after each chunk completes,
-/// enabling incremental preview updates without waiting for the entire
-/// compilation to finish.
+/// `Some`, it is called with a fully assembled `.typ` string after each chunk
+/// completes, enabling incremental preview updates without waiting for the
+/// entire compilation to finish.
 ///
 /// The final, complete `.typ` is written to `main.typ` on disk and returned
 /// in [`ProjectOutput`].
 pub fn compile_project_full(
     start_path: &Path,
-    on_progress: Option<tokio::sync::mpsc::UnboundedSender<String>>,
+    on_progress: Option<Box<dyn Fn(String) + Send>>,
 ) -> Result<ProjectOutput> {
     let (config, project_root) = Config::find_and_load(start_path)?;
     let (main_file, main_file_name, main_stem) = resolve_main_file(&config, &project_root)?;
@@ -126,7 +146,7 @@ pub fn compile_project_full(
         let mut partial = planned_to_partial_nodes(&planned, &backend, Phase0Mode::Pending);
 
         // Internal channel: execute thread → this thread.
-        let (prog_tx, mut prog_rx) = tokio::sync::mpsc::unbounded_channel::<ProgressEvent>();
+        let (prog_tx, prog_rx) = std::sync::mpsc::channel::<ProgressEvent>();
 
         // Run execute_and_assemble_streaming in a dedicated OS thread.
         // It is a blocking, CPU-bound call — unsuitable for an async context.
@@ -145,8 +165,8 @@ pub fn compile_project_full(
         });
 
         // Receive ProgressEvents; after each one, rebuild the full project
-        // .typ and push it to the caller.
-        while let Some(event) = prog_rx.blocking_recv() {
+        // .typ and call the progress callback.
+        for event in prog_rx {
             partial[event.doc_idx] = event.executed;
             let partial_main = assemble_pass(&partial, &main_source, &main_file_name);
             let partial_fixed = fix_paths_in_typst(&partial_main, &main_typ_path)?;
@@ -157,8 +177,8 @@ pub fn compile_project_full(
                 placeholder_line,
                 &config,
             )?;
-            if let Some(ref tx) = on_progress {
-                let _ = tx.send(assembled);
+            if let Some(ref f) = on_progress {
+                f(assembled);
             }
         }
 
@@ -425,7 +445,11 @@ fn fix_paths_in_typst(source: &str, typ_file: &Path) -> Result<String> {
     let result = PATH_REGEX.replace_all(source, |caps: &regex::Captures| {
         let abs_path_str = &caps[1];
         let abs_path = Path::new(abs_path_str);
-        let filename_os = abs_path.file_name().unwrap();
+        // The regex guarantees a non-empty path segment after `.knot_cache/`,
+        // so file_name() is always Some. We skip the copy on the impossible None.
+        let Some(filename_os) = abs_path.file_name() else {
+            return format!("\"{}\"", abs_path_str);
+        };
         let filename = filename_os.to_string_lossy();
 
         if !processed.contains(filename_os) {
