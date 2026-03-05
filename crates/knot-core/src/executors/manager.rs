@@ -41,7 +41,6 @@
 //!     r_exec_2.execute("print(x)", &graphics)?; // x is still in scope
 //!     Ok(())
 //! }
-#![allow(missing_docs)]
 
 use crate::defaults::Defaults;
 use crate::executors::{KnotExecutor, LanguageExecutor, python::PythonExecutor, r::RExecutor};
@@ -51,6 +50,14 @@ use std::collections::hash_map::Entry;
 use std::path::PathBuf;
 use std::time::Duration;
 
+/// Pool of language executors, keyed by language name.
+///
+/// Executors are initialized lazily on first use and reused for subsequent
+/// calls, preserving interpreter state across chunks.  Use [`take`] /
+/// [`put_back`] to move an executor into a thread for exclusive execution.
+///
+/// [`take`]: ExecutorManager::take
+/// [`put_back`]: ExecutorManager::put_back
 pub struct ExecutorManager {
     executors: HashMap<String, Box<dyn KnotExecutor>>,
     cache_dir: PathBuf,

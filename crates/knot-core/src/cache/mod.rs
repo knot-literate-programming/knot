@@ -1,12 +1,14 @@
-#![allow(missing_docs)]
-// Cache Module
-//
-// Provides cache management for chunk and inline expression results:
-// - Content-addressed storage with SHA256 hashing
-// - Sequential invalidation (chunk N+1 depends on chunk N)
-// - Dependency tracking (file mtime/size)
-// - Persistent metadata (metadata.json)
+//! Content-addressed cache for chunk and inline expression results.
+//!
+//! Results are keyed by a SHA-256 hash that chains sequential chunk hashes,
+//! so editing chunk N automatically invalidates N+1, N+2, … on the next run.
+//! File dependencies are also tracked (path + content hash) so that changing
+//! an external data file triggers re-execution of the chunks that read it.
+//!
+//! Metadata is persisted to `metadata.json` inside the cache directory and
+//! re-loaded on the next compilation without re-executing unchanged chunks.
 
+/// SHA-256 hashing utilities for chunks, inline expressions and file dependencies.
 pub mod hashing;
 mod metadata;
 mod storage;
@@ -20,8 +22,15 @@ use chrono::Utc;
 use std::fs;
 use std::path::PathBuf;
 
+/// On-disk cache for a single `.knot` document.
+///
+/// Stores chunk results, inline expression results, session snapshots and
+/// freeze-object hashes.  All content-addressed entries live under
+/// `cache_dir`; the index is persisted as `metadata.json` in the same directory.
 pub struct Cache {
+    /// Path to the cache directory (e.g. `.knot_cache/main/`).
     pub cache_dir: PathBuf,
+    /// In-memory index of all cached entries; written to disk by [`Cache::save_metadata`].
     pub metadata: CacheMetadata,
 }
 

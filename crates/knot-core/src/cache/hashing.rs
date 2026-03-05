@@ -1,9 +1,9 @@
-// Cache Hashing Logic
-//
-// Handles SHA256-based hashing for:
-// - Chunk code with options and dependencies (with chaining)
-// - Inline expressions with options
-// - File dependencies (path + mtime + size)
+//! SHA-256 hashing for chunks, inline expressions and file dependencies.
+//!
+//! Chunk hashes are chained: each hash includes the previous chunk's hash so
+//! that editing chunk N automatically invalidates N+1, N+2, … in the same
+//! language chain.  File dependencies are hashed by content so that changing
+//! an external file is detected immediately, without relying on mtime.
 
 use crate::parser::ChunkOptions;
 use anyhow::{Result, anyhow};

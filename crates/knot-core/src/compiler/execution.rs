@@ -2,7 +2,6 @@
 //!
 //! Nodes of the same language run sequentially (shared interpreter state);
 //! nodes of different languages run in separate OS threads simultaneously.
-#![allow(missing_docs)]
 
 use crate::backend::TypstBackend;
 use crate::cache::Cache;
@@ -28,7 +27,12 @@ use std::sync::{Arc, Mutex};
 /// (same index used by `assemble_pass`). Use it to update a `Vec<ExecutedNode>`
 /// buffer in place, then reassemble the Typst output.
 pub struct ProgressEvent {
+    /// Global index of the node in the original planned document order.
+    ///
+    /// Matches the index used by [`assemble_pass`](crate::assemble_pass).
+    /// Use it to update a `Vec<ExecutedNode>` buffer in place.
     pub doc_idx: usize,
+    /// The fully executed node, ready to be inserted into the output buffer.
     pub executed: ExecutedNode,
 }
 
