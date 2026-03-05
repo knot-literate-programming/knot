@@ -320,8 +320,8 @@ fn wrap_with_figure(chunk: &Chunk, code_chunk_call: &str) -> String {
 mod tests {
     use super::*;
     use crate::parser::ast::{Chunk, ChunkOptions, Position, Range};
-    use std::path::PathBuf;
     use insta::assert_snapshot;
+    use std::path::PathBuf;
 
     #[test]
     fn test_format_codly_call() {

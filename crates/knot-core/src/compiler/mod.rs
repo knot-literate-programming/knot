@@ -490,24 +490,24 @@ pub fn planned_to_partial_nodes(
                     (skip_output(pn, backend, &ChunkExecutionState::Inert), false)
                 } else {
                     match mode {
-                        Phase0Mode::Pending => {
-                            (skip_output(pn, backend, &ChunkExecutionState::Pending), false)
-                        }
+                        Phase0Mode::Pending => (
+                            skip_output(pn, backend, &ChunkExecutionState::Pending),
+                            false,
+                        ),
                         Phase0Mode::Modified => {
                             if must_execute_langs.contains(&pn.lang) {
                                 // Subsequent MustExecute in the same chain = cascade.
                                 (
-                                    skip_output(
-                                        pn,
-                                        backend,
-                                        &ChunkExecutionState::ModifiedCascade,
-                                    ),
+                                    skip_output(pn, backend, &ChunkExecutionState::ModifiedCascade),
                                     false,
                                 )
                             } else {
                                 // First MustExecute for this language = direct edit.
                                 must_execute_langs.insert(pn.lang.clone());
-                                (skip_output(pn, backend, &ChunkExecutionState::Modified), false)
+                                (
+                                    skip_output(pn, backend, &ChunkExecutionState::Modified),
+                                    false,
+                                )
                             }
                         }
                     }
@@ -749,7 +749,13 @@ mod tests {
         let inline_start = source.find("`r x`").unwrap();
         let inline_end = inline_start + "`r x`".len();
 
-        let chunk_node = make_executed_node(chunk_start, chunk_end, "#code-chunk(lang: \"r\", code: [```r\nx <- 1```])", true, 3);
+        let chunk_node = make_executed_node(
+            chunk_start,
+            chunk_end,
+            "#code-chunk(lang: \"r\", code: [```r\nx <- 1```])",
+            true,
+            3,
+        );
         let inline_node = make_executed_node(inline_start, inline_end, "1", false, 0);
         let result = assemble_pass(&[chunk_node, inline_node], source, "test.knot");
         assert_snapshot!(result);

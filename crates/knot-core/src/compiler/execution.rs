@@ -19,8 +19,8 @@ use anyhow::{Context, Result};
 use log::info;
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
 use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex};
 
 /// Emitted after each node completes execution, enabling progressive preview updates.
 ///
