@@ -228,16 +228,52 @@ computing as a single activity, not two separate phases.
 
 ## Comparison with RMarkdown and Quarto
 
+RMarkdown and Quarto are exceptional tools. They have shaped the practice of
+reproducible research over many years and inspired much of what Knot tries to do.
+If you are already happy with one of them, there is no reason to switch.
+
+Knot is a young project. It does not have the maturity, the ecosystem, or the
+community of either. What it offers instead is a narrow but deliberate bet: Typst
+as the only typesetting target, with reproducibility as a first-class constraint.
+
+### What RMarkdown and Quarto do better
+
+- **Maturity and ecosystem.** Thousands of packages, templates, and extensions
+  have been built around knitr and Quarto. Knot has none of that yet.
+- **Output formats.** Quarto targets HTML, Word, presentations, websites, books,
+  and more. Knot only produces Typst documents.
+- **Language support.** Quarto supports R, Python, Julia, Observable, and others.
+  Knot supports R and Python.
+- **Typesetting flexibility.** If you need LaTeX — for a journal template, a
+  specific package, or a workflow that requires `.tex` output — RMarkdown and
+  Quarto are the right tools. Typst is still young and not accepted everywhere.
+- **Speed of a first full run.** Knot's incremental model shines on reruns, but
+  the first compilation has the same cost as any other tool. On large documents,
+  Typst's own compilation is fast; the bottleneck is code execution, which is
+  comparable across systems.
+
+### Where Knot makes a different choice
+
+- **Notebook-style execution is not reproducible by default.** In RMarkdown and
+  Quarto, nothing prevents a notebook session from accumulating state across
+  interactive runs. A chunk can depend on an object defined two sessions ago and
+  the document will still compile — until it does not. Knot enforces a strictly
+  linear execution order and a chained cache: every chunk depends on everything
+  before it. Reproducibility is structural, not a convention.
+- **Typst instead of LaTeX.** Typst's syntax is clean, its compilation is fast,
+  and its layout model is modern. For users who do not need LaTeX compatibility,
+  it removes a significant source of friction.
+- **Live preview with per-chunk streaming.** Cached chunks appear instantly; only
+  invalidated chunks rerun. The preview updates progressively rather than waiting
+  for the full document.
+
 | | Knot | RMarkdown | Quarto |
 |---|---|---|---|
-| Typesetting engine | Typst | LaTeX / HTML | LaTeX / HTML / others |
-| Engine language | Rust | R | Rust |
-| Supported languages | R, Python | R (+ others via reticulate) | R, Python, Julia, others |
-| Caching | Chained SHA-256 | knitr cache (by chunk) | Freeze/cache |
+| Typesetting engine | Typst only | LaTeX / HTML | LaTeX / HTML / others |
+| Maturity | Early | Mature | Mature |
+| Supported languages | R, Python | R (+ reticulate) | R, Python, Julia, others |
+| Output formats | PDF (via Typst) | Many | Many |
+| Execution order | Strictly linear | Notebook (non-deterministic) | Notebook (non-deterministic) |
+| Caching | Chained SHA-256 | knitr cache (per chunk) | Freeze / cache |
 | Live preview | Streaming, per-chunk | None / slow | Limited |
 | Bidirectional sync | Yes | No | Partial |
-| Cross-file isolation | Strict | No isolation | No isolation |
-
-Knot's scope is deliberately narrower than Quarto's. It does not try to target
-every output format or every language. It targets Typst, R, and Python — and tries
-to do that combination exceptionally well.
