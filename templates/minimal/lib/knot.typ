@@ -19,10 +19,10 @@
     stroke: 2pt + rgb("#f97316"),
   ),
   modified: (
-    stroke: 2pt + rgb("#d97706"),
+    stroke: 5pt + rgb("#fcd34d"),
   ),
   "modified-cascade": (
-    stroke: 1pt + rgb("#fcd34d"),
+    stroke: 0.5pt + rgb("#fcd34d"),
   ),
   inert: (
     overlay-fill: white.transparentize(40%),
@@ -70,7 +70,9 @@
   // Wrap code in styled block
   let code-block = if code != none {
     // Visual state borders: driven by state-styles dict (customizable via knot-state-styles).
-    let effective-stroke = if is-pending { state-styles.pending.stroke } else if is-modified { state-styles.modified.stroke } else if is-modified-cascade { state-styles.at("modified-cascade").stroke } else { code-stroke }
+    let effective-stroke = if is-pending { state-styles.pending.stroke } else if is-modified {
+      state-styles.modified.stroke
+    } else if is-modified-cascade { state-styles.at("modified-cascade").stroke } else { code-stroke }
     let b = block(
       fill: code-background,
       stroke: effective-stroke,
@@ -173,6 +175,6 @@
     )[
       #set text(fill: white, size: 0.95em)
       #e
-    ])
+    ]),
   )
 }
