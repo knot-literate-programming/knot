@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 // Cache Module
 //
 // Provides cache management for chunk and inline expression results:

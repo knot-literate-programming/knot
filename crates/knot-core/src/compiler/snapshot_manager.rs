@@ -7,6 +7,7 @@
 //! snapshot operations (`restore_if_needed`, `update_after_node`) can access
 //! the executor directly without requiring it to be threaded through every
 //! call site as a `&mut Option<Box<dyn KnotExecutor>>`.
+#![allow(missing_docs)]
 
 use crate::cache::Cache;
 use crate::defaults::Defaults;

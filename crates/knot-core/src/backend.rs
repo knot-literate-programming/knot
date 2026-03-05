@@ -1,3 +1,5 @@
+//! Output formatting backend trait and Typst implementation.
+
 use crate::compiler::ChunkExecutionState;
 use crate::executors::{ExecutionOutput, ExecutionResult};
 use crate::parser::{Chunk, Layout, ResolvedChunkOptions, Show};
@@ -22,6 +24,12 @@ pub fn format_local_call(options: &HashMap<String, String>) -> String {
     format_typst_call("local", options)
 }
 
+/// Output backend for the compilation pipeline.
+///
+/// The current implementation targets Typst ([`TypstBackend`]), but the trait is
+/// designed to support additional backends in the future — for example LaTeX or
+/// Markdown. To add a new backend, implement this trait and wire it up in
+/// `compiler/mod.rs` where `TypstBackend` is instantiated.
 pub trait Backend {
     /// Formats a processed chunk into the target document syntax.
     fn format_chunk(
@@ -33,6 +41,7 @@ pub trait Backend {
     ) -> String;
 }
 
+/// Typst output backend — the only current implementation of [`Backend`].
 pub struct TypstBackend;
 
 impl Default for TypstBackend {
@@ -42,6 +51,7 @@ impl Default for TypstBackend {
 }
 
 impl TypstBackend {
+    /// Creates a new `TypstBackend`.
     pub fn new() -> Self {
         Self
     }
@@ -86,20 +96,14 @@ fn push_base_args(chunk: &Chunk, state: &ChunkExecutionState, args: &mut Vec<Str
         args.push(format!("caption: [{}]", caption));
     }
 
-    if matches!(state, ChunkExecutionState::Inert) {
-        args.push("is-inert: true".to_string());
-    }
-
-    if matches!(state, ChunkExecutionState::Pending) {
-        args.push("is-pending: true".to_string());
-    }
-
-    if matches!(state, ChunkExecutionState::Modified) {
-        args.push("is-modified: true".to_string());
-    }
-
-    if matches!(state, ChunkExecutionState::ModifiedCascade) {
-        args.push("is-modified-cascade: true".to_string());
+    match state {
+        ChunkExecutionState::Inert => args.push("is-inert: true".to_string()),
+        ChunkExecutionState::Pending => args.push("is-pending: true".to_string()),
+        ChunkExecutionState::Modified => args.push("is-modified: true".to_string()),
+        ChunkExecutionState::ModifiedCascade => {
+            args.push("is-modified-cascade: true".to_string());
+        }
+        ChunkExecutionState::Ready => {}
     }
 
     if !chunk.errors.is_empty() {

@@ -1,6 +1,7 @@
 //! Python Process Management
 //!
 //! Manages the lifecycle of a persistent Python3 subprocess using an embedded event loop wrapper.
+#![allow(missing_docs)]
 
 use crate::executors::read_streams_until_boundary;
 use anyhow::{Context, Result, anyhow};

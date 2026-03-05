@@ -2,6 +2,7 @@
 //!
 //! Nodes of the same language run sequentially (shared interpreter state);
 //! nodes of different languages run in separate OS threads simultaneously.
+#![allow(missing_docs)]
 
 use crate::backend::TypstBackend;
 use crate::cache::Cache;

@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 // Python Executor - Public API and main struct
 //
 // This module orchestrates Python code execution with caching support.

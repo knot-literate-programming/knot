@@ -1,8 +1,13 @@
+//! Three-pass compilation pipeline for `.knot` documents.
+//!
+//! The [`Compiler`] struct drives Plan → Execute → Assemble.
+//! See the crate-level documentation for a full description of the pipeline.
+
 use crate::cache::Cache;
 use crate::config::Config;
 use crate::executors::{ExecutorManager, KnotExecutor};
 use crate::parser::ast::{Chunk, Document, InlineExpr};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -10,6 +15,7 @@ use std::time::Duration;
 pub mod formatters;
 pub mod pipeline;
 pub mod snapshot_manager;
+/// Bidirectional source ↔ PDF navigation via `#KNOT-SYNC` markers.
 pub mod sync;
 
 mod execution;
@@ -41,18 +47,23 @@ use anyhow::Result;
 use log::info;
 
 use execution::{ChainOutput, group_by_language, run_language_chain};
-use node_output::{
-    format_error_block_for_node, format_executed_node, modified_cascade_output, modified_output,
-    pending_output, phase0_inert_output, skip_output,
-};
+use node_output::{format_error_block_for_node, format_executed_node, skip_output};
 use options::{compute_hash, resolve_options};
 
 /// Represents a node in the document that can be executed.
 pub enum ExecutableNode {
+    /// A fenced code chunk.
     Chunk(Box<Chunk>),
+    /// An inline expression `` `{lang} code` ``.
     InlineExpr(InlineExpr),
 }
 
+/// The compilation engine for a single `.knot` document.
+///
+/// Holds the executor pool, resolved config, project root and cache directory.
+/// Create via [`Compiler::new`], then call [`Compiler::plan_and_partial`] and
+/// [`Compiler::execute_and_assemble_streaming`] for progressive compilation, or use the
+/// project-level helpers in [`crate::project`] for full-project builds.
 pub struct Compiler {
     executor_manager: ExecutorManager,
     config: Config,
@@ -432,12 +443,11 @@ pub fn planned_to_partial_nodes(
 ) -> Vec<ExecutedNode> {
     // Track which languages have a cached runtime error so that subsequent
     // MustExecute nodes in the same language chain are rendered as Inert.
-    let mut inert_langs: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut inert_langs: HashSet<String> = HashSet::new();
     // Track which languages have already seen a MustExecute node (Modified mode):
     // the first MustExecute per language = direct edit (Modified),
     // subsequent ones = hash cascade (ModifiedCascade).
-    let mut must_execute_langs: std::collections::HashSet<String> =
-        std::collections::HashSet::new();
+    let mut must_execute_langs: HashSet<String> = HashSet::new();
     let mut result = Vec::with_capacity(planned.len());
 
     for pn in planned {
@@ -475,18 +485,27 @@ pub fn planned_to_partial_nodes(
             ExecutionNeed::MustExecute => {
                 if inert_langs.contains(&pn.lang) {
                     // Upstream error cached for this language → will be Inert.
-                    (phase0_inert_output(pn, backend), false)
+                    (skip_output(pn, backend, &ChunkExecutionState::Inert), false)
                 } else {
                     match mode {
-                        Phase0Mode::Pending => (pending_output(pn, backend), false),
+                        Phase0Mode::Pending => {
+                            (skip_output(pn, backend, &ChunkExecutionState::Pending), false)
+                        }
                         Phase0Mode::Modified => {
                             if must_execute_langs.contains(&pn.lang) {
                                 // Subsequent MustExecute in the same chain = cascade.
-                                (modified_cascade_output(pn, backend), false)
+                                (
+                                    skip_output(
+                                        pn,
+                                        backend,
+                                        &ChunkExecutionState::ModifiedCascade,
+                                    ),
+                                    false,
+                                )
                             } else {
                                 // First MustExecute for this language = direct edit.
                                 must_execute_langs.insert(pn.lang.clone());
-                                (modified_output(pn, backend), false)
+                                (skip_output(pn, backend, &ChunkExecutionState::Modified), false)
                             }
                         }
                     }

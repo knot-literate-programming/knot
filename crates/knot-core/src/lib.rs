@@ -1,3 +1,20 @@
+//! `knot-core` — parsing, compilation, caching and execution engine for Knot.
+//!
+//! # Architecture
+//!
+//! Compilation proceeds in three passes driven by [`compiler::Compiler`]:
+//!
+//! 1. **Plan** — [`compiler::pipeline`] resolves options, computes SHA-256 hashes
+//!    and classifies each node as `Skip`, `CacheHit` or `MustExecute`.
+//! 2. **Execute** — `MustExecute` nodes are grouped by language and run in parallel
+//!    threads; results are written to the on-disk [`cache`].
+//! 3. **Assemble** — node outputs are interleaved with the raw source to produce a
+//!    `.typ` file for Typst.
+//!
+//! For progressive preview, [`project::compile_project_phase0`] runs only Pass 1,
+//! rendering cached chunks immediately and placeholders for pending ones.
+//! [`project::compile_project_full`] runs all three passes with optional streaming.
+
 pub mod backend;
 pub mod cache;
 pub mod compiler;
@@ -23,7 +40,9 @@ pub use project::{
     ProjectOutput, compile_project_full, compile_project_phase0, compile_project_phase0_unsaved,
 };
 
-// R helper scripts (loaded in order)
+/// R helper scripts embedded in the binary, loaded into every R executor session.
+///
+/// Each entry is `(filename, source_code)`. Scripts are sourced in order.
 pub const R_HELPERS: &[(&str, &str)] = &[
     ("helpers.R", include_str!("../resources/r/helpers.R")),
     ("executor.R", include_str!("../resources/r/executor.R")),
@@ -33,7 +52,9 @@ pub const R_HELPERS: &[(&str, &str)] = &[
     ("lsp.R", include_str!("../resources/r/lsp.R")),
 ];
 
-// Python helper scripts (loaded in order)
+/// Python helper scripts embedded in the binary, loaded into every Python executor session.
+///
+/// Each entry is `(filename, source_code)`. Scripts are executed in order.
 pub const PYTHON_HELPERS: &[(&str, &str)] = &[
     ("helpers.py", include_str!("../resources/python/helpers.py")),
     (

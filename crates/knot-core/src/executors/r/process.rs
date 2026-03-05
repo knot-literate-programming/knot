@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 // R Process Management
 //
 // Handles the lifecycle of the persistent R subprocess:

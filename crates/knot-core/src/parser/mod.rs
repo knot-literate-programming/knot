@@ -17,6 +17,7 @@
 //! let source = "Some Typst content\n\n```{r}\nprint('hello')\n```";
 //! let doc = parse_document(source);
 //! ```
+#![allow(missing_docs)]
 
 pub mod ast;
 pub mod indent;

@@ -1,4 +1,5 @@
 //! Freeze contract: detection and registration of immutable cross-chunk objects.
+#![allow(missing_docs)]
 
 use crate::cache::{Cache, FreezeObjectInfo};
 use crate::compiler::pipeline::PlannedNode;

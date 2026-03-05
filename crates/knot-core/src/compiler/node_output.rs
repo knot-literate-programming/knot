@@ -2,6 +2,7 @@
 //!
 //! Each function corresponds to one rendering case: fresh execution,
 //! inert (upstream error), skipped (`eval = false`), or execution error.
+#![allow(missing_docs)]
 
 use crate::backend::{Backend, TypstBackend};
 use crate::compiler::pipeline::{ChunkExecutionState, PlannedNode, PlannedNodeKind};
@@ -62,115 +63,7 @@ pub(super) fn inert_output(pn: &PlannedNode, backend: &TypstBackend, config: &Co
     }
 }
 
-/// Format a MustExecute node that is in a Phase-0 Inert cascade.
-///
-/// A `CacheHit(RuntimeError)` precedes this node in the same language chain,
-/// so it will be rendered as `Inert` after execution. We apply the Inert style
-/// immediately (white overlay, `is-inert: true`) so Phase 0 visually matches
-/// the final compiled output.
-///
-/// Uses the pre-resolved options already stored on the [`PlannedNode`] rather
-/// than re-resolving with config — an acceptable approximation for the
-/// transient Phase-0 state.
-pub(super) fn phase0_inert_output(pn: &PlannedNode, backend: &TypstBackend) -> String {
-    match &pn.kind {
-        PlannedNodeKind::Chunk { node: chunk, data } => {
-            let empty = ExecutionOutput {
-                result: ExecutionResult::Text(String::new()),
-                warnings: vec![],
-            };
-            format_output(
-                backend,
-                chunk,
-                &data.merged_codly_options,
-                &data.resolved_options,
-                &empty,
-                &ChunkExecutionState::Inert,
-            )
-        }
-        PlannedNodeKind::Inline { node: inline } => {
-            format!(
-                "#text(fill: luma(150))[`{{{} {}}}`]",
-                inline.language, inline.code
-            )
-        }
-    }
-}
-
-/// Format a MustExecute node that the user directly edited (first in its language chain).
-///
-/// Used in Phase-0 `Modified` mode (`do_phase0_only`): the chunk's code changed
-/// directly — rendered with an amber border (strong) to signal a pending edit.
-pub(super) fn modified_output(pn: &PlannedNode, backend: &TypstBackend) -> String {
-    match &pn.kind {
-        PlannedNodeKind::Chunk { node: chunk, data } => {
-            let empty = ExecutionOutput {
-                result: ExecutionResult::Text(String::new()),
-                warnings: vec![],
-            };
-            format_output(
-                backend,
-                chunk,
-                &data.merged_codly_options,
-                &data.resolved_options,
-                &empty,
-                &ChunkExecutionState::Modified,
-            )
-        }
-        PlannedNodeKind::Inline { .. } => String::new(),
-    }
-}
-
-/// Format a MustExecute node invalidated by hash cascade (not directly edited).
-///
-/// Used in Phase-0 `Modified` mode: a downstream chunk whose hash changed
-/// because an upstream chunk changed — rendered with a muted amber border.
-pub(super) fn modified_cascade_output(pn: &PlannedNode, backend: &TypstBackend) -> String {
-    match &pn.kind {
-        PlannedNodeKind::Chunk { node: chunk, data } => {
-            let empty = ExecutionOutput {
-                result: ExecutionResult::Text(String::new()),
-                warnings: vec![],
-            };
-            format_output(
-                backend,
-                chunk,
-                &data.merged_codly_options,
-                &data.resolved_options,
-                &empty,
-                &ChunkExecutionState::ModifiedCascade,
-            )
-        }
-        PlannedNodeKind::Inline { .. } => String::new(),
-    }
-}
-
-/// Format a node that is pending execution (placeholder: code shown, empty output).
-///
-/// Used during progressive compilation (Phase 0): the node is known to need
-/// execution but hasn't run yet. Rendered identically to a skipped node —
-/// code visible according to the chunk's `show` option, output empty.
-pub(super) fn pending_output(pn: &PlannedNode, backend: &TypstBackend) -> String {
-    match &pn.kind {
-        PlannedNodeKind::Chunk { node: chunk, data } => {
-            let empty = ExecutionOutput {
-                result: ExecutionResult::Text(String::new()),
-                warnings: vec![],
-            };
-            format_output(
-                backend,
-                chunk,
-                &data.merged_codly_options,
-                &data.resolved_options,
-                &empty,
-                &ChunkExecutionState::Pending,
-            )
-        }
-        PlannedNodeKind::Inline { .. } => String::new(),
-    }
-}
-
-/// Format a node with eval = false (no execution, empty result).
+/// Format a node with empty output in the given execution state.
 pub(super) fn skip_output(
     pn: &PlannedNode,
     backend: &TypstBackend,

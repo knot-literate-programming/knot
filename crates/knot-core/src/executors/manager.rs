@@ -41,6 +41,7 @@
 //!     r_exec_2.execute("print(x)", &graphics)?; // x is still in scope
 //!     Ok(())
 //! }
+#![allow(missing_docs)]
 
 use crate::defaults::Defaults;
 use crate::executors::{KnotExecutor, LanguageExecutor, python::PythonExecutor, r::RExecutor};

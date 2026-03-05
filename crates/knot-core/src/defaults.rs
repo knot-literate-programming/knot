@@ -18,7 +18,9 @@ use std::str::FromStr;
 /// The compiler will enforce updating all three locations via exhaustive pattern matching.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Language {
+    /// The R statistical computing language.
     R,
+    /// The Python programming language.
     Python,
 }
 

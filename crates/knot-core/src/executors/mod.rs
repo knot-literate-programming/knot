@@ -1,3 +1,9 @@
+//! Language executor traits and shared output types.
+//!
+//! [`LanguageExecutor`] is the low-level trait; [`KnotExecutor`] extends it with
+//! session persistence (save/load snapshots) used by the snapshot manager.
+//! Concrete implementations live in [`python`] and [`r`].
+
 use anyhow::Result;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -6,6 +12,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+/// Shared error formatting utilities for executor implementations.
 pub mod error_utils;
 pub mod manager;
 pub mod path_utils;
@@ -77,21 +84,37 @@ pub(crate) fn read_stream<R: BufRead + Send + 'static>(
 pub use manager::ExecutorManager;
 pub use side_channel::{KnotMetadata, OutputMetadata, RuntimeError, RuntimeWarning, SideChannel};
 
-// From section 3.3 of the reference document
-
+/// The output produced by a successful code execution.
 #[derive(Debug)]
 pub enum ExecutionResult {
+    /// Plain text output (stdout).
     Text(String),
+    /// A saved figure file (SVG or PNG).
     Plot(PathBuf),
+    /// A saved DataFrame file.
     DataFrame(PathBuf),
-    TextAndPlot { text: String, plot: PathBuf },
-    DataFrameAndPlot { dataframe: PathBuf, plot: PathBuf },
+    /// Both text output and a figure.
+    TextAndPlot {
+        /// Plain text output (stdout).
+        text: String,
+        /// Path to the saved figure file.
+        plot: PathBuf,
+    },
+    /// Both a DataFrame and a figure.
+    DataFrameAndPlot {
+        /// Path to the saved DataFrame file.
+        dataframe: PathBuf,
+        /// Path to the saved figure file.
+        plot: PathBuf,
+    },
 }
 
 /// Aggregated output of a successful code execution (no runtime error).
 #[derive(Debug)]
 pub struct ExecutionOutput {
+    /// The primary execution result (text, plot, DataFrame, or combination).
     pub result: ExecutionResult,
+    /// Non-fatal warnings emitted during execution.
     pub warnings: Vec<RuntimeWarning>,
 }
 
@@ -103,16 +126,22 @@ pub struct ExecutionOutput {
 /// - `Err(e)` — infrastructure failure (process crash, timeout…); not cacheable.
 #[derive(Debug)]
 pub enum ExecutionAttempt {
+    /// Code ran without error; output is available.
     Success(ExecutionOutput),
+    /// Code raised a deterministic runtime error (cacheable; triggers Inert cascade).
     RuntimeError(RuntimeError),
 }
 
-/// Graphics options for code execution
+/// Graphics rendering options passed to the language executor before each chunk.
 #[derive(Debug, Clone)]
 pub struct GraphicsOptions {
+    /// Figure width in inches.
     pub width: f64,
+    /// Figure height in inches.
     pub height: f64,
+    /// Resolution in dots per inch.
     pub dpi: u32,
+    /// Output format string, e.g. `"svg"` or `"png"`.
     pub format: String,
 }
 
@@ -232,9 +261,13 @@ pub fn metadata_to_execution_result(
     })
 }
 
+/// Low-level interface for a language executor subprocess.
 pub trait LanguageExecutor: Send + Sync {
+    /// Spawn and initialise the executor subprocess.
     fn initialize(&mut self) -> Result<()>;
+    /// Execute a code chunk and return the result or a runtime error.
     fn execute(&mut self, code: &str, graphics: &GraphicsOptions) -> Result<ExecutionAttempt>;
+    /// Evaluate an inline expression and return the result as a string.
     fn execute_inline(&mut self, code: &str) -> Result<String>;
     /// Execute a lightweight query and return raw stdout (no formatting)
     fn query(&mut self, code: &str) -> Result<String>;

@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 // Library module for knot CLI functions
 // This allows integration tests to call CLI functions directly
 

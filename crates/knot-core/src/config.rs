@@ -1,7 +1,8 @@
-// Configuration parsing for knot.toml
-//
-// Reads the knot.toml configuration file to extract project settings,
-// particularly the paths to helper files (Typst and R).
+//! Configuration parsing for `knot.toml`.
+//!
+//! [`Config::find_and_load`] walks up the directory tree until it finds a
+//! `knot.toml`, then deserialises it into a [`Config`] struct.  All fields
+//! have sensible defaults so a missing `knot.toml` is not an error.
 
 pub use crate::parser::ast::ChunkDefaults;
 use anyhow::{Context, Result};
@@ -9,14 +10,19 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+/// Project configuration loaded from `knot.toml`.
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct Config {
+    /// `[document]` section — entry point and include list.
     #[serde(default)]
     pub document: DocumentConfig,
+    /// `[helpers]` section — optional custom Typst helper path.
     #[serde(default)]
     pub helpers: HelpersConfig,
+    /// `[execution]` section — timeout and other execution parameters.
     #[serde(default)]
     pub execution: ExecutionConfig,
+    /// `[chunk-defaults]` section — global chunk option defaults.
     #[serde(default, rename = "chunk-defaults")]
     pub chunk_defaults: ChunkDefaults,
     /// Codly configuration options (passed to #codly() during initialization)
@@ -38,17 +44,23 @@ pub struct Config {
     pub python_error: Option<ChunkDefaults>,
 }
 
+/// `[document]` section of `knot.toml`.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct DocumentConfig {
+    /// Path to the main `.knot` file (e.g. `"main.knot"`).
     pub main: Option<String>,
+    /// Additional `.knot` files to compile as includes.
     pub includes: Option<Vec<String>>,
 }
 
+/// `[helpers]` section of `knot.toml`.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct HelpersConfig {
+    /// Path to a custom Typst helper file (relative to project root).
     pub typst: Option<String>,
 }
 
+/// `[execution]` section of `knot.toml`.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct ExecutionConfig {

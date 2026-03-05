@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 // Cache Metadata Structures
 //
 // Defines the data structures for cache metadata:

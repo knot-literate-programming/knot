@@ -1,3 +1,9 @@
+//! Bidirectional source ↔ PDF navigation.
+//!
+//! The compiler embeds `#KNOT-SYNC` markers in the assembled `.typ` output.
+//! This module parses those markers and maps line numbers in both directions:
+//! `.typ` → `.knot` ([`map_typ_line_to_knot`]) and `.knot` → `.typ` ([`map_knot_line_to_typ`]).
+
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::fs;
@@ -10,22 +16,33 @@ static SYNC_RE: Lazy<Regex> =
 static INJECTION_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^\s*// #KNOT-INJECTION-START line=(\d+)$").unwrap());
 
+/// A `#KNOT-SYNC` marker anchoring a code chunk in the `.typ` output.
 #[derive(Debug, Clone)]
 pub struct ChunkMarker {
+    /// Source `.knot` file path (relative to project root).
     pub source: String,
+    /// 1-based line in the `.knot` file where this chunk starts.
     pub knot_line: usize,
+    /// 0-based line in the `.typ` file where this chunk's output begins.
     pub start_line: usize,
+    /// 0-based line in the `.typ` file where this chunk's output ends.
     pub end_line: usize,
 }
 
+/// A `BEGIN-FILE` / `END-FILE` block in the assembled `.typ`, corresponding to one `.knot` file.
 #[derive(Debug, Clone)]
 pub struct FileBlock {
+    /// Relative path of the `.knot` source file.
     pub file: String,
+    /// 0-based line in the `.typ` file where this block starts.
     pub start_line: usize,
+    /// 0-based line in the `.typ` file where this block ends.
     pub end_line: usize,
+    /// All chunk markers within this block, in document order.
     pub chunks: Vec<ChunkMarker>,
 }
 
+/// Parse all `#KNOT-SYNC` / `BEGIN-FILE` / `END-FILE` markers from an assembled `.typ` string.
 pub fn parse_knot_markers(content: &str) -> Vec<FileBlock> {
     let mut finished_blocks = Vec::new();
     let mut block_stack: Vec<FileBlock> = Vec::new();
@@ -135,6 +152,9 @@ pub fn parse_knot_markers(content: &str) -> Vec<FileBlock> {
     finished_blocks
 }
 
+/// Map a 0-based `.typ` line number to its origin `.knot` file and 0-based line.
+///
+/// Returns `None` if the line falls inside an injected region with no stable source mapping.
 pub fn map_typ_line_to_knot(
     typ_line: usize,
     blocks: &[FileBlock],
@@ -187,6 +207,9 @@ pub fn map_typ_line_to_knot(
     ))
 }
 
+/// Map a 0-based `.knot` line number to its corresponding 0-based `.typ` line.
+///
+/// Returns `None` if no mapping can be established (e.g. file not found in blocks).
 pub fn map_knot_line_to_typ(
     knot_file: &str,
     knot_line: usize,
