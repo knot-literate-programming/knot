@@ -7,10 +7,12 @@ use std::collections::HashMap;
 
 /// Helper function to format a HashMap of options into a Typst function call.
 fn format_typst_call(fn_name: &str, options: &HashMap<String, String>) -> String {
-    let args: Vec<String> = options
+    // Sort by key for deterministic output (HashMap iteration order is not stable).
+    let mut args: Vec<String> = options
         .iter()
         .map(|(key, value)| format!("{}: {}", key, value))
         .collect();
+    args.sort();
     format!("#{}({})", fn_name, args.join(", "))
 }
 
@@ -319,29 +321,20 @@ mod tests {
     use super::*;
     use crate::parser::ast::{Chunk, ChunkOptions, Position, Range};
     use std::path::PathBuf;
+    use insta::assert_snapshot;
 
     #[test]
     fn test_format_codly_call() {
         let mut options = std::collections::HashMap::new();
         options.insert("lang-radius".to_string(), "10pt".to_string());
         options.insert("stroke".to_string(), "1pt + rgb(\"#CE412B\")".to_string());
-
-        let result = format_codly_call(&options);
-
-        // Check that it starts with #codly(
-        assert!(result.starts_with("#codly("));
-        assert!(result.ends_with(")"));
-
-        // Check that both options are present
-        assert!(result.contains("lang-radius: 10pt"));
-        assert!(result.contains("stroke: 1pt + rgb(\"#CE412B\")"));
+        assert_snapshot!(format_codly_call(&options));
     }
 
     #[test]
     fn test_format_codly_call_empty() {
         let options = std::collections::HashMap::new();
-        let result = format_codly_call(&options);
-        assert_eq!(result, "#codly()");
+        assert_snapshot!(format_codly_call(&options));
     }
 
     fn create_test_chunk(
@@ -421,11 +414,13 @@ mod tests {
             warnings: vec![],
         };
         let resolved = chunk.options.resolve();
-
-        let output =
-            backend.format_chunk(&chunk, &chunk.codly_options, &resolved, &output_data, &ChunkExecutionState::Ready);
-
-        assert!(output.contains("errors: ([Unknown option: 'foo'], [Invalid value for 'eval'])"));
+        assert_snapshot!(backend.format_chunk(
+            &chunk,
+            &chunk.codly_options,
+            &resolved,
+            &output_data,
+            &ChunkExecutionState::Ready
+        ));
     }
 
     #[test]
@@ -437,14 +432,13 @@ mod tests {
             warnings: vec![],
         };
         let resolved = chunk.options.resolve();
-
-        let output =
-            backend.format_chunk(&chunk, &chunk.codly_options, &resolved, &output_data, &ChunkExecutionState::Ready);
-
-        assert!(output.contains("lang: \"r\""));
-        assert!(output.contains("code: [```r\nx <- 1:10\nmean(x)```]"));
-        assert!(output.contains("output: [```output\n[1] 5.5```]"));
-        assert!(output.starts_with("#code-chunk("));
+        assert_snapshot!(backend.format_chunk(
+            &chunk,
+            &chunk.codly_options,
+            &resolved,
+            &output_data,
+            &ChunkExecutionState::Ready
+        ));
     }
 
     #[test]
@@ -456,12 +450,13 @@ mod tests {
             warnings: vec![],
         };
         let resolved = chunk.options.resolve();
-
-        let output =
-            backend.format_chunk(&chunk, &chunk.codly_options, &resolved, &output_data, &ChunkExecutionState::Ready);
-
-        assert!(output.contains("code: none"));
-        assert!(output.contains("output: [```output\n[1] 5.5```]"));
+        assert_snapshot!(backend.format_chunk(
+            &chunk,
+            &chunk.codly_options,
+            &resolved,
+            &output_data,
+            &ChunkExecutionState::Ready
+        ));
     }
 
     #[test]
@@ -473,11 +468,13 @@ mod tests {
             warnings: vec![],
         };
         let resolved = chunk.options.resolve();
-
-        let output =
-            backend.format_chunk(&chunk, &chunk.codly_options, &resolved, &output_data, &ChunkExecutionState::Ready);
-
-        assert!(output.contains("output: none"));
+        assert_snapshot!(backend.format_chunk(
+            &chunk,
+            &chunk.codly_options,
+            &resolved,
+            &output_data,
+            &ChunkExecutionState::Ready
+        ));
     }
 
     #[test]
@@ -495,15 +492,13 @@ mod tests {
             warnings: vec![],
         };
         let resolved = chunk.options.resolve();
-
-        let output =
-            backend.format_chunk(&chunk, &chunk.codly_options, &resolved, &output_data, &ChunkExecutionState::Ready);
-
-        assert!(output.contains("#figure("));
-        assert!(output.contains("kind: raw"));
-        assert!(output.contains("supplement: \"Chunk\""));
-        assert!(output.contains("caption: [[My Caption]]"));
-        assert!(output.contains("<my-chunk>"));
+        assert_snapshot!(backend.format_chunk(
+            &chunk,
+            &chunk.codly_options,
+            &resolved,
+            &output_data,
+            &ChunkExecutionState::Ready
+        ));
     }
 
     #[test]
@@ -521,97 +516,91 @@ mod tests {
             warnings: vec![],
         };
         let resolved = chunk.options.resolve();
-
-        let output =
-            backend.format_chunk(&chunk, &chunk.codly_options, &resolved, &output_data, &ChunkExecutionState::Ready);
-
-        // Caption should be passed directly to code-chunk when no name
-        assert!(output.contains("caption: [[My Caption]]"));
-        assert!(!output.contains("#figure("));
+        assert_snapshot!(backend.format_chunk(
+            &chunk,
+            &chunk.codly_options,
+            &resolved,
+            &output_data,
+            &ChunkExecutionState::Ready
+        ));
     }
 
     #[test]
     fn test_format_chunk_plot_output() {
         let backend = TypstBackend::new();
         let chunk = create_test_chunk("r", "plot(1:10)", None, Show::Output, None);
-        let plot_path = PathBuf::from("/tmp/plot.svg");
         let output_data = ExecutionOutput {
-            result: ExecutionResult::Plot(plot_path),
+            result: ExecutionResult::Plot(PathBuf::from("/tmp/plot.svg")),
             warnings: vec![],
         };
         let resolved = chunk.options.resolve();
-
-        let output =
-            backend.format_chunk(&chunk, &chunk.codly_options, &resolved, &output_data, &ChunkExecutionState::Ready);
-
-        assert!(output.contains("output: [#image("));
-        assert!(output.contains("plot.svg"));
+        assert_snapshot!(backend.format_chunk(
+            &chunk,
+            &chunk.codly_options,
+            &resolved,
+            &output_data,
+            &ChunkExecutionState::Ready
+        ));
     }
 
     #[test]
     fn test_format_chunk_dataframe_output() {
         let backend = TypstBackend::new();
         let chunk = create_test_chunk("r", "mtcars", None, Show::Output, None);
-        let csv_path = PathBuf::from("/tmp/data.csv");
         let output_data = ExecutionOutput {
-            result: ExecutionResult::DataFrame(csv_path),
+            result: ExecutionResult::DataFrame(PathBuf::from("/tmp/data.csv")),
             warnings: vec![],
         };
         let resolved = chunk.options.resolve();
-
-        let output =
-            backend.format_chunk(&chunk, &chunk.codly_options, &resolved, &output_data, &ChunkExecutionState::Ready);
-
-        assert!(output.contains("output: [#{ let data = csv("));
-        assert!(output.contains("data.csv"));
-        assert!(output.contains("table(columns: data.first().len()"));
+        assert_snapshot!(backend.format_chunk(
+            &chunk,
+            &chunk.codly_options,
+            &resolved,
+            &output_data,
+            &ChunkExecutionState::Ready
+        ));
     }
 
     #[test]
     fn test_format_chunk_text_and_plot() {
         let backend = TypstBackend::new();
         let chunk = create_test_chunk("r", "plot(1:10); summary(1:10)", None, Show::Output, None);
-        let plot_path = PathBuf::from("/tmp/plot.svg");
         let output_data = ExecutionOutput {
             result: ExecutionResult::TextAndPlot {
                 text: "Min: 1\nMax: 10".to_string(),
-                plot: plot_path,
+                plot: PathBuf::from("/tmp/plot.svg"),
             },
             warnings: vec![],
         };
         let resolved = chunk.options.resolve();
-
-        let output =
-            backend.format_chunk(&chunk, &chunk.codly_options, &resolved, &output_data, &ChunkExecutionState::Ready);
-
-        assert!(output.contains("#image("));
-        assert!(output.contains("plot.svg"));
-        assert!(output.contains("Min: 1"));
-        assert!(output.contains("Max: 10"));
+        assert_snapshot!(backend.format_chunk(
+            &chunk,
+            &chunk.codly_options,
+            &resolved,
+            &output_data,
+            &ChunkExecutionState::Ready
+        ));
     }
 
     #[test]
     fn test_format_chunk_dataframe_and_plot() {
         let backend = TypstBackend::new();
         let chunk = create_test_chunk("r", "plot(mtcars); mtcars", None, Show::Output, None);
-        let csv_path = PathBuf::from("/tmp/data.csv");
-        let plot_path = PathBuf::from("/tmp/plot.svg");
         let output_data = ExecutionOutput {
             result: ExecutionResult::DataFrameAndPlot {
-                dataframe: csv_path,
-                plot: plot_path,
+                dataframe: PathBuf::from("/tmp/data.csv"),
+                plot: PathBuf::from("/tmp/plot.svg"),
             },
             warnings: vec![],
         };
         let resolved = chunk.options.resolve();
-
-        let output =
-            backend.format_chunk(&chunk, &chunk.codly_options, &resolved, &output_data, &ChunkExecutionState::Ready);
-
-        assert!(output.contains("let data = csv("));
-        assert!(output.contains("data.csv"));
-        assert!(output.contains("#image("));
-        assert!(output.contains("plot.svg"));
+        assert_snapshot!(backend.format_chunk(
+            &chunk,
+            &chunk.codly_options,
+            &resolved,
+            &output_data,
+            &ChunkExecutionState::Ready
+        ));
     }
 
     #[test]
@@ -623,13 +612,13 @@ mod tests {
             warnings: vec![],
         };
         let resolved = chunk.options.resolve();
-
-        let output =
-            backend.format_chunk(&chunk, &chunk.codly_options, &resolved, &output_data, &ChunkExecutionState::Ready);
-
-        // Empty name should not create figure wrapper
-        assert!(!output.contains("#figure("));
-        assert!(output.starts_with("#code-chunk("));
+        assert_snapshot!(backend.format_chunk(
+            &chunk,
+            &chunk.codly_options,
+            &resolved,
+            &output_data,
+            &ChunkExecutionState::Ready
+        ));
     }
 
     #[test]
@@ -641,64 +630,55 @@ mod tests {
             warnings: vec![],
         };
         let resolved = chunk.options.resolve();
-
-        let output =
-            backend.format_chunk(&chunk, &chunk.codly_options, &resolved, &output_data, &ChunkExecutionState::Ready);
-
-        // Empty text should result in output: none
-        assert!(output.contains("output: none"));
+        assert_snapshot!(backend.format_chunk(
+            &chunk,
+            &chunk.codly_options,
+            &resolved,
+            &output_data,
+            &ChunkExecutionState::Ready
+        ));
     }
 
     #[test]
     fn test_format_chunk_with_codly_options() {
         let backend = TypstBackend::new();
         let mut chunk = create_test_chunk("r", "x <- 1:10", None, Show::Both, None);
-
-        // Add codly options
         chunk
             .codly_options
             .insert("stroke".to_string(), "1pt + rgb(\"#CE412B\")".to_string());
         chunk
             .codly_options
             .insert("lang-radius".to_string(), "10pt".to_string());
-
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("[1] 1  2  3  4  5  6  7  8  9 10".to_string()),
             warnings: vec![],
         };
         let resolved = chunk.options.resolve();
-
-        let output =
-            backend.format_chunk(&chunk, &chunk.codly_options, &resolved, &output_data, &ChunkExecutionState::Ready);
-
-        // Should use #local() for chunk-specific codly options
-        assert!(output.contains("#local("));
-        assert!(output.contains("stroke: 1pt + rgb(\"#CE412B\")"));
-        assert!(output.contains("lang-radius: 10pt"));
-
-        // Code block should follow the #local() call
-        assert!(output.contains("```r"));
+        assert_snapshot!(backend.format_chunk(
+            &chunk,
+            &chunk.codly_options,
+            &resolved,
+            &output_data,
+            &ChunkExecutionState::Ready
+        ));
     }
 
     #[test]
     fn test_format_chunk_without_codly_options() {
         let backend = TypstBackend::new();
         let chunk = create_test_chunk("r", "x <- 1:10", None, Show::Both, None);
-
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("[1] 1  2  3  4  5  6  7  8  9 10".to_string()),
             warnings: vec![],
         };
         let resolved = chunk.options.resolve();
-
-        let output =
-            backend.format_chunk(&chunk, &chunk.codly_options, &resolved, &output_data, &ChunkExecutionState::Ready);
-
-        // Without codly options, should NOT have #local()
-        assert!(!output.contains("#local("));
-
-        // Should have simple code
-        assert!(output.contains("code: [```r"));
+        assert_snapshot!(backend.format_chunk(
+            &chunk,
+            &chunk.codly_options,
+            &resolved,
+            &output_data,
+            &ChunkExecutionState::Ready
+        ));
     }
 
     #[test]

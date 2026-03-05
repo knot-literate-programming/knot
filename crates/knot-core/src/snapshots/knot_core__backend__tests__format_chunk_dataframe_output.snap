@@ -1,0 +1,5 @@
+---
+source: crates/knot-core/src/backend.rs
+expression: "backend.format_chunk(&chunk, &chunk.codly_options, &resolved, &output_data,\n&ChunkExecutionState::Ready)"
+---
+#code-chunk(lang: "r", code: none, output: [#{ let data = csv("/tmp/data.csv"); table(columns: data.first().len(), ..data.flatten()) }])

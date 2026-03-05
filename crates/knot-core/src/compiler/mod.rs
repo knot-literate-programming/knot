@@ -607,6 +607,7 @@ pub(super) mod test_helpers {
 mod tests {
     use super::*;
     use crate::parser::ast::Document;
+    use insta::assert_snapshot;
     use tempfile::TempDir;
 
     // -----------------------------------------------------------------------
@@ -737,6 +738,21 @@ mod tests {
         assert!(result.contains("BBB "), "Inter-node text 'BBB ' missing");
         assert!(result.contains("2"), "Inline result missing");
         assert!(result.ends_with(" CCC"), "Suffix ' CCC' missing");
+    }
+
+    #[test]
+    fn test_assemble_pass_full_output_snapshot() {
+        // Source: prose, then a chunk, then an inline expression.
+        let source = "= Intro\n\n```{r}\nx <- 1\n```\n\nResult: `r x`\n";
+        let chunk_start = source.find("```{r}").unwrap();
+        let chunk_end = source.find("```\n\nResult").unwrap() + 3;
+        let inline_start = source.find("`r x`").unwrap();
+        let inline_end = inline_start + "`r x`".len();
+
+        let chunk_node = make_executed_node(chunk_start, chunk_end, "#code-chunk(lang: \"r\", code: [```r\nx <- 1```])", true, 3);
+        let inline_node = make_executed_node(inline_start, inline_end, "1", false, 0);
+        let result = assemble_pass(&[chunk_node, inline_node], source, "test.knot");
+        assert_snapshot!(result);
     }
 
     // -----------------------------------------------------------------------
