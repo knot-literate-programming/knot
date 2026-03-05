@@ -30,3 +30,15 @@
 
 - [VS Code](./vscode.md)
 - [CLI Reference](./cli.md)
+
+---
+
+# Developer Guide
+
+- [Architecture Overview](./dev-architecture.md)
+- [The Three-Pass Pipeline](./dev-pipeline.md)
+- [Language Executors](./dev-executors.md)
+- [Adding a Chunk Option](./dev-chunk-option.md)
+- [The Language Server](./dev-lsp.md)
+- [Testing](./dev-testing.md)
+- [Contributing](./dev-contributing.md)
