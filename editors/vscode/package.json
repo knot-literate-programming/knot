@@ -40,8 +40,13 @@
     "languages": [
       {
         "id": "knot",
-        "aliases": ["Knot", "knot"],
-        "extensions": [".knot"],
+        "aliases": [
+          "Knot",
+          "knot"
+        ],
+        "extensions": [
+          ".knot"
+        ],
         "configuration": "./language-configuration.json",
         "icon": {
           "light": "./icons/knot-light.svg",
@@ -191,7 +196,10 @@
         },
         "knot.preview.pdfViewer": {
           "type": "string",
-          "enum": ["vscode", "external"],
+          "enum": [
+            "vscode",
+            "external"
+          ],
           "default": "vscode",
           "description": "PDF viewer to use for preview (vscode: built-in PDF viewer, external: system default)"
         },
@@ -219,9 +227,11 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run clean && npm run bundle -- --production",
+    "compile": "npm run bundle",
+    "bundle": "node esbuild.js",
+    "clean": "node -e \"require('fs').rmSync('out', { recursive: true, force: true })\"",
+    "watch": "node esbuild.js --watch",
     "package": "vsce package --allow-missing-repository",
     "lint": "eslint src --ext ts"
   },
@@ -233,8 +243,9 @@
     "@types/vscode": "^1.80.0",
     "@typescript-eslint/eslint-plugin": "^6.x",
     "@typescript-eslint/parser": "^6.x",
+    "@vscode/vsce": "^2.22.0",
+    "esbuild": "^0.27.3",
     "eslint": "^8.x",
-    "typescript": "^5.3.0",
-    "@vscode/vsce": "^2.22.0"
+    "typescript": "^5.3.0"
   }
 }

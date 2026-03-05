@@ -1,11 +1,26 @@
+# Development files
 .vscode/**
 .vscode-test/**
 src/**
 .gitignore
 .yarnrc
-vsc-extension-quickstart.md
+esbuild.js
 **/tsconfig.json
 **/.eslintrc.json
-**/*.map
 **/*.ts
+
+# Bundled — node_modules not needed at runtime
+node_modules/**
+
+# Source maps (excluded from production build)
+**/*.map
+
+# Docs / test files
+vsc-extension-quickstart.md
 TEST-SIMPLE.md
+TESTING.md
+QUICKSTART.md
+README.md
+
+# Packaged vsix files
+*.vsix
