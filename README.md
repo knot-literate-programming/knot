@@ -114,11 +114,10 @@ The VS Code extension shows a streaming preview: cache hits appear instantly, an
 
 ## Documentation
 
-Full documentation is coming. In the meantime:
+**[knot-literate-programming.github.io/knot](https://knot-literate-programming.github.io/knot)**
 
-- **Chunk options reference** — see [`CLAUDE.md`](CLAUDE.md) § Chunk Options
-- **Architecture** — see [`CLAUDE.md`](CLAUDE.md) for the full pipeline description
-- **Dev plans** — see [`docs/dev-plans/`](docs/dev-plans/)
+- User guide — installation, chunk options, VS Code, CLI reference
+- Developer guide — architecture, adding a language executor, LSP internals
 
 ---
 

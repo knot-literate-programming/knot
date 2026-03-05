@@ -1,0 +1,12 @@
+[book]
+title = "Knot — User Guide"
+authors = ["Nicolas Klutchnikoff"]
+language = "en"
+src = "src"
+
+[output.html]
+site-url = "/knot/"
+git-repository-url = "https://github.com/knot-literate-programming/knot"
+git-repository-icon = "fa-github"
+edit-url-template = "https://github.com/knot-literate-programming/knot/edit/master/docs/book/src/{path}"
+no-section-label = false
