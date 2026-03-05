@@ -37,7 +37,7 @@ use std::path::{Path, PathBuf};
 // Public types
 // ---------------------------------------------------------------------------
 
-// TODO: typed error hierarchy for the public API.
+// TODO(#1): typed error hierarchy for the public API.
 //
 // Step 1 — define a `ProjectError` enum in this module (using `thiserror`)
 // with variants for the failure modes callers may want to distinguish

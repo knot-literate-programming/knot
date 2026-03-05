@@ -9,7 +9,7 @@
 
 Knot lets you write R and Python code directly inside Typst documents. The code executes, and the results — text, plots, tables — flow into your document automatically. Think RMarkdown or Quarto, but with Typst instead of LaTeX and a Rust engine underneath.
 
-<!-- TODO: add demo GIF here -->
+<!-- TODO(#2): add demo GIF here -->
 
 ---
 
