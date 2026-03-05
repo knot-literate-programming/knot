@@ -37,6 +37,26 @@ use std::path::{Path, PathBuf};
 // Public types
 // ---------------------------------------------------------------------------
 
+// TODO: typed error hierarchy for the public API.
+//
+// Step 1 — define a `ProjectError` enum in this module (using `thiserror`)
+// with variants for the failure modes callers may want to distinguish
+// (e.g. `ConfigNotFound`, `MainFileNotFound`, `IncludeOutsideRoot`).
+// Internal anyhow errors can be wrapped with `#[error(transparent)]`.
+// Change the return type of the three public entry points to
+// `Result<ProjectOutput, ProjectError>`.
+//
+// Step 2 — propagate typed errors all the way down through `compiler/`,
+// `cache/`, `parser/`, and `executors/`, replacing `anyhow` throughout
+// `knot-core`. Only then does the handbook recommendation
+// ("thiserror for libraries, anyhow for binaries") fully apply.
+//
+// Skipped for now: the only consumers (knot-lsp, knot-cli) do not
+// pattern-match on error variants — they log the display string.
+// The refactor becomes worthwhile once callers need to react differently
+// to specific failure modes (e.g. offer to create knot.toml on
+// ConfigNotFound, or show a targeted diagnostic on SecurityViolation).
+
 /// The output of a project compilation.
 pub struct ProjectOutput {
     /// Fully assembled Typst content written to `main.typ`.
