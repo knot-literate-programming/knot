@@ -108,7 +108,7 @@ pub(super) fn format_error_block_for_node(
     )
 }
 
-/// Clones the chunk with merged codly options and delegates to the backend formatter.
+/// Delegates to the backend formatter, passing merged codly options separately.
 pub(super) fn format_output(
     backend: &TypstBackend,
     chunk: &Chunk,
@@ -117,7 +117,5 @@ pub(super) fn format_output(
     output: &ExecutionOutput,
     state: &ChunkExecutionState,
 ) -> String {
-    let mut chunk_with_codly = chunk.clone();
-    chunk_with_codly.codly_options = merged_codly_options.clone();
-    backend.format_chunk(&chunk_with_codly, resolved_options, output, state)
+    backend.format_chunk(chunk, merged_codly_options, resolved_options, output, state)
 }

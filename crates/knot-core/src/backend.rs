@@ -32,9 +32,14 @@ pub fn format_local_call(options: &HashMap<String, String>) -> String {
 /// `compiler/mod.rs` where `TypstBackend` is instantiated.
 pub trait Backend {
     /// Formats a processed chunk into the target document syntax.
+    ///
+    /// `codly_options` is the *merged* set of codly presentation options for this
+    /// chunk (global config merged with per-chunk overrides).  It is passed
+    /// separately so that the caller never needs to clone the `Chunk` struct.
     fn format_chunk(
         &self,
         chunk: &Chunk,
+        codly_options: &HashMap<String, String>,
         resolved_options: &ResolvedChunkOptions,
         output: &ExecutionOutput,
         state: &ChunkExecutionState,
@@ -61,6 +66,7 @@ impl Backend for TypstBackend {
     fn format_chunk(
         &self,
         chunk: &Chunk,
+        codly_options: &HashMap<String, String>,
         resolved_options: &ResolvedChunkOptions,
         output: &ExecutionOutput,
         state: &ChunkExecutionState,
@@ -72,7 +78,7 @@ impl Backend for TypstBackend {
         let mut args = vec![];
         push_base_args(chunk, state, &mut args);
         push_warnings_arg(output, resolved_options, &mut args);
-        push_code_arg(chunk, resolved_options, &mut args);
+        push_code_arg(chunk, codly_options, resolved_options, &mut args);
         push_output_arg(output, resolved_options, &mut args);
         push_presentation_args(resolved_options, &mut args);
 
@@ -153,10 +159,15 @@ fn push_warnings_arg(
 }
 
 /// Pushes the `code:` argument (with optional #local() wrapper for per-chunk codly options).
-fn push_code_arg(chunk: &Chunk, resolved_options: &ResolvedChunkOptions, args: &mut Vec<String>) {
+fn push_code_arg(
+    chunk: &Chunk,
+    codly_options: &HashMap<String, String>,
+    resolved_options: &ResolvedChunkOptions,
+    args: &mut Vec<String>,
+) {
     if matches!(resolved_options.show, Show::Both | Show::Code) {
-        let code_str = if !chunk.codly_options.is_empty() {
-            let local_call = format_local_call(&chunk.codly_options);
+        let code_str = if !codly_options.is_empty() {
+            let local_call = format_local_call(codly_options);
             format!(
                 "[{}[```{}\n{}```]]",
                 local_call,
@@ -412,7 +423,7 @@ mod tests {
         let resolved = chunk.options.resolve();
 
         let output =
-            backend.format_chunk(&chunk, &resolved, &output_data, &ChunkExecutionState::Ready);
+            backend.format_chunk(&chunk, &chunk.codly_options, &resolved, &output_data, &ChunkExecutionState::Ready);
 
         assert!(output.contains("errors: ([Unknown option: 'foo'], [Invalid value for 'eval'])"));
     }
@@ -428,7 +439,7 @@ mod tests {
         let resolved = chunk.options.resolve();
 
         let output =
-            backend.format_chunk(&chunk, &resolved, &output_data, &ChunkExecutionState::Ready);
+            backend.format_chunk(&chunk, &chunk.codly_options, &resolved, &output_data, &ChunkExecutionState::Ready);
 
         assert!(output.contains("lang: \"r\""));
         assert!(output.contains("code: [```r\nx <- 1:10\nmean(x)```]"));
@@ -447,7 +458,7 @@ mod tests {
         let resolved = chunk.options.resolve();
 
         let output =
-            backend.format_chunk(&chunk, &resolved, &output_data, &ChunkExecutionState::Ready);
+            backend.format_chunk(&chunk, &chunk.codly_options, &resolved, &output_data, &ChunkExecutionState::Ready);
 
         assert!(output.contains("code: none"));
         assert!(output.contains("output: [```output\n[1] 5.5```]"));
@@ -464,7 +475,7 @@ mod tests {
         let resolved = chunk.options.resolve();
 
         let output =
-            backend.format_chunk(&chunk, &resolved, &output_data, &ChunkExecutionState::Ready);
+            backend.format_chunk(&chunk, &chunk.codly_options, &resolved, &output_data, &ChunkExecutionState::Ready);
 
         assert!(output.contains("output: none"));
     }
@@ -486,7 +497,7 @@ mod tests {
         let resolved = chunk.options.resolve();
 
         let output =
-            backend.format_chunk(&chunk, &resolved, &output_data, &ChunkExecutionState::Ready);
+            backend.format_chunk(&chunk, &chunk.codly_options, &resolved, &output_data, &ChunkExecutionState::Ready);
 
         assert!(output.contains("#figure("));
         assert!(output.contains("kind: raw"));
@@ -512,7 +523,7 @@ mod tests {
         let resolved = chunk.options.resolve();
 
         let output =
-            backend.format_chunk(&chunk, &resolved, &output_data, &ChunkExecutionState::Ready);
+            backend.format_chunk(&chunk, &chunk.codly_options, &resolved, &output_data, &ChunkExecutionState::Ready);
 
         // Caption should be passed directly to code-chunk when no name
         assert!(output.contains("caption: [[My Caption]]"));
@@ -531,7 +542,7 @@ mod tests {
         let resolved = chunk.options.resolve();
 
         let output =
-            backend.format_chunk(&chunk, &resolved, &output_data, &ChunkExecutionState::Ready);
+            backend.format_chunk(&chunk, &chunk.codly_options, &resolved, &output_data, &ChunkExecutionState::Ready);
 
         assert!(output.contains("output: [#image("));
         assert!(output.contains("plot.svg"));
@@ -549,7 +560,7 @@ mod tests {
         let resolved = chunk.options.resolve();
 
         let output =
-            backend.format_chunk(&chunk, &resolved, &output_data, &ChunkExecutionState::Ready);
+            backend.format_chunk(&chunk, &chunk.codly_options, &resolved, &output_data, &ChunkExecutionState::Ready);
 
         assert!(output.contains("output: [#{ let data = csv("));
         assert!(output.contains("data.csv"));
@@ -571,7 +582,7 @@ mod tests {
         let resolved = chunk.options.resolve();
 
         let output =
-            backend.format_chunk(&chunk, &resolved, &output_data, &ChunkExecutionState::Ready);
+            backend.format_chunk(&chunk, &chunk.codly_options, &resolved, &output_data, &ChunkExecutionState::Ready);
 
         assert!(output.contains("#image("));
         assert!(output.contains("plot.svg"));
@@ -595,7 +606,7 @@ mod tests {
         let resolved = chunk.options.resolve();
 
         let output =
-            backend.format_chunk(&chunk, &resolved, &output_data, &ChunkExecutionState::Ready);
+            backend.format_chunk(&chunk, &chunk.codly_options, &resolved, &output_data, &ChunkExecutionState::Ready);
 
         assert!(output.contains("let data = csv("));
         assert!(output.contains("data.csv"));
@@ -614,7 +625,7 @@ mod tests {
         let resolved = chunk.options.resolve();
 
         let output =
-            backend.format_chunk(&chunk, &resolved, &output_data, &ChunkExecutionState::Ready);
+            backend.format_chunk(&chunk, &chunk.codly_options, &resolved, &output_data, &ChunkExecutionState::Ready);
 
         // Empty name should not create figure wrapper
         assert!(!output.contains("#figure("));
@@ -632,7 +643,7 @@ mod tests {
         let resolved = chunk.options.resolve();
 
         let output =
-            backend.format_chunk(&chunk, &resolved, &output_data, &ChunkExecutionState::Ready);
+            backend.format_chunk(&chunk, &chunk.codly_options, &resolved, &output_data, &ChunkExecutionState::Ready);
 
         // Empty text should result in output: none
         assert!(output.contains("output: none"));
@@ -658,7 +669,7 @@ mod tests {
         let resolved = chunk.options.resolve();
 
         let output =
-            backend.format_chunk(&chunk, &resolved, &output_data, &ChunkExecutionState::Ready);
+            backend.format_chunk(&chunk, &chunk.codly_options, &resolved, &output_data, &ChunkExecutionState::Ready);
 
         // Should use #local() for chunk-specific codly options
         assert!(output.contains("#local("));
@@ -681,7 +692,7 @@ mod tests {
         let resolved = chunk.options.resolve();
 
         let output =
-            backend.format_chunk(&chunk, &resolved, &output_data, &ChunkExecutionState::Ready);
+            backend.format_chunk(&chunk, &chunk.codly_options, &resolved, &output_data, &ChunkExecutionState::Ready);
 
         // Without codly options, should NOT have #local()
         assert!(!output.contains("#local("));
