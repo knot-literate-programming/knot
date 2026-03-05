@@ -111,6 +111,18 @@
         "title": "Jump to compiled (.typ)",
         "category": "Knot",
         "icon": "$(go-to-file)"
+      },
+      {
+        "command": "knot.insertChunkR",
+        "title": "Insert R Chunk",
+        "category": "Knot",
+        "icon": "$(add)"
+      },
+      {
+        "command": "knot.insertChunkPython",
+        "title": "Insert Python Chunk",
+        "category": "Knot",
+        "icon": "$(add)"
       }
     ],
     "menus": {
@@ -178,6 +190,18 @@
         "command": "knot.formatChunk",
         "key": "ctrl+shift+i",
         "mac": "cmd+shift+i",
+        "when": "resourceLangId == knot && editorTextFocus"
+      },
+      {
+        "command": "knot.insertChunkR",
+        "key": "ctrl+k r",
+        "mac": "cmd+k r",
+        "when": "resourceLangId == knot && editorTextFocus"
+      },
+      {
+        "command": "knot.insertChunkPython",
+        "key": "ctrl+k p",
+        "mac": "cmd+k p",
         "when": "resourceLangId == knot && editorTextFocus"
       }
     ],

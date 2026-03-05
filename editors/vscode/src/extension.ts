@@ -21,6 +21,7 @@ import {
     TextEditorDecorationType,
     TextEditor,
     ColorThemeKind,
+    SnippetString,
 } from 'vscode';
 import {
     LanguageClient,
@@ -396,6 +397,21 @@ export async function activate(context: ExtensionContext) {
             }
         })
     );
+
+    context.subscriptions.push(
+        commands.registerCommand('knot.insertChunkR', () => insertChunk('r'))
+    );
+
+    context.subscriptions.push(
+        commands.registerCommand('knot.insertChunkPython', () => insertChunk('python'))
+    );
+}
+
+function insertChunk(lang: string): void {
+    const editor = window.activeTextEditor;
+    if (!editor || editor.document.languageId !== 'knot') return;
+    // Insert a fenced code block and place the cursor on the blank line inside.
+    editor.insertSnippet(new SnippetString(`\`\`\`{${lang}}\n$0\n\`\`\`\n`));
 }
 
 export async function deactivate(): Promise<void> {
