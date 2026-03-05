@@ -72,7 +72,14 @@ npm run compile
 
 ## Documentation
 
-For high-level roadmap and architectural details, see the documents in **[docs/dev-plans/](docs/dev-plans/)**.
+The full developer documentation is available at **[knot-literate-programming.github.io/knot](https://knot-literate-programming.github.io/knot/)**, including:
+
+- [Architecture overview](https://knot-literate-programming.github.io/knot/dev-architecture.html) — three-pass pipeline, caching, LSP design
+- [Adding a language executor](https://knot-literate-programming.github.io/knot/dev-executors.html) — step-by-step guide for adding a new language
+- [Adding a chunk option](https://knot-literate-programming.github.io/knot/dev-chunk-option.html) — walkthrough for extending chunk options
+- [Contributing guide](https://knot-literate-programming.github.io/knot/dev-contributing.html) — CI steps, commit conventions, project structure
+
+For high-level roadmap and architectural details, see also **[docs/dev-plans/](docs/dev-plans/)**.
 
 ---
 
