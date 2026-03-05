@@ -137,8 +137,25 @@ are served from cache.
 
 ## The Freeze Contract
 
-For large objects — a trained model, a multi-gigabyte dataset — serialising and
-restoring a snapshot may itself be expensive. The `freeze` option addresses this.
+### The snapshot trade-off
+
+Snapshots make incremental recompilation fast, but they have a cost: each snapshot
+captures the **entire interpreter environment** at that point — every variable,
+every object. If your document loads a multi-gigabyte dataset or trains a model,
+that object is included in every subsequent snapshot. With twenty chunks after the
+training step, you end up with twenty copies of the model on disk, and restoring
+any one of those snapshots means reading the full file back into memory.
+
+This is the core trade-off:
+
+| | Default (no freeze) | With `freeze` |
+|---|---|---|
+| **Snapshots** | Heavy — large objects included in each one | Light — large objects excluded |
+| **Disk usage** | Grows with number of downstream chunks | Object stored once |
+| **Snapshot restore** | One large file to read | Small snapshot + separate object load |
+| **Constraint** | None | Object must not be mutated downstream |
+
+### How freeze works
 
 ~~~typst
 ```{r}
@@ -147,15 +164,28 @@ model <- train(training_data)
 ```
 ~~~
 
-When you declare `freeze: [model, training_data]`, Knot computes an
-[xxHash64](https://xxhash.com/) fingerprint of each named object immediately after
-the chunk executes and stores it in the cache.
+When you declare `freeze: [model, training_data]`, Knot:
 
-After every subsequent chunk in the same language chain that must re-execute, Knot
-recomputes the fingerprints of `model` and `training_data` and compares them against
-the stored values. If they differ — meaning some downstream code accidentally
-modified them — Knot marks the violation and suspends execution of the rest of
-the chain, surfacing the error in the preview and in VS Code diagnostics.
+1. **Serialises** each named object into content-addressed storage
+   (`.knot_cache/objects/{hash}.ext`) immediately after the chunk executes.
+2. **Excludes** those objects from all subsequent snapshots, keeping them
+   lightweight.
+3. **Reloads** the objects separately after every snapshot restore — so the
+   interpreter always has them available.
+
+The objects are still serialised and deserialised; the gain is that snapshots
+themselves stay small and fast to write and read, and the objects live on disk
+only once regardless of how many chunks follow.
+
+### The immutability contract
+
+In exchange, Knot computes an [xxHash64](https://xxhash.com/) fingerprint of each
+frozen object immediately after declaration. After every subsequent chunk in the
+same language chain that must re-execute, Knot recomputes the fingerprints and
+compares them against the stored values. If they differ — meaning some downstream
+code accidentally modified them — Knot marks the violation and suspends execution
+of the rest of the chain, surfacing the error in the preview and in VS Code
+diagnostics.
 
 This gives you a **compile-time contract**: "these objects must not change after
 this point." If they do, you find out immediately, not after you have published the
@@ -163,6 +193,12 @@ document.
 
 xxHash64 was chosen for its speed: it can fingerprint hundreds of megabytes per
 second, making it practical even for large in-memory objects.
+
+### When to use freeze
+
+Use `freeze` when an object is **large and immutable** after its creation chunk —
+a trained model, a loaded dataset, a precomputed matrix. Do not use it for objects
+that downstream chunks are expected to modify.
 
 ---
 
