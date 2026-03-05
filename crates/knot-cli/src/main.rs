@@ -49,8 +49,6 @@ enum Commands {
         #[arg(long)]
         check: bool,
     },
-    /// Install the VSCode extension
-    InstallVscode,
     /// Map a line in a compiled .typ file back to its .knot source
     JumpToSource {
         /// The compiled .typ file
@@ -104,9 +102,6 @@ fn main() -> Result<()> {
                 // Or search for all .knot files
                 println!("Feature: recursive formatting coming soon. Please specify a file.");
             }
-        }
-        Commands::InstallVscode => {
-            install_vscode()?;
         }
         Commands::JumpToSource { file, line, open } => {
             jump_to_source(file, *line, *open)?;
@@ -464,125 +459,3 @@ fn run_event_loop(
     }
 }
 
-/// Install the VSCode extension
-fn install_vscode() -> Result<()> {
-    info!("🔧 Installing VSCode extension...");
-
-    let vscode_dir = find_vscode_extension_dir()?;
-    println!("📂 Found extension at: {:?}", vscode_dir);
-
-    println!("\n📦 Installing npm dependencies...");
-    run_npm_command(
-        &["install"],
-        &vscode_dir,
-        "Failed to run 'npm install'. Is npm installed?",
-    )?;
-    println!("  ✓ Dependencies installed");
-
-    println!("\n🔨 Compiling TypeScript...");
-    run_npm_command(
-        &["run", "compile"],
-        &vscode_dir,
-        "Failed to run 'npm run compile'",
-    )?;
-    println!("  ✓ TypeScript compiled");
-
-    println!("\n🧹 Cleaning up old .vsix files...");
-    for entry in fs::read_dir(&vscode_dir)?
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.path()
-                .extension()
-                .and_then(|ext| ext.to_str())
-                .map(|ext| ext == "vsix")
-                .unwrap_or(false)
-        })
-    {
-        let path = entry.path();
-        fs::remove_file(&path)?;
-        println!("  ✓ Removed old package: {:?}", path.file_name().unwrap());
-    }
-
-    println!("\n📦 Packaging extension...");
-    run_npm_command(
-        &["run", "package"],
-        &vscode_dir,
-        "Failed to run 'npm run package'. Is @vscode/vsce installed?",
-    )?;
-    println!("  ✓ Extension packaged");
-
-    let vsix_path = find_vsix_file(&vscode_dir)?;
-    println!("\n📦 Found package: {:?}", vsix_path.file_name().unwrap());
-
-    println!("\n🚀 Installing extension in VSCode...");
-    let install_output = std::process::Command::new("code")
-        .arg("--install-extension")
-        .arg(&vsix_path)
-        .current_dir(&vscode_dir)
-        .output()
-        .context("Failed to run 'code --install-extension'. Is VSCode CLI installed?")?;
-
-    if !install_output.status.success() {
-        let stderr = String::from_utf8_lossy(&install_output.stderr);
-        anyhow::bail!("VSCode installation failed:\n{}", stderr);
-    }
-
-    println!("  ✓ Extension installed successfully!");
-    println!("\n✅ Done! Restart VSCode to activate the Knot extension.");
-    println!("\n💡 Tip: Open a .knot file to see syntax highlighting and LSP features.");
-
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// Private helpers for install_vscode()
-// ---------------------------------------------------------------------------
-
-/// Walks up from cwd until it finds an `editors/vscode` subdirectory.
-fn find_vscode_extension_dir() -> Result<PathBuf> {
-    let mut current_dir = std::env::current_dir()?;
-    loop {
-        let candidate = current_dir.join("editors").join("vscode");
-        if candidate.exists() && candidate.is_dir() {
-            return Ok(candidate);
-        }
-        match current_dir.parent() {
-            Some(parent) => current_dir = parent.to_path_buf(),
-            None => anyhow::bail!(
-                "Could not find editors/vscode directory. \
-                 Please run this command from within the knot repository."
-            ),
-        }
-    }
-}
-
-/// Runs `npm <args>` in `dir`, returning an error if the command fails.
-fn run_npm_command(args: &[&str], dir: &Path, spawn_context: &str) -> Result<()> {
-    let status = std::process::Command::new("npm")
-        .args(args)
-        .current_dir(dir)
-        .status()
-        .context(spawn_context.to_string())?;
-    if !status.success() {
-        anyhow::bail!("npm {} failed", args.join(" "));
-    }
-    Ok(())
-}
-
-/// Returns the path of the first `.vsix` file found in `dir`.
-fn find_vsix_file(dir: &Path) -> Result<PathBuf> {
-    let vsix: Vec<_> = fs::read_dir(dir)?
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.path()
-                .extension()
-                .and_then(|ext| ext.to_str())
-                .map(|ext| ext == "vsix")
-                .unwrap_or(false)
-        })
-        .collect();
-    if vsix.is_empty() {
-        anyhow::bail!("No .vsix file found after packaging");
-    }
-    Ok(vsix[0].path())
-}
