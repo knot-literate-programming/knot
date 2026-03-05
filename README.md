@@ -4,6 +4,7 @@
 
 [![CI](https://github.com/knot-literate-programming/knot/actions/workflows/ci.yml/badge.svg)](https://github.com/knot-literate-programming/knot/actions/workflows/ci.yml)
 [![Latest Release](https://img.shields.io/github/v/release/knot-literate-programming/knot)](https://github.com/knot-literate-programming/knot/releases)
+[![Documentation](https://img.shields.io/badge/docs-knot--literate--programming.github.io%2Fknot-blue)](https://knot-literate-programming.github.io/knot/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 Knot lets you write R and Python code directly inside Typst documents. The code executes, and the results — text, plots, tables — flow into your document automatically. Think RMarkdown or Quarto, but with Typst instead of LaTeX and a Rust engine underneath.
