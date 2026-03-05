@@ -192,6 +192,22 @@ warning = false
 # Syntax highlighting config
 ```
 
+## Two Distinct Styling Systems
+
+Knot has two separate, intentionally asymmetric styling systems:
+
+**1. Chunk presentation styles** — appear in the **final PDF**
+- Configured via `knot.toml` (`[chunk-defaults]`, `[codly]`) or per-chunk options (`#| code-background:`, `#| code-stroke:`, etc.)
+- Propagated by the Rust pipeline through `ResolvedChunkOptions` → `backend.rs` → `#code-chunk(...)` arguments
+- Examples: code block background, border, inset, output layout
+
+**2. Execution state styles** — appear **only in live preview**, never in the final PDF
+- Configured directly in `lib/knot.typ` via the `knot-state-styles` dictionary
+- Implemented purely in Typst; Rust only sets boolean flags (`is-pending`, `is-modified`, etc.)
+- Examples: orange border for pending chunks, amber for modified, white overlay for inert
+
+**Rule**: do not route state styles through `knot.toml` or the Rust config pipeline — `lib/knot.typ` is the right and only place for them.
+
 ## Key Conventions
 
 - Error handling uses `anyhow::Result` everywhere; the `?` operator propagates freely.

@@ -9,17 +9,20 @@
 // not document configuration (Codly, figure numbering, etc.).
 // Document configuration belongs in your main.knot file.
 
-/// Default visual styles for chunk execution states.
-/// Override individual entries to customize borders and inert overlay.
+/// Visual styles for chunk execution states (live preview only — not in final PDF).
+/// These appear during `knot watch --preview` and VS Code preview when chunks are
+/// pending execution, recently modified, or inert due to an upstream error.
+/// Override entries here to customize the preview feedback; chunk presentation
+/// styles (background, inset, etc.) belong in knot.toml or chunk options instead.
 #let knot-state-styles = (
   pending: (
     stroke: 2pt + rgb("#f97316"),
   ),
   modified: (
-    stroke: 2pt + rgb("#d97706"),
+    stroke: 5pt + rgb("#fcd34d"),
   ),
   "modified-cascade": (
-    stroke: 1pt + rgb("#fcd34d"),
+    stroke: 0.5pt + rgb("#fcd34d"),
   ),
   inert: (
     overlay-fill: white.transparentize(40%),
@@ -67,7 +70,9 @@
   // Wrap code in styled block
   let code-block = if code != none {
     // Visual state borders: driven by state-styles dict (customizable via knot-state-styles).
-    let effective-stroke = if is-pending { state-styles.pending.stroke } else if is-modified { state-styles.modified.stroke } else if is-modified-cascade { state-styles.at("modified-cascade").stroke } else { code-stroke }
+    let effective-stroke = if is-pending { state-styles.pending.stroke } else if is-modified {
+      state-styles.modified.stroke
+    } else if is-modified-cascade { state-styles.at("modified-cascade").stroke } else { code-stroke }
     let b = block(
       fill: code-background,
       stroke: effective-stroke,
@@ -170,6 +175,6 @@
     )[
       #set text(fill: white, size: 0.95em)
       #e
-    ])
+    ]),
   )
 }

@@ -9,8 +9,11 @@
 // not document configuration (Codly, figure numbering, etc.).
 // Document configuration belongs in your main.knot file.
 
-/// Default visual styles for chunk execution states.
-/// Override individual entries to customize borders and inert overlay.
+/// Visual styles for chunk execution states (live preview only — not in final PDF).
+/// These appear during `knot watch --preview` and VS Code preview when chunks are
+/// pending execution, recently modified, or inert due to an upstream error.
+/// Override entries here to customize the preview feedback; chunk presentation
+/// styles (background, inset, etc.) belong in knot.toml or chunk options instead.
 #let knot-state-styles = (
   pending: (
     stroke: 2pt + rgb("#f97316"),
