@@ -148,7 +148,7 @@ impl Compiler {
         cache: Arc<Mutex<Cache>>,
         source: &str,
         source_file: &str,
-        progress: Option<tokio::sync::mpsc::UnboundedSender<ProgressEvent>>,
+        progress: Option<std::sync::mpsc::Sender<ProgressEvent>>,
     ) -> Result<String> {
         let backend = TypstBackend::new();
         let executed = self.execute_pass(planned, Arc::clone(&cache), &backend, progress)?;
@@ -279,7 +279,7 @@ impl Compiler {
         planned: Vec<PlannedNode>,
         cache: Arc<Mutex<Cache>>,
         backend: &TypstBackend,
-        progress: Option<tokio::sync::mpsc::UnboundedSender<ProgressEvent>>,
+        progress: Option<std::sync::mpsc::Sender<ProgressEvent>>,
     ) -> Result<Vec<ExecutedNode>> {
         // Step 1: group nodes by language, preserving document order via indices.
         let groups = group_by_language(planned);

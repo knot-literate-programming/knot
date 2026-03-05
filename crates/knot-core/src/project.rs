@@ -16,9 +16,9 @@
 //!   LSP to show preview updates while the user is typing, before saving.
 //!
 //! - [`compile_project_full`] — full compilation (plan + execute + assemble).
-//!   If an [`tokio::sync::mpsc::UnboundedSender`] is supplied, a fully
-//!   assembled `.typ` string is pushed into it after each chunk of the main
-//!   file completes, enabling incremental preview updates.
+//!   If an `on_progress` callback is supplied, a fully assembled `.typ` string
+//!   is passed to it after each chunk of the main file completes, enabling
+//!   incremental preview updates.
 
 use crate::backend::TypstBackend;
 use crate::compiler::Compiler;
@@ -87,15 +87,15 @@ pub fn compile_project_phase0_unsaved(
 ///
 /// Includes are compiled fully first (they are usually cache hits).
 /// The main file is compiled with per-chunk streaming: if `on_progress` is
-/// `Some`, a fully assembled `.typ` string is sent after each chunk completes,
-/// enabling incremental preview updates without waiting for the entire
-/// compilation to finish.
+/// `Some`, it is called with a fully assembled `.typ` string after each chunk
+/// completes, enabling incremental preview updates without waiting for the
+/// entire compilation to finish.
 ///
 /// The final, complete `.typ` is written to `main.typ` on disk and returned
 /// in [`ProjectOutput`].
 pub fn compile_project_full(
     start_path: &Path,
-    on_progress: Option<tokio::sync::mpsc::UnboundedSender<String>>,
+    on_progress: Option<Box<dyn Fn(String) + Send>>,
 ) -> Result<ProjectOutput> {
     let (config, project_root) = Config::find_and_load(start_path)?;
     let (main_file, main_file_name, main_stem) = resolve_main_file(&config, &project_root)?;
@@ -126,7 +126,7 @@ pub fn compile_project_full(
         let mut partial = planned_to_partial_nodes(&planned, &backend, Phase0Mode::Pending);
 
         // Internal channel: execute thread → this thread.
-        let (prog_tx, mut prog_rx) = tokio::sync::mpsc::unbounded_channel::<ProgressEvent>();
+        let (prog_tx, prog_rx) = std::sync::mpsc::channel::<ProgressEvent>();
 
         // Run execute_and_assemble_streaming in a dedicated OS thread.
         // It is a blocking, CPU-bound call — unsuitable for an async context.
@@ -145,8 +145,8 @@ pub fn compile_project_full(
         });
 
         // Receive ProgressEvents; after each one, rebuild the full project
-        // .typ and push it to the caller.
-        while let Some(event) = prog_rx.blocking_recv() {
+        // .typ and call the progress callback.
+        for event in prog_rx {
             partial[event.doc_idx] = event.executed;
             let partial_main = assemble_pass(&partial, &main_source, &main_file_name);
             let partial_fixed = fix_paths_in_typst(&partial_main, &main_typ_path)?;
@@ -157,8 +157,8 @@ pub fn compile_project_full(
                 placeholder_line,
                 &config,
             )?;
-            if let Some(ref tx) = on_progress {
-                let _ = tx.send(assembled);
+            if let Some(ref f) = on_progress {
+                f(assembled);
             }
         }
 
