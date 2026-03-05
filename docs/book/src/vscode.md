@@ -39,15 +39,30 @@ No code executes while you type. The preview is pure Typst — immediate.
 
 3. **Final**: once all chunks have executed, diagnostics are refreshed.
 
-### What the border colours mean
+### What the border styles mean
 
-| Border | Meaning |
+| Style | Meaning |
 |---|---|
 | None | Output is current (cache hit or just executed) |
-| Amber (strong) | Chunk edited since last compile — awaiting save |
-| Amber (thin) | Downstream cache invalidation — awaiting save |
-| Orange | Compile in progress — chunk queued for execution |
-| White overlay | Inert — execution suspended due to an upstream error |
+| 5 pt amber dotted | Chunk you edited directly — awaiting save |
+| 1 pt amber dashed | Downstream hash-cascade invalidation — awaiting save |
+| 2 pt orange solid | Compile in progress — chunk queued for execution |
+| White semi-transparent overlay | Inert — execution suspended due to an upstream error |
+
+These styles are defined in `lib/knot.typ` via the `knot-state-styles` dictionary
+and can be customised per project:
+
+```typst
+// In lib/knot.typ — override any entry to change the preview appearance
+#let knot-state-styles = (
+  pending: (stroke: 2pt + rgb("#f97316")),
+  modified: (stroke: (thickness: 5pt, paint: rgb("#fcd34d"), dash: "densely-dotted")),
+  "modified-cascade": (stroke: (thickness: 1pt, paint: rgb("#fcd34d"), dash: "dashed")),
+  inert: (overlay-fill: white.transparentize(40%)),
+)
+```
+
+> These styles appear **only in the live preview** — they never show up in the final PDF.
 
 ## Bidirectional sync
 

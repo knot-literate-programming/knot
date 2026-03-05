@@ -172,8 +172,8 @@ The VS Code extension brings all of the above together into a fluid writing
 experience:
 
 1. **You type** — the preview updates instantly with the current cached output for
-   all unchanged chunks. Modified chunks show an amber border to indicate they are
-   awaiting compilation.
+   all unchanged chunks. The chunk you edited shows a thick amber dotted border;
+   downstream chunks invalidated by the hash cascade show a thin amber dashed border.
 
 2. **You save** — Knot immediately assembles a Phase 0 preview (cache hits in full,
    pending chunks shown with an orange border). This appears in under 50 ms.
