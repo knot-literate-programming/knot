@@ -139,7 +139,7 @@ export class KnotProjectProvider implements vscode.TreeDataProvider<ProjectItem>
         try {
             const contents = fs.readdirSync(dirPath);
             return contents.some(f => f.endsWith('.knot'));
-        } catch (e) {
+        } catch {
             return false;
         }
     }
