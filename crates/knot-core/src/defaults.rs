@@ -74,9 +74,6 @@ impl Defaults {
     /// Directory name for language-generated files (plots, CSVs)
     pub const LANGUAGE_FILES_DIR: &'static str = "_knot_files";
 
-    /// List of supported languages for code chunks (as string slices)
-    pub const SUPPORTED_LANGUAGES: &[&str] = &["r", "python"];
-
     /// Returns all supported languages as Language enum values
     pub fn supported_languages() -> &'static [Language] {
         Language::all()

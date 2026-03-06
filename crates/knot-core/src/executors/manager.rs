@@ -123,7 +123,7 @@ impl ExecutorManager {
 
     /// Check if a language is supported
     pub fn is_supported(&self, lang: &str) -> bool {
-        crate::defaults::Defaults::SUPPORTED_LANGUAGES.contains(&lang)
+        lang.parse::<crate::defaults::Language>().is_ok()
     }
 
     /// Get the number of initialized executors (for testing)

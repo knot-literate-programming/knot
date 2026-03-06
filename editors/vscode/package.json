@@ -23,11 +23,6 @@
     "url": "https://github.com/nklutchnikoff/knot"
   },
   "main": "./out/extension.js",
-  "activationEvents": [
-    "onLanguage:knot",
-    "onView:knotExplorer",
-    "onCommand:knot.formatChunk"
-  ],
   "contributes": {
     "views": {
       "explorer": [
@@ -141,6 +136,16 @@
           "command": "knot.jumpToKnot",
           "when": "resourceLangId == typst",
           "group": "navigation"
+        },
+        {
+          "command": "knot.insertChunkR",
+          "when": "resourceLangId == knot",
+          "group": "1_modification"
+        },
+        {
+          "command": "knot.insertChunkPython",
+          "when": "resourceLangId == knot",
+          "group": "1_modification"
         }
       ],
       "editor/title": [
