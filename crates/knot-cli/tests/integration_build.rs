@@ -130,7 +130,7 @@ fn test_successful_build_with_includes() {
 }
 
 #[test]
-fn test_error_when_placeholder_missing() {
+fn test_successful_build_without_placeholder() {
     let (_temp, project_root) = setup_test_project();
 
     // Modify main.knot to remove placeholder
@@ -147,19 +147,35 @@ This is the end.
 "#;
     fs::write(project_root.join("main.knot"), main_knot_no_placeholder).unwrap();
 
-    // Attempt to build project
+    // Attempt to build project (should succeed now!)
     let result = knot_cli::build_project(Some(&project_root));
 
-    // Check that build failed with appropriate error
+    // Check that build succeeded
+    assert!(result.is_ok(), "Build should succeed even without placeholder: {:?}", result.err());
+
+    // Verify that content was appended at the end
+    let main_typ_content = fs::read_to_string(project_root.join("main.typ")).unwrap();
     assert!(
-        result.is_err(),
-        "Build should fail when placeholder is missing"
+        main_typ_content.contains("= Introduction"),
+        "Main .typ should contain original content"
     );
-    let error_msg = result.unwrap_err().to_string();
     assert!(
-        error_msg.contains("/* KNOT-INJECT-CHAPTERS */"),
-        "Error should mention missing placeholder: {}",
-        error_msg
+        main_typ_content.contains("= Results"),
+        "Main .typ should contain injected content"
+    );
+    
+    // Check it's after the main content
+    let conclusion_idx = main_typ_content.find("= Conclusion").expect("Conclusion not found");
+    let injection_idx = main_typ_content.find("// #KNOT-INJECTION-START").expect("Injection start not found");
+    assert!(
+        injection_idx > conclusion_idx,
+        "Injected content should be after the main content (conclusion)"
+    );
+
+    // Also check for the end marker
+    assert!(
+        main_typ_content.contains("// #KNOT-INJECTION-END"),
+        "Injected content should have an end marker"
     );
 }
 

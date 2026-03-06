@@ -18,7 +18,7 @@ main = "main.knot"
 main = "main.knot"
 
 # Additional .knot files compiled before main and injected at
-# /* KNOT-INJECT-CHAPTERS */ in main.knot
+# /* KNOT-INJECT-CHAPTERS */ in main.knot (or at the end if missing).
 includes = ["chapter1.knot", "chapter2.knot"]
 
 [execution]

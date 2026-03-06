@@ -82,7 +82,7 @@ Each file gets its own isolated R and Python environment. Variables defined in
 between files, write it to disk (e.g., an RDS file, a CSV, a pickle) in one file
 and read it in the next.
 
-The main file must contain a `/* KNOT-INJECT-CHAPTERS */` placeholder where the
+The main file can contain a `/* KNOT-INJECT-CHAPTERS */` placeholder where the
 compiled include files will be inserted:
 
 ```typst
@@ -92,4 +92,9 @@ compiled include files will be inserted:
 = My Book
 
 /* KNOT-INJECT-CHAPTERS */
+
+= Appendices
 ```
+
+If the placeholder is missing, Knot will automatically append the includes at the
+very end of the `main.knot` file.
