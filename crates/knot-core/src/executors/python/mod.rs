@@ -239,6 +239,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Requires Python installation
     fn test_python_execute_simple() {
         let (_tmp, mut executor) = setup_executor();
         let output = executor
@@ -265,6 +266,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Requires Python installation
     fn test_python_persistence() {
         let (_tmp, mut executor) = setup_executor();
         executor
@@ -284,6 +286,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Requires Python installation
     fn test_python_hash_object() {
         let (_tmp, mut executor) = setup_executor();
         executor
@@ -320,6 +323,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Requires Python installation
     fn test_python_save_load_session() {
         let (tmp, mut executor) = setup_executor();
         let snapshot_path = tmp.path().join("session.pkl");
@@ -350,6 +354,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Requires Python installation
     fn test_python_error_handling() {
         let (_tmp, mut executor) = setup_executor();
         let output = executor
@@ -375,6 +380,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Requires Python installation
     fn test_python_warnings() {
         let (_tmp, mut executor) = setup_executor();
         let output = executor
