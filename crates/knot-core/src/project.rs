@@ -371,18 +371,18 @@ fn compile_includes(
 }
 
 /// Return the 1-based line number of the `/* KNOT-INJECT-CHAPTERS */`
-/// placeholder in the main source, or 1 if not found.
+/// placeholder in the main source, or the last line + 1 if not found.
 fn find_placeholder_line(main_source: &str) -> usize {
     main_source
         .lines()
         .position(|l| l.contains("/* KNOT-INJECT-CHAPTERS */"))
         .map(|idx| idx + 1)
-        .unwrap_or(1)
+        .unwrap_or_else(|| main_source.lines().count() + 1)
 }
 
 /// Assemble the final project `.typ` from its parts:
 ///
-/// 1. Inject includes at `/* KNOT-INJECT-CHAPTERS */`.
+/// 1. Inject includes at `/* KNOT-INJECT-CHAPTERS */` (or at the end if missing).
 /// 2. Inject codly config at `/* KNOT-CODLY-INIT */`.
 /// 3. Wrap everything with `// BEGIN-FILE` / `// END-FILE` markers.
 fn assemble_project_typ(
@@ -395,13 +395,18 @@ fn assemble_project_typ(
     // 1. Inject includes.
     let mut assembled = if !includes_content.is_empty() {
         if !main_content.contains("/* KNOT-INJECT-CHAPTERS */") {
-            anyhow::bail!("No `/* KNOT-INJECT-CHAPTERS */` placeholder found in {main_file_name}.");
+            let wrapped = format!(
+                "\n// #KNOT-INJECTION-START line={placeholder_line}\n{}\n// #KNOT-INJECTION-END\n",
+                includes_content.trim()
+            );
+            format!("{}{}", main_content.trim_end(), wrapped)
+        } else {
+            let wrapped = format!(
+                "// #KNOT-INJECTION-START line={placeholder_line}\n{}\n// #KNOT-INJECTION-END\n",
+                includes_content.trim()
+            );
+            main_content.replace("/* KNOT-INJECT-CHAPTERS */", &wrapped)
         }
-        let wrapped = format!(
-            "// #KNOT-INJECTION-START line={placeholder_line}\n{}\n// #KNOT-INJECTION-END\n",
-            includes_content.trim()
-        );
-        main_content.replace("/* KNOT-INJECT-CHAPTERS */", &wrapped)
     } else {
         main_content.to_string()
     };
