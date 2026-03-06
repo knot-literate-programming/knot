@@ -23,5 +23,8 @@ Cargo.lock
 # macOS
 .DS_Store
 
+# Announcement drafts
+ANNOUNCEMENT_PROPOSALS.md
+
 # Test files
 examples/test-error-context.knot

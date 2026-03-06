@@ -66,32 +66,33 @@ contributor experience, and polish before public launch.
 
 ## Current Priorities
 
-### 1. Documentation and contributor onboarding
+### 1. Documentation and contributor onboarding — Complete
 
-- [ ] User guide (installation, first project, all chunk options, VS Code guide)
-- [ ] Developer guide (architecture deep-dive, how to add a language executor,
+- [x] User guide (installation, first project, all chunk options, VS Code guide)
+- [x] Developer guide (architecture deep-dive, how to add a language executor,
       how to add a chunk option)
-- [ ] Contributor install script (check prerequisites: R, Python, Typst, Tinymist, Rust)
-- [ ] Update README with demo GIF/screenshot, clearer quick-start
-- [ ] `mdbook` setup for hosted documentation (GitHub Pages)
+- [x] Contributor install script (check prerequisites: R, Python, Typst, Tinymist, Rust)
+- [x] Update README with demo GIF/screenshot, clearer quick-start
+- [x] `mdbook` setup for hosted documentation (GitHub Pages)
 
 ### 2. LSP navigation (Go to Definition / References)
 
 See `lsp-navigation.md`. Intercept `textDocument/definition` and
 `textDocument/references`, map coordinates through `PositionMapper`, forward
-to Tinymist, and map the response back.
+to Tinymist, and map the response back. See Issue #5.
 
-### 3. Pre-launch checklist
+### 3. Pre-launch checklist — Complete
 
 See `pre-launch-checklist.md`: CI (already in place), binary distribution
-via `cargo-dist`, review for sensitive information before public push.
+via `cargo-dist` (configured for macOS, Linux, Windows), review for sensitive information before public push.
 
 ### 4. Future / post-v1.0
 
-- Julia language executor
+- Julia language executor (Issue #3)
 - Variable Explorer (live introspection of R/Python sessions in the editor)
 - Content generators (Mermaid diagrams, LilyPond, …)
 - Improved error messages for CI/CD environments
+- Replace anyhow with thiserror in `knot-core` (Issue #1)
 
 ---
 
