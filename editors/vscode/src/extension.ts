@@ -1,6 +1,5 @@
 // Knot VS Code Extension - LSP Client
 import * as path from 'path';
-import * as os from 'os';
 import * as fs from 'fs';
 import {
     workspace,
@@ -16,12 +15,11 @@ import {
     Position,
     ViewColumn,
     UriHandler,
-    Selection,
-    TextEditorRevealType,
     TextEditorDecorationType,
     TextEditor,
     ColorThemeKind,
     SnippetString,
+    OutputChannel,
 } from 'vscode';
 import {
     LanguageClient,
@@ -88,7 +86,7 @@ let forwardSyncTimer: ReturnType<typeof setTimeout> | undefined;
  * Handles URIs in the form of vscode://knot-dev.knot/jump?file=...&line=...
  */
 class KnotUriHandler implements UriHandler {
-    constructor(private outputChannel: any) {}
+    constructor(private outputChannel: OutputChannel) {}
 
     async handleUri(uri: Uri) {
         if (uri.path === '/jump') {
@@ -245,7 +243,7 @@ export async function activate(context: ExtensionContext) {
                         line: pos.line,
                         character: pos.character,
                     });
-                } catch (_) {
+                } catch {
                     // Silently ignore — knot-lsp may not be ready yet.
                 }
             }, 150);
@@ -419,7 +417,7 @@ export async function deactivate(): Promise<void> {
     chunkDecorationType?.dispose();
 }
 
-async function openPreview(outputChannel: any): Promise<void> {
+async function openPreview(outputChannel: OutputChannel): Promise<void> {
     const editor = window.activeTextEditor;
     if (!editor || editor.document.languageId !== 'knot') return;
 
@@ -439,7 +437,7 @@ async function openPreview(outputChannel: any): Promise<void> {
             async (progress) => {
                 progress.report({ message: 'Compiling...' });
 
-                const result: any = await client!.sendRequest('knot/startPreview', {
+                const result = await client!.sendRequest('knot/startPreview', {
                     uri: knotUri.toString(),
                 });
 
@@ -464,7 +462,7 @@ async function openPreview(outputChannel: any): Promise<void> {
     }
 }
 
-async function buildProject(outputChannel: any): Promise<void> {
+async function buildProject(outputChannel: OutputChannel): Promise<void> {
     const editor = window.activeTextEditor;
     if (!editor || editor.document.languageId !== 'knot') return;
 
@@ -497,7 +495,7 @@ async function buildProject(outputChannel: any): Promise<void> {
     }
 }
 
-async function jumpToKnotSource(outputChannel: any): Promise<void> {
+async function jumpToKnotSource(outputChannel: OutputChannel): Promise<void> {
     const editor = window.activeTextEditor;
     if (!editor) return;
     const doc = editor.document;
@@ -512,5 +510,5 @@ async function jumpToKnotSource(outputChannel: any): Promise<void> {
             const targetDoc = await workspace.openTextDocument(Uri.file(file));
             await window.showTextDocument(targetDoc, { selection: new Range(pos, pos), viewColumn: ViewColumn.One });
         }
-    } catch (e) { /* ignore */ }
+    } catch { /* ignore */ }
 }

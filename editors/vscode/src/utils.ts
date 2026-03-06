@@ -1,7 +1,7 @@
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
-import { workspace } from 'vscode';
+import { workspace, OutputChannel } from 'vscode';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 
@@ -10,12 +10,13 @@ const execFileAsync = promisify(execFile);
 /**
  * Run a knot command and return its stdout
  */
-export async function runKnotCommand(knotPath: string, args: string[], outputChannel?: any, cwd?: string): Promise<string> {
+export async function runKnotCommand(knotPath: string, args: string[], outputChannel?: OutputChannel, cwd?: string): Promise<string> {
     try {
         const { stdout } = await execFileAsync(knotPath, args, cwd ? { cwd } : {});
         return stdout.trim();
-    } catch (e: any) {
-        outputChannel?.appendLine(`Knot command failed: ${knotPath} ${args.join(' ')}\nError: ${e.message}`);
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        outputChannel?.appendLine(`Knot command failed: ${knotPath} ${args.join(' ')}\nError: ${msg}`);
         throw e;
     }
 }
@@ -23,7 +24,7 @@ export async function runKnotCommand(knotPath: string, args: string[], outputCha
 /**
  * Resolve a binary path by looking in common locations (bin, .cargo/bin, workspace)
  */
-export function resolveBinaryPath(name: string, outputChannel?: any): string {
+export function resolveBinaryPath(name: string, outputChannel?: OutputChannel): string {
     const homeBin = path.join(os.homedir(), 'bin', name);
     const cargoBin = path.join(os.homedir(), '.cargo', 'bin', name);
     
@@ -67,7 +68,7 @@ export function parseMainFromToml(tomlPath: string): string {
         const content = fs.readFileSync(tomlPath, 'utf-8');
         const match = content.match(/main\s*=\s*"(.*)"/);
         return match ? match[1] : 'main.knot';
-    } catch (e) {
+    } catch {
         return 'main.knot';
     }
 }
