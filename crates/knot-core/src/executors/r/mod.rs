@@ -101,7 +101,12 @@ impl ConstantObjectHandler for RExecutor {
         if out.contains("NONE") {
             anyhow::bail!("Object '{}' not found", object_name);
         }
-        Ok(out.trim().trim_start_matches("[1]").trim().trim_matches('"').to_string())
+        Ok(out
+            .trim()
+            .trim_start_matches("[1]")
+            .trim()
+            .trim_matches('"')
+            .to_string())
     }
 
     fn hash_objects(
@@ -119,10 +124,17 @@ impl ConstantObjectHandler for RExecutor {
             .join(", ");
         let code = format!("print(hash_objects_batch(c({})))", names_vec);
         let out = self.query(&code)?;
-        
-        let json_str = out.trim().trim_start_matches("[1]").trim().trim_matches('"').replace("\\\"", "\"");
+
+        let json_str = out
+            .trim()
+            .trim_start_matches("[1]")
+            .trim()
+            .trim_matches('"')
+            .replace("\\\"", "\"");
         let map: std::collections::HashMap<String, String> = serde_json::from_str(&json_str)
-            .map_err(|e| anyhow::anyhow!("hash_objects_batch parse error: {} (out was: {})", e, out))?;
+            .map_err(|e| {
+                anyhow::anyhow!("hash_objects_batch parse error: {} (out was: {})", e, out)
+            })?;
         Ok(map)
     }
 

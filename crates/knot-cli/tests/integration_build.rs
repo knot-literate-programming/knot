@@ -151,7 +151,11 @@ This is the end.
     let result = knot_cli::build_project(Some(&project_root));
 
     // Check that build succeeded
-    assert!(result.is_ok(), "Build should succeed even without placeholder: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Build should succeed even without placeholder: {:?}",
+        result.err()
+    );
 
     // Verify that content was appended at the end
     let main_typ_content = fs::read_to_string(project_root.join("main.typ")).unwrap();
@@ -163,10 +167,14 @@ This is the end.
         main_typ_content.contains("= Results"),
         "Main .typ should contain injected content"
     );
-    
+
     // Check it's after the main content
-    let conclusion_idx = main_typ_content.find("= Conclusion").expect("Conclusion not found");
-    let injection_idx = main_typ_content.find("// #KNOT-INJECTION-START").expect("Injection start not found");
+    let conclusion_idx = main_typ_content
+        .find("= Conclusion")
+        .expect("Conclusion not found");
+    let injection_idx = main_typ_content
+        .find("// #KNOT-INJECTION-START")
+        .expect("Injection start not found");
     assert!(
         injection_idx > conclusion_idx,
         "Injected content should be after the main content (conclusion)"

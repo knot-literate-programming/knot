@@ -76,7 +76,7 @@ impl RProcess {
         self.stderr = child.stderr.take().map(BufReader::new);
         self.child = Some(child);
         self._helper_file = Some(temp_file);
-        
+
         let _ = self.read_until_boundary()?;
 
         // NOW start the main loop which will wait for code on stdin

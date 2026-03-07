@@ -1,9 +1,7 @@
 #![allow(missing_docs)]
 // Integration test for R session snapshots
 
-use knot_core::executors::{
-    KnotExecutor, LanguageExecutor, python::PythonExecutor, r::RExecutor,
-};
+use knot_core::executors::{KnotExecutor, LanguageExecutor, python::PythonExecutor, r::RExecutor};
 use tempfile::TempDir;
 
 #[test]
@@ -45,16 +43,22 @@ fn test_save_and_load_session_r() {
     let result = executor.execute_inline("exists('x')").unwrap();
     assert!(
         result.to_uppercase().contains("TRUE"),
-        "Variable x should exist after load, got: {}", result
+        "Variable x should exist after load, got: {}",
+        result
     );
 
     let result = executor.execute_inline("x[1]").unwrap();
-    assert!(result.contains("1"), "Variable x should have correct value, got: {}", result);
+    assert!(
+        result.contains("1"),
+        "Variable x should have correct value, got: {}",
+        result
+    );
 
     let result = executor.execute_inline("y[2]").unwrap();
     assert!(
         result.contains("4"),
-        "Variable y should have correct value (2^2 = 4), got: {}", result
+        "Variable y should have correct value (2^2 = 4), got: {}",
+        result
     );
 
     println!("✓ Session save/load works correctly");
@@ -131,8 +135,12 @@ fn test_save_and_load_session_python() {
     let graphics = default_graphics();
 
     // Execute code to create variables
-    executor.execute("x = [i for i in range(10)]", &graphics).unwrap();
-    executor.execute("y = [i**2 for i in x]", &graphics).unwrap();
+    executor
+        .execute("x = [i for i in range(10)]", &graphics)
+        .unwrap();
+    executor
+        .execute("y = [i**2 for i in x]", &graphics)
+        .unwrap();
 
     // Save session
     let snapshot_path = _temp.path().join("snapshot.pkl");
@@ -145,7 +153,9 @@ fn test_save_and_load_session_python() {
     executor.execute("del x", &graphics).unwrap();
 
     // Verify variables are gone
-    let result = executor.execute_inline("'x' in locals() or 'x' in globals()").unwrap();
+    let result = executor
+        .execute_inline("'x' in locals() or 'x' in globals()")
+        .unwrap();
     assert!(
         result.contains("False"),
         "Variable x should not exist after del"
@@ -155,7 +165,9 @@ fn test_save_and_load_session_python() {
     executor.load_session(&snapshot_path).unwrap();
 
     // Verify variables are restored
-    let result = executor.execute_inline("'x' in locals() or 'x' in globals()").unwrap();
+    let result = executor
+        .execute_inline("'x' in locals() or 'x' in globals()")
+        .unwrap();
     assert!(
         result.contains("True"),
         "Variable x should exist after load"

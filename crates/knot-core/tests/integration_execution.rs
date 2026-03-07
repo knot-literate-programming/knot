@@ -87,10 +87,14 @@ fn test_r_timeout() {
     let graphics = default_graphics();
 
     let result = short_executor.execute(code, &graphics);
-    
+
     assert!(result.is_err(), "Execution should fail with timeout error");
     let err_msg = result.unwrap_err().to_string();
-    assert!(err_msg.contains("timed out"), "Error should mention timeout, got: {}", err_msg);
+    assert!(
+        err_msg.contains("timed out"),
+        "Error should mention timeout, got: {}",
+        err_msg
+    );
 }
 
 #[test]
@@ -109,7 +113,10 @@ fn test_r_large_output() {
 
     match output.result {
         ExecutionResult::Text(t) => {
-            assert!(t.contains("Line 99999"), "Output should contain the last line");
+            assert!(
+                t.contains("Line 99999"),
+                "Output should contain the last line"
+            );
             assert!(t.len() > 1_000_000, "Output should be large (at least 1MB)");
         }
         _ => panic!("Expected Text result"),
@@ -131,7 +138,11 @@ fn test_r_unicode_output() {
 
     match output.result {
         ExecutionResult::Text(t) => {
-            assert!(t.contains("Bonjour le monde 🌍 ✨"), "Output should contain unicode emojis, got: {}", t);
+            assert!(
+                t.contains("Bonjour le monde 🌍 ✨"),
+                "Output should contain unicode emojis, got: {}",
+                t
+            );
         }
         _ => panic!("Expected Text result"),
     }
@@ -143,7 +154,11 @@ fn test_r_unicode_output() {
             .expect("Failed to use unicode variable"),
     );
     match output2.result {
-        ExecutionResult::Text(t) => assert!(t.contains("π = 3.14"), "Unicode variable should persist, got: {}", t),
+        ExecutionResult::Text(t) => assert!(
+            t.contains("π = 3.14"),
+            "Unicode variable should persist, got: {}",
+            t
+        ),
         _ => panic!("Expected Text result"),
     }
 }
@@ -161,15 +176,19 @@ fn test_r_syntax_error() {
 
     match attempt {
         ExecutionAttempt::RuntimeError(_) => {
-            // R might report this differently depending on version/locale, 
+            // R might report this differently depending on version/locale,
             // but it should be a RuntimeError.
         }
-        ExecutionAttempt::Success(_) => panic!("Expected RuntimeError for syntax error, got Success"),
+        ExecutionAttempt::Success(_) => {
+            panic!("Expected RuntimeError for syntax error, got Success")
+        }
     }
 
     // Verify executor is still functional
     let output = unwrap_success(
-        executor.execute("cat('Alive\\n')", &graphics).expect("Executor died after syntax error")
+        executor
+            .execute("cat('Alive\\n')", &graphics)
+            .expect("Executor died after syntax error"),
     );
     match output.result {
         ExecutionResult::Text(t) => assert!(t.contains("Alive")),
@@ -367,4 +386,3 @@ fn test_r_message_not_error() {
         "R message() should not cause execution failure even if it writes to stderr"
     );
 }
-

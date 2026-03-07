@@ -211,8 +211,13 @@ print("Still here")
     );
 
     assert_eq!(output.warnings.len(), 1);
-    assert!(output.warnings[0].message.to_string().contains("This is a warning"));
-    
+    assert!(
+        output.warnings[0]
+            .message
+            .to_string()
+            .contains("This is a warning")
+    );
+
     match output.result {
         ExecutionResult::Text(t) => assert!(t.contains("Still here")),
         _ => panic!("Expected Text result"),
@@ -233,10 +238,14 @@ fn test_python_timeout() {
     let graphics = default_graphics();
 
     let result = short_executor.execute(code, &graphics);
-    
+
     assert!(result.is_err(), "Execution should fail with timeout error");
     let err_msg = result.unwrap_err().to_string();
-    assert!(err_msg.contains("timed out"), "Error should mention timeout, got: {}", err_msg);
+    assert!(
+        err_msg.contains("timed out"),
+        "Error should mention timeout, got: {}",
+        err_msg
+    );
 }
 
 #[test]
@@ -255,7 +264,10 @@ fn test_python_large_output() {
 
     match output.result {
         ExecutionResult::Text(t) => {
-            assert!(t.contains("Line 99999"), "Output should contain the last line");
+            assert!(
+                t.contains("Line 99999"),
+                "Output should contain the last line"
+            );
             assert!(t.len() > 1_000_000, "Output should be large (at least 1MB)");
         }
         _ => panic!("Expected Text result"),
@@ -277,7 +289,10 @@ fn test_python_unicode_output() {
 
     match output.result {
         ExecutionResult::Text(t) => {
-            assert!(t.contains("Bonjour le monde 🌍 ✨"), "Output should contain unicode emojis");
+            assert!(
+                t.contains("Bonjour le monde 🌍 ✨"),
+                "Output should contain unicode emojis"
+            );
         }
         _ => panic!("Expected Text result"),
     }
@@ -309,12 +324,16 @@ fn test_python_syntax_error() {
         ExecutionAttempt::RuntimeError(_) => {
             // Python should report a SyntaxError
         }
-        ExecutionAttempt::Success(_) => panic!("Expected RuntimeError for syntax error, got Success"),
+        ExecutionAttempt::Success(_) => {
+            panic!("Expected RuntimeError for syntax error, got Success")
+        }
     }
 
     // Verify executor is still functional
     let output = unwrap_success(
-        executor.execute("print('Alive')", &graphics).expect("Executor died after syntax error")
+        executor
+            .execute("print('Alive')", &graphics)
+            .expect("Executor died after syntax error"),
     );
     match output.result {
         ExecutionResult::Text(t) => assert!(t.contains("Alive")),
@@ -376,4 +395,3 @@ fn test_python_message_not_error() {
         "Python stderr output should not cause execution failure"
     );
 }
-

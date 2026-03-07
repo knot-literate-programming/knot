@@ -50,7 +50,11 @@ pub fn execute(
 
     // Send the source call and finish the block with END_EXEC.
     // The R-side knot_main_loop handles the tryCatch/eval/boundary logic.
-    writeln!(stdin, "source('{}', local=FALSE, echo=FALSE)", code_file_str)?;
+    writeln!(
+        stdin,
+        "source('{}', local=FALSE, echo=FALSE)",
+        code_file_str
+    )?;
     writeln!(stdin, "END_EXEC")?;
     stdin.flush()?;
 
