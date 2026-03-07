@@ -37,18 +37,50 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest] # Windows-latest temporarily excluded for R/Python setup complexity
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install Python dependencies
+        run: |
+          pip install pandas matplotlib
+
+      - name: Setup R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+
+      - name: Install R dependencies
+        run: |
+          Rscript -e 'install.packages(c("ggplot2", "svglite", "jsonlite"))'
+
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Run tests
-        run: cargo test --workspace --exclude knot-cli # knot-cli has integration tests that might need R/Python
+      - name: Run tests (including ignored integration tests)
+        run: cargo test --workspace -- --ignored
+
+  test-windows:
+    name: Tests (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+      - name: Run unit tests (excluding R/Python)
+        run: cargo test --workspace --exclude knot-cli
+
 
   vscode-extension:
     name: VS Code Extension

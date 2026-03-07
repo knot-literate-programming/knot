@@ -58,8 +58,6 @@
   }
 
   # Write JSON with auto_unbox = TRUE so scalar fields become JSON scalars.
-  # Vectors that must stay as arrays (traceback, warnings list) are wrapped
-  # with as.list() at the call site before being stored in the data object.
   tryCatch({
     json_content <- jsonlite::toJSON(data, auto_unbox = TRUE, pretty = TRUE)
     writeLines(json_content, meta_file, useBytes = TRUE)

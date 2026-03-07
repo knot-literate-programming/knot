@@ -67,9 +67,9 @@ impl KnotExecutor for RExecutor {
     fn save_session(&mut self, path: &Path) -> Result<()> {
         // Delegate to R helper function
         let path_str = escape_path_for_code(path);
-        let code = format!("cat(save_session('{}'))", path_str);
+        let code = format!("save_session('{}')", path_str);
         let out = self.query(&code)?;
-        if out.trim() == "TRUE" {
+        if out.contains("TRUE") {
             Ok(())
         } else {
             anyhow::bail!("Failed to save R session: {}", out)
@@ -79,9 +79,9 @@ impl KnotExecutor for RExecutor {
     fn load_session(&mut self, path: &Path) -> Result<()> {
         // Delegate to R helper function
         let path_str = escape_path_for_code(path);
-        let code = format!("cat(load_session('{}'))", path_str);
+        let code = format!("load_session('{}')", path_str);
         let out = self.query(&code)?;
-        if out.trim() == "TRUE" {
+        if out.contains("TRUE") {
             Ok(())
         } else {
             anyhow::bail!("Failed to load R session: {}", out)
@@ -96,12 +96,12 @@ impl KnotExecutor for RExecutor {
 impl ConstantObjectHandler for RExecutor {
     fn hash_object(&mut self, object_name: &str) -> Result<String> {
         // Use R helper function
-        let code = format!("cat(hash_object('{}'))", object_name);
+        let code = format!("print(hash_object('{}'))", object_name);
         let out = self.query(&code)?;
-        if out.trim() == "NONE" {
+        if out.contains("NONE") {
             anyhow::bail!("Object '{}' not found", object_name);
         }
-        Ok(out.trim().to_string())
+        Ok(out.trim().trim_start_matches("[1]").trim().trim_matches('"').to_string())
     }
 
     fn hash_objects(
@@ -117,10 +117,12 @@ impl ConstantObjectHandler for RExecutor {
             .map(|n| format!("'{}'", n.replace('\'', "\\'")))
             .collect::<Vec<_>>()
             .join(", ");
-        let code = format!("hash_objects_batch(c({}))", names_vec);
+        let code = format!("print(hash_objects_batch(c({})))", names_vec);
         let out = self.query(&code)?;
-        let map: std::collections::HashMap<String, String> = serde_json::from_str(out.trim())
-            .map_err(|e| anyhow::anyhow!("hash_objects_batch parse error: {}", e))?;
+        
+        let json_str = out.trim().trim_start_matches("[1]").trim().trim_matches('"').replace("\\\"", "\"");
+        let map: std::collections::HashMap<String, String> = serde_json::from_str(&json_str)
+            .map_err(|e| anyhow::anyhow!("hash_objects_batch parse error: {} (out was: {})", e, out))?;
         Ok(map)
     }
 
@@ -131,7 +133,7 @@ impl ConstantObjectHandler for RExecutor {
         let object_path = objects_dir.join(format!("{}.rds", hash));
         let path_str = escape_path_for_code(&object_path);
 
-        let code = format!("cat(save_constant('{}', '{}'))", object_name, path_str);
+        let code = format!("print(save_constant('{}', '{}'))", object_name, path_str);
         self.query(&code)?;
 
         log::debug!(
@@ -146,7 +148,7 @@ impl ConstantObjectHandler for RExecutor {
         let object_path = cache_dir.join("objects").join(format!("{}.rds", hash));
 
         let path_str = escape_path_for_code(&object_path);
-        let code = format!("cat(load_constant('{}', '{}'))", object_name, path_str);
+        let code = format!("print(load_constant('{}', '{}'))", object_name, path_str);
         self.query(&code)?;
 
         log::debug!(

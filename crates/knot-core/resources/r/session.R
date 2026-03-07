@@ -1,7 +1,7 @@
 # Knot R Session Management
 
 save_session <- function(path) {
-  tryCatch({
+  res <- tryCatch({
     # Save objects
     save.image(file = path)
 
@@ -14,10 +14,12 @@ save_session <- function(path) {
     message(sprintf("Error saving R session: %s", e$message))
     FALSE
   })
+  cat(as.character(res), "\n")
+  res
 }
 
 load_session <- function(path) {
-  tryCatch({
+  res <- tryCatch({
     if (!file.exists(path)) return(FALSE)
 
     # Restore packages first
@@ -38,4 +40,6 @@ load_session <- function(path) {
     message(sprintf("Error loading R session: %s", e$message))
     FALSE
   })
+  cat(as.character(res), "\n")
+  res
 }

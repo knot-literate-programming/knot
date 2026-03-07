@@ -49,7 +49,7 @@ fn unwrap_success(attempt: ExecutionAttempt) -> knot_core::executors::ExecutionO
 }
 
 #[test]
-#[ignore] // Requires R
+#[ignore] // requires R or Python
 fn test_simple_r_execution() {
     let (_temp, mut executor) = setup_executor();
     let graphics = default_graphics();
@@ -74,7 +74,111 @@ fn test_simple_r_execution() {
 }
 
 #[test]
-#[ignore] // Requires R
+#[ignore] // requires R or Python
+fn test_r_timeout() {
+    let (_temp, mut executor) = setup_executor();
+    // Set a very short timeout for this test
+    let cache_dir = _temp.path().join(".knot_cache_timeout_r");
+    let mut short_executor = RExecutor::new(cache_dir, std::time::Duration::from_millis(500))
+        .expect("Failed to create R executor");
+    short_executor.initialize().expect("Failed to initialize R");
+
+    let code = "Sys.sleep(2)";
+    let graphics = default_graphics();
+
+    let result = short_executor.execute(code, &graphics);
+    
+    assert!(result.is_err(), "Execution should fail with timeout error");
+    let err_msg = result.unwrap_err().to_string();
+    assert!(err_msg.contains("timed out"), "Error should mention timeout, got: {}", err_msg);
+}
+
+#[test]
+#[ignore] // requires R or Python
+fn test_r_large_output() {
+    let (_temp, mut executor) = setup_executor();
+    let graphics = default_graphics();
+
+    // Generate ~1MB of output
+    let code = "for (i in 0:100000) { cat('Line ', i, '\\n', sep='') }";
+    let output = unwrap_success(
+        executor
+            .execute(code, &graphics)
+            .expect("Failed to execute with large output"),
+    );
+
+    match output.result {
+        ExecutionResult::Text(t) => {
+            assert!(t.contains("Line 99999"), "Output should contain the last line");
+            assert!(t.len() > 1_000_000, "Output should be large (at least 1MB)");
+        }
+        _ => panic!("Expected Text result"),
+    }
+}
+
+#[test]
+#[ignore] // requires R or Python
+fn test_r_unicode_output() {
+    let (_temp, mut executor) = setup_executor();
+    let graphics = default_graphics();
+
+    let code = "cat('Bonjour le monde 🌍 ✨\\n')\nx <- 'π = 3.14'";
+    let output = unwrap_success(
+        executor
+            .execute(code, &graphics)
+            .expect("Failed to execute with unicode"),
+    );
+
+    match output.result {
+        ExecutionResult::Text(t) => {
+            assert!(t.contains("Bonjour le monde 🌍 ✨"), "Output should contain unicode emojis, got: {}", t);
+        }
+        _ => panic!("Expected Text result"),
+    }
+
+    // Verify persistence of unicode variable
+    let output2 = unwrap_success(
+        executor
+            .execute("cat(x)", &graphics)
+            .expect("Failed to use unicode variable"),
+    );
+    match output2.result {
+        ExecutionResult::Text(t) => assert!(t.contains("π = 3.14"), "Unicode variable should persist, got: {}", t),
+        _ => panic!("Expected Text result"),
+    }
+}
+
+#[test]
+#[ignore] // requires R or Python
+fn test_r_syntax_error() {
+    let (_temp, mut executor) = setup_executor();
+    let graphics = default_graphics();
+
+    let code = "cat('Unclosed string";
+    let attempt = executor
+        .execute(code, &graphics)
+        .expect("execute() must handle syntax errors");
+
+    match attempt {
+        ExecutionAttempt::RuntimeError(_) => {
+            // R might report this differently depending on version/locale, 
+            // but it should be a RuntimeError.
+        }
+        ExecutionAttempt::Success(_) => panic!("Expected RuntimeError for syntax error, got Success"),
+    }
+
+    // Verify executor is still functional
+    let output = unwrap_success(
+        executor.execute("cat('Alive\\n')", &graphics).expect("Executor died after syntax error")
+    );
+    match output.result {
+        ExecutionResult::Text(t) => assert!(t.contains("Alive")),
+        _ => panic!("Expected Text result"),
+    }
+}
+
+#[test]
+#[ignore] // requires R or Python
 fn test_r_error_handling() {
     let (_temp, mut executor) = setup_executor();
     let graphics = default_graphics();
@@ -98,7 +202,7 @@ fn test_r_error_handling() {
 }
 
 #[test]
-#[ignore] // Requires R
+#[ignore] // requires R or Python
 fn test_dataframe_serialization() {
     let (_temp, mut executor) = setup_executor();
 
@@ -129,7 +233,7 @@ typst(df)
 }
 
 #[test]
-#[ignore] // Requires R, ggplot2, and svglite packages
+#[ignore] // requires R or Python
 fn test_plot_generation() {
     let (_temp, mut executor) = setup_executor();
 
@@ -166,7 +270,7 @@ typst(gg)
 }
 
 #[test]
-#[ignore] // Requires R, ggplot2, and svglite packages
+#[ignore] // requires R or Python
 fn test_combined_dataframe_and_plot() {
     let (_temp, mut executor) = setup_executor();
 
@@ -204,7 +308,7 @@ typst(gg)
 }
 
 #[test]
-#[ignore] // Requires R
+#[ignore] // requires R or Python
 fn test_r_session_persistence() {
     let (_temp, mut executor) = setup_executor();
     let graphics = default_graphics();
@@ -231,7 +335,7 @@ fn test_r_session_persistence() {
 }
 
 #[test]
-#[ignore] // Requires R
+#[ignore] // requires R or Python
 fn test_r_warning_not_error() {
     let (_temp, mut executor) = setup_executor();
 
@@ -249,7 +353,7 @@ fn test_r_warning_not_error() {
 }
 
 #[test]
-#[ignore] // Requires R
+#[ignore] // requires R or Python
 fn test_r_message_not_error() {
     let (_temp, mut executor) = setup_executor();
     let graphics = default_graphics();
@@ -263,3 +367,4 @@ fn test_r_message_not_error() {
         "R message() should not cause execution failure even if it writes to stderr"
     );
 }
+

@@ -67,17 +67,22 @@ impl RProcess {
         // Send boundary markers to signal end of initialization
         writeln!(stdin, "cat('{}\\n', file=stdout())", BOUNDARY)?;
         writeln!(stdin, "cat('{}\\n', file=stderr())", BOUNDARY)?;
-
         stdin.flush()?;
 
+        // Consume the initialization output
+        // We do this BEFORE starting the main loop because main_loop will take over stdin.
         self.stdin = Some(stdin);
         self.stdout = child.stdout.take().map(BufReader::new);
         self.stderr = child.stderr.take().map(BufReader::new);
         self.child = Some(child);
         self._helper_file = Some(temp_file);
-
-        // Consume the initialization output
+        
         let _ = self.read_until_boundary()?;
+
+        // NOW start the main loop which will wait for code on stdin
+        let stdin = self.stdin.as_mut().unwrap();
+        writeln!(stdin, "knot_main_loop('{}')", BOUNDARY)?;
+        stdin.flush()?;
 
         Ok(())
     }

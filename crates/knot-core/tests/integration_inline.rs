@@ -5,7 +5,7 @@ use knot_core::{Compiler, Document};
 use std::fs;
 
 #[test]
-#[ignore] // Requires R
+#[ignore] // requires R or Python
 fn test_inline_options_and_cache_invalidation() {
     // Create a temporary directory structure for testing
     let temp_dir = std::env::temp_dir().join(format!("knot_test_{}", std::process::id()));
@@ -69,6 +69,63 @@ print(y)
     assert!(result3.contains("The value is 20"));
     assert!(!result3.contains("30"));
     assert!(result3.contains("40"));
+
+    // Cleanup
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+#[ignore] // requires R or Python
+fn test_inline_python_execution() {
+    // Create a temporary directory structure for testing
+    let temp_dir = std::env::temp_dir().join(format!("knot_test_py_{}", std::process::id()));
+    fs::create_dir_all(&temp_dir).expect("Failed to create temp dir");
+    let test_file = temp_dir.join("test_py.knot");
+
+    let source = r#"
+```{python output=false}
+x = 10
+```
+The value of x is `{python} x`.
+```{python}
+y = x * 2
+print(y)
+```
+"#;
+    // Write source to temp file
+    fs::write(&test_file, source).expect("Failed to write test file");
+
+    // First pass: execute and cache everything
+    let doc1 = Document::parse(source.to_string());
+    let mut compiler1 = Compiler::new(&test_file).expect("Failed to create compiler1");
+    let result1 = compiler1
+        .compile(&doc1, "test_py.knot")
+        .expect("Failed to compile doc1");
+
+    println!("RESULT 1:\n{}", result1);
+    assert!(result1.contains("The value of x is 10"));
+    assert!(result1.contains("20"));
+
+    // Second pass: modify the inline expression
+    let modified_source = r#"
+```{python output=false}
+x = 50
+```
+The value of x is `{python} x`.
+```{python}
+y = x * 2
+print(y)
+```
+"#;
+    fs::write(&test_file, modified_source).expect("Failed to write modified test file");
+    let doc2 = Document::parse(modified_source.to_string());
+    let mut compiler2 = Compiler::new(&test_file).expect("Failed to create compiler2");
+    let result2 = compiler2
+        .compile(&doc2, "test_py.knot")
+        .expect("Failed to compile doc2");
+
+    assert!(result2.contains("The value of x is 50"));
+    assert!(result2.contains("100"));
 
     // Cleanup
     let _ = fs::remove_dir_all(&temp_dir);
