@@ -65,8 +65,11 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Run tests (including ignored integration tests)
-        run: cargo test --workspace -- --ignored
+      - name: Run tests (excluding knot-cli)
+        run: cargo test --workspace --exclude knot-cli
+
+      - name: Run knot-core integration tests (R and Python)
+        run: cargo test -p knot-core -- --ignored
 
 
   vscode-extension:
