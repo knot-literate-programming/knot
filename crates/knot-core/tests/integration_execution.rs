@@ -76,7 +76,7 @@ fn test_simple_r_execution() {
 #[test]
 #[ignore] // requires R or Python
 fn test_r_timeout() {
-    let (_temp, mut executor) = setup_executor();
+    let (_temp, _executor) = setup_executor();
     // Set a very short timeout for this test
     let cache_dir = _temp.path().join(".knot_cache_timeout_r");
     let mut short_executor = RExecutor::new(cache_dir, std::time::Duration::from_millis(500))
