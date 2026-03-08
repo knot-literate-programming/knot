@@ -48,11 +48,13 @@ pub fn execute(
         meta_file, cache_dir_str, graphics.width, graphics.height, graphics.dpi, graphics.format
     )?;
 
-    // Send the source call and finish the block with END_EXEC.
-    // The R-side knot_main_loop handles the tryCatch/eval/boundary logic.
+    // Use eval(parse(file=...)) instead of source() so that knot_main_loop's
+    // withVisible wrapper can capture the visibility of the last expression.
+    // source() with echo=FALSE silently drops visible values (print.eval=FALSE
+    // by default), causing expressions like `1 + 1` to produce no output.
     writeln!(
         stdin,
-        "source('{}', local=FALSE, echo=FALSE)",
+        "eval(parse(file='{}'), envir=.GlobalEnv)",
         code_file_str
     )?;
     writeln!(stdin, "END_EXEC")?;

@@ -26,8 +26,9 @@ fn test_save_and_load_session_r() {
     // Verify snapshot file exists
     assert!(snapshot_path.exists(), "Snapshot file should be created");
 
-    // Clear environment (simulate new session)
-    executor.execute_inline("rm(list = ls())").unwrap();
+    // Clear user variables only — rm(list=ls()) would also remove knot helper
+    // functions (save_session, load_session, etc.) since they live in .GlobalEnv.
+    executor.execute_inline("rm(x, y)").unwrap();
 
     // Verify variables are gone
     let result = executor.execute_inline("exists('x')").unwrap();
@@ -87,7 +88,8 @@ fn test_snapshot_preserves_complex_objects_r() {
     // Save and load
     let snapshot_path = temp_dir.path().join("complex.RData");
     executor.save_session(&snapshot_path).unwrap();
-    executor.execute_inline("rm(list = ls())").unwrap();
+    // Clear only user-created variables (not knot helper functions in .GlobalEnv)
+    executor.execute_inline("rm(scalar, vector, text, func)").unwrap();
     executor.load_session(&snapshot_path).unwrap();
 
     // Verify all objects are restored
