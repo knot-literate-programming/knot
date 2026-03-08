@@ -26,11 +26,17 @@ Knot lets you write R and Python code directly inside Typst documents. The code 
 
 ## Installation
 
+**macOS / Linux**
 ```bash
 curl -sSf https://raw.githubusercontent.com/knot-literate-programming/knot/master/install.sh | bash
 ```
 
-The script downloads the prebuilt binaries for your platform, installs the VS Code extension, and checks that all prerequisites (Typst, Tinymist, R, Python, Air, Ruff) are in place.
+**Windows (PowerShell)**
+```powershell
+powershell -c "irm https://github.com/knot-literate-programming/knot/releases/latest/download/knot-installer.ps1 | iex"
+```
+
+The installers download the prebuilt `knot` and `knot-lsp` binaries for your platform. The macOS/Linux script also installs the VS Code extension and checks that all prerequisites are in place; on Windows, download the `.vsix` from the [latest release](https://github.com/knot-literate-programming/knot/releases) and install it with `code --install-extension knot-*.vsix`.
 
 **Prerequisites:**
 
@@ -135,7 +141,7 @@ We welcome bug reports, feature requests, and pull requests. See [CONTRIBUTING.m
   author  = {Klutchnikoff, Nicolas},
   title   = {{Knot: Literate programming for Typst}},
   url     = {https://github.com/knot-literate-programming/knot},
-  version = {0.3.0},
+  version = {0.3.1},
   year    = {2026}
 }
 ```

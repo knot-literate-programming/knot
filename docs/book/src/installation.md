@@ -2,6 +2,8 @@
 
 ## Quick install
 
+**macOS / Linux**
+
 ```bash
 curl -sSf https://raw.githubusercontent.com/knot-literate-programming/knot/master/install.sh | bash
 ```
@@ -12,6 +14,18 @@ This script:
 3. Installs them to `~/.local/bin` (override with `--prefix DIR`).
 4. Installs the VS Code extension if the `code` command is available.
 5. Checks that all prerequisites are present and tells you what is missing.
+
+**Windows (PowerShell)**
+
+```powershell
+powershell -c "irm https://github.com/knot-literate-programming/knot/releases/latest/download/knot-installer.ps1 | iex"
+```
+
+This installs `knot` and `knot-lsp` to `%USERPROFILE%\.cargo\bin` and adds it to your `PATH`. Then install the VS Code extension manually: download the `.vsix` file from the [latest release](https://github.com/knot-literate-programming/knot/releases) and run:
+
+```powershell
+code --install-extension knot-*.vsix
+```
 
 ## Prerequisites
 
