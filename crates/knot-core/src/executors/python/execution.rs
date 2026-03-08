@@ -34,7 +34,7 @@ with _knot_wm.catch_warnings(record=True) as _knot_caught:
     except Exception as _knot_e:
         for _w in _knot_caught:
             _knot_add_warning(str(_w.message), line=_w.lineno)
-        _write_metadata({{'message': str(_knot_e), 'traceback': _knot_tb.format_tb(_knot_e.__traceback__)}}, type='error')
+        _write_metadata({{'message': f"{{type(_knot_e).__name__}}: {{str(_knot_e)}}", 'traceback': _knot_tb.format_tb(_knot_e.__traceback__)}}, type='error')
         raise
 for _w in _knot_caught:
     _knot_add_warning(str(_w.message), line=_w.lineno)

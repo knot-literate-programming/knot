@@ -14,7 +14,7 @@ base_plot <- function(expr, width = NULL, height = NULL, dpi = NULL, format = NU
 
   # Open device
   if (format == "svg") {
-    grDevices::svg(filepath, width = width, height = height)
+    svglite::svglite(filepath, width = width, height = height)
   } else if (format == "png") {
     grDevices::png(filepath, width = width * dpi, height = height * dpi, res = dpi)
   } else if (format == "pdf") {
@@ -74,7 +74,8 @@ typst.default <- function(obj, ...) {
   filename <- sprintf("plot_%s.%s", hash, format)
   filepath <- file.path(.get_base_dir(), filename)
 
-  ggplot2::ggsave(filepath, plot = plot_obj, width = width, height = height, dpi = dpi, device = format)
+  device <- if (format == "svg") svglite::svglite else format
+  ggplot2::ggsave(filepath, plot = plot_obj, width = width, height = height, dpi = dpi, device = device)
 
   metadata <- list(
     type   = "plot",
@@ -103,7 +104,7 @@ typst.default <- function(obj, ...) {
 
   # Copy current device to file
   if (format == "svg") {
-    grDevices::dev.copy(grDevices::svg, file = filepath, width = width, height = height)
+    grDevices::dev.copy(svglite::svglite, file = filepath, width = width, height = height)
   } else if (format == "png") {
     grDevices::dev.copy(grDevices::png, file = filepath,
                        width = width * dpi, height = height * dpi, res = dpi)

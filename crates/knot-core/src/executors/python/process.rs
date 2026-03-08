@@ -16,9 +16,10 @@ const PYTHON_WRAPPER: &str = r#"
 import sys
 import traceback
 
-# Force unbuffered output
-sys.stdout.reconfigure(line_buffering=True)
-sys.stderr.reconfigure(line_buffering=True)
+# Force UTF-8 encoding and unbuffered output (required on Windows)
+sys.stdout.reconfigure(encoding='utf-8', line_buffering=True)
+sys.stderr.reconfigure(encoding='utf-8', line_buffering=True)
+sys.stdin.reconfigure(encoding='utf-8')
 
 def main():
     while True:

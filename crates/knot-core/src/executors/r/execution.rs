@@ -7,42 +7,12 @@
 // Uses side-channel (via KNOT_METADATA_FILE) for robust communication.
 // If no metadata is provided, stdout text is used as fallback.
 
-use super::{BOUNDARY, RExecutor, formatters, process::RProcess};
+use super::{RExecutor, formatters, process::RProcess};
 use crate::executors::path_utils::escape_path_for_code;
 use crate::executors::{ExecutionAttempt, GraphicsOptions, SideChannel};
 use anyhow::{Context, Result};
 use std::io::Write;
 use std::path::Path;
-
-/// Wrap R code with error handlers using eval(parse(file=...)).
-///
-/// The user code is read from `code_file` at runtime — no string escaping needed.
-/// Using parse() at runtime inside tryCatch means syntax errors are also captured
-/// as structured metadata (locale-independent), unlike direct code embedding.
-///
-/// NOTE: If you change this wrapper, update traceback_skip in execute() below.
-/// Current count: tryCatch(1) + withCallingHandlers(2) + withVisible(3) + eval(4) = 4
-fn wrap_r_code_file(code_file: &str) -> String {
-    format!(
-        r#"tryCatch({{
-  withCallingHandlers({{
-    .knot_res <- withVisible(eval(parse(file='{code_file}'), envir=.GlobalEnv))
-    if (.knot_res$visible) print(.knot_res$value)
-    invisible(.write_metadata(NULL, type = "sync"))
-  }}, warning = function(w) {{
-    .knot_add_warning(w)
-    invokeRestart("muffleWarning")
-  }})
-}}, error = function(e) {{
-  err_obj <- list(message = e$message)
-  if (!is.null(e$call)) err_obj$call <- deparse(e$call)[1]
-  err_obj$traceback <- as.list(as.character(sys.calls()))
-  .write_metadata(err_obj, type = "error")
-  stop(e)
-}})
-"#
-    )
-}
 
 /// Executes a code chunk in the persistent R process
 pub fn execute(
@@ -78,11 +48,16 @@ pub fn execute(
         meta_file, cache_dir_str, graphics.width, graphics.height, graphics.dpi, graphics.format
     )?;
 
-    // Send the wrapper that reads the code file at runtime
-    let wrapped_code = wrap_r_code_file(&code_file_str);
-    writeln!(stdin, "{}", wrapped_code)?;
-    writeln!(stdin, "cat('{}\\n', file=stdout())", BOUNDARY)?;
-    writeln!(stdin, "cat('{}\\n', file=stderr())", BOUNDARY)?;
+    // Use eval(parse(file=...)) instead of source() so that knot_main_loop's
+    // withVisible wrapper can capture the visibility of the last expression.
+    // source() with echo=FALSE silently drops visible values (print.eval=FALSE
+    // by default), causing expressions like `1 + 1` to produce no output.
+    writeln!(
+        stdin,
+        "eval(parse(file='{}'), envir=.GlobalEnv)",
+        code_file_str
+    )?;
+    writeln!(stdin, "END_EXEC")?;
     stdin.flush()?;
 
     let (stdout_output, stderr_output) = process.read_until_boundary()?;
@@ -91,7 +66,7 @@ pub fn execute(
     // Read metadata from side-channel
     let metadata = channel.read_metadata()?;
 
-    // R wrapper adds 4 frames: tryCatch, withCallingHandlers, withVisible, eval
+    // R knot_main_loop adds 4 frames: tryCatch, withCallingHandlers, withVisible, eval
     crate::executors::process_execution_output(code, metadata, &stdout_output, &stderr_output, 4)
 }
 
@@ -105,15 +80,9 @@ pub fn execute_inline(executor: &mut RExecutor, code: &str) -> Result<String> {
         .as_mut()
         .context("R process stdin is not available")?;
 
-    // Just wrap in withVisible to get the output
-    let inline_code = format!(
-        ".knot_res <- withVisible({{ {} }}); if (.knot_res$visible) print(.knot_res$value);",
-        code
-    );
-
-    writeln!(stdin, "{}", inline_code)?;
-    writeln!(stdin, "cat('{}\\n', file=stdout())", BOUNDARY)?;
-    writeln!(stdin, "cat('{}\\n', file=stderr())", BOUNDARY)?;
+    // knot_main_loop handles visibility and printing
+    writeln!(stdin, "{}", code)?;
+    writeln!(stdin, "END_EXEC")?;
     stdin.flush()?;
 
     let (stdout_output, stderr_output) = executor.process.read_until_boundary()?;
@@ -132,10 +101,9 @@ pub fn query(process: &mut RProcess, code: &str) -> Result<String> {
         .as_mut()
         .context("R process stdin is not available")?;
 
-    // Write the code, followed by boundary markers
+    // Write the code, followed by END_EXEC
     writeln!(stdin, "{}", code)?;
-    writeln!(stdin, "cat('{}\\n', file=stdout())", BOUNDARY)?;
-    writeln!(stdin, "cat('{}\\n', file=stderr())", BOUNDARY)?;
+    writeln!(stdin, "END_EXEC")?;
     stdin.flush()?;
 
     let (stdout_output, stderr_output) = process.read_until_boundary()?;
