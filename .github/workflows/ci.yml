@@ -60,7 +60,7 @@ jobs:
 
       - name: Install R dependencies
         run: |
-          Rscript -e "install.packages(c('ggplot2', 'svglite', 'jsonlite'), repos='https://cloud.r-project.org')"
+          Rscript -e "install.packages(c('ggplot2', 'svglite', 'jsonlite', 'digest'), repos='https://cloud.r-project.org')"
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
