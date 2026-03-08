@@ -89,7 +89,9 @@ fn test_snapshot_preserves_complex_objects_r() {
     let snapshot_path = temp_dir.path().join("complex.RData");
     executor.save_session(&snapshot_path).unwrap();
     // Clear only user-created variables (not knot helper functions in .GlobalEnv)
-    executor.execute_inline("rm(scalar, vector, text, func)").unwrap();
+    executor
+        .execute_inline("rm(scalar, vector, text, func)")
+        .unwrap();
     executor.load_session(&snapshot_path).unwrap();
 
     // Verify all objects are restored
