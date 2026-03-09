@@ -84,8 +84,13 @@ impl Backend for TypstBackend {
         push_output_arg(output, resolved_options, &mut args);
         push_presentation_args(resolved_options, &mut args);
 
-        let code_chunk_call = format!("#code-chunk({})", args.join(", "));
-        wrap_with_figure(chunk, &code_chunk_call)
+        let fn_name = if matches!(resolved_options.show, Show::Replace) {
+            "knot-replace"
+        } else {
+            "code-chunk"
+        };
+        let call = format!("#{}({})", fn_name, args.join(", "));
+        wrap_with_figure(chunk, &call)
     }
 }
 
@@ -167,7 +172,10 @@ fn push_code_arg(
     resolved_options: &ResolvedChunkOptions,
     args: &mut Vec<String>,
 ) {
-    if matches!(resolved_options.show, Show::Both | Show::Code) {
+    if matches!(
+        resolved_options.show,
+        Show::Both | Show::Code | Show::Replace
+    ) {
         let code_str = if !codly_options.is_empty() {
             let local_call = format_local_call(codly_options);
             format!(
@@ -191,7 +199,10 @@ fn push_output_arg(
     resolved_options: &ResolvedChunkOptions,
     args: &mut Vec<String>,
 ) {
-    if !matches!(resolved_options.show, Show::Both | Show::Output) {
+    if !matches!(
+        resolved_options.show,
+        Show::Both | Show::Output | Show::Replace
+    ) {
         args.push("output: none".to_string());
         return;
     }
@@ -679,6 +690,35 @@ mod tests {
             &output_data,
             &ChunkExecutionState::Ready
         ));
+    }
+
+    #[test]
+    fn test_format_chunk_show_replace() {
+        let backend = TypstBackend::new();
+        let chunk = create_test_chunk("r", "ggplot(df) + geom_line()", None, Show::Replace, None);
+        let output_data = ExecutionOutput {
+            result: ExecutionResult::Plot(PathBuf::from("/tmp/plot.svg")),
+            warnings: vec![],
+        };
+        let resolved = chunk.options.resolve();
+        let result = backend.format_chunk(
+            &chunk,
+            &chunk.codly_options,
+            &resolved,
+            &output_data,
+            &ChunkExecutionState::Ready,
+        );
+        assert!(
+            result.contains("#knot-replace("),
+            "should call #knot-replace"
+        );
+        assert!(
+            !result.contains("#code-chunk("),
+            "should not call #code-chunk"
+        );
+        assert!(result.contains("code:"), "should include code arg");
+        assert!(result.contains("output:"), "should include output arg");
+        assert!(!result.contains("layout:"), "should not include layout arg");
     }
 
     #[test]

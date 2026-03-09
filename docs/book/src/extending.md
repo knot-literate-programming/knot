@@ -153,3 +153,36 @@ individual entries to customise the feedback without touching `code-chunk`:
 
 > **Note**: `knot-state-styles` affects the live preview only.  It has no effect
 > in the final PDF produced by `knot build`.
+
+### Overriding `knot-replace`
+
+`#knot-replace` is called instead of `#code-chunk` when a chunk uses
+`show: replace`.  By default it is an alias for `code-chunk` (fallback:
+code and output shown one after the other, like `show: both`).
+
+In a [touying](https://typst.app/universe/package/touying) presentation,
+override it once after importing the theme so that code appears on overlay 1
+and the output **replaces it** at the same position on overlay 2:
+
+```typst
+#import "@preview/touying:0.6.3": *
+// ... theme setup ...
+
+#let knot-replace(code: none, output: none, ..rest) = alternatives(
+  code-chunk(code: code, ..rest),
+  code-chunk(output: output, ..rest),
+)
+```
+
+Then in your `.knot` file:
+
+~~~typst
+```{r}
+#| show: replace
+ggplot(df, aes(x, y)) + geom_line()
+```
+~~~
+
+`knot-replace` receives the same named parameters as `code-chunk` (see the
+full parameter list above), so all styling options (`code-background`,
+`output-background`, etc.) pass through to both overlays automatically.
