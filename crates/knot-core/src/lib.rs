@@ -76,6 +76,25 @@ pub const PYTHON_HELPERS: &[(&str, &str)] = &[
     ("lsp.py", include_str!("../resources/python/lsp.py")),
 ];
 
+/// A short fingerprint of the embedded language scripts (R + Python).
+///
+/// Included in every chunk hash so that updating `output.R` or `output.py`
+/// automatically invalidates all existing cache entries — no manual
+/// `knot clean` required when the runtime scripts change.
+///
+/// Computed once at first access and cached for the lifetime of the process.
+pub static SCRIPTS_VERSION: once_cell::sync::Lazy<String> = once_cell::sync::Lazy::new(|| {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    for (_, content) in R_HELPERS {
+        hasher.update(content.as_bytes());
+    }
+    for (_, content) in PYTHON_HELPERS {
+        hasher.update(content.as_bytes());
+    }
+    format!("{:x}", hasher.finalize())[..16].to_string()
+});
+
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
