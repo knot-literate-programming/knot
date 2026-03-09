@@ -2,6 +2,7 @@
 
 import os
 import hashlib
+from functools import singledispatch
 from typing import Any, Optional
 
 
@@ -18,31 +19,48 @@ def current_plot():
     return fig
 
 
+@singledispatch
 def typst(obj: Any, **kwargs) -> Any:
-    """Convert Python objects to Typst representations."""
-    try:
-        import matplotlib.figure
-        if isinstance(obj, matplotlib.figure.Figure):
-            return _typst_matplotlib(obj, **kwargs)
-    except ImportError:
-        pass
+    """Convert Python objects to Typst representations.
 
-    try:
-        from plotnine import ggplot
-        if isinstance(obj, ggplot):
-            return _typst_plotnine(obj, **kwargs)
-    except ImportError:
-        pass
+    Dispatches on the type of *obj*. Built-in handlers are registered for
+    ``matplotlib.figure.Figure``, ``plotnine.ggplot``, and
+    ``pandas.DataFrame`` when those libraries are available.
 
-    try:
-        import pandas as pd
-        if isinstance(obj, pd.DataFrame):
-            return _typst_dataframe(obj, **kwargs)
-    except ImportError:
-        pass
+    Users can register their own handlers without modifying Knot::
 
+        typst.register(MyClass)(lambda obj, **kwargs: ...)
+    """
     print(obj)
     return obj
+
+
+try:
+    import matplotlib.figure
+
+    @typst.register(matplotlib.figure.Figure)
+    def _(fig, **kwargs):
+        return _typst_matplotlib(fig, **kwargs)
+except ImportError:
+    pass
+
+try:
+    from plotnine import ggplot
+
+    @typst.register(ggplot)
+    def _(gg, **kwargs):
+        return _typst_plotnine(gg, **kwargs)
+except ImportError:
+    pass
+
+try:
+    import pandas as pd
+
+    @typst.register(pd.DataFrame)
+    def _(df, **kwargs):
+        return _typst_dataframe(df, **kwargs)
+except ImportError:
+    pass
 
 
 def _typst_matplotlib(fig, width=None, height=None, dpi=None, format=None):
