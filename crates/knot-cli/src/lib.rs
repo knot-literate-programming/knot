@@ -117,7 +117,7 @@ fn fix_paths_in_typst(source: &str, typ_file: &Path) -> Result<String> {
 
         if !processed_files.contains(filename_os) {
             let dest_path = local_files_dir.join(filename.as_ref());
-            if abs_path.exists() && !dest_path.exists() {
+            if abs_path.exists() {
                 let _ = fs::copy(abs_path, &dest_path);
             }
             processed_files.insert(filename_os.to_owned());
