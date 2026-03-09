@@ -30,8 +30,15 @@ Options can also be set globally in `knot.toml` under `[chunk-defaults]`,
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `show` | string | `"both"` | What to display: `"both"`, `"code"`, `"output"`, `"none"`. |
+| `show` | string | `"both"` | What to display: `"both"`, `"code"`, `"output"`, `"none"`, `"replace"`. |
 | `echo` | bool | `true` | Alias for `show: "output"` when `false`. Kept for compatibility. |
+
+The `"replace"` value is designed for **presentation slides**: code appears first,
+then the output replaces it at the same position on the next overlay click.
+It requires a compatible slide framework such as
+[touying](https://typst.app/universe/package/touying) — see
+[Overriding `knot-replace`](./extending.md#overriding-knot-replace) for the
+one-line setup.
 
 ## Labelling and captions
 
