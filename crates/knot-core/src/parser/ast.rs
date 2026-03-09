@@ -14,6 +14,10 @@ pub enum Show {
     Code,
     Output,
     None,
+    /// Presentation mode: code on overlay 1, output replaces it on overlay 2.
+    /// Emits `#knot-replace(...)` — define `#let knot-replace = alternatives`
+    /// after importing touying to enable the animation.
+    Replace,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

@@ -39,6 +39,14 @@
   ),
 )
 
+/// Presentation replacement: shows code on overlay 1, output on overlay 2
+/// at the same position. Override with touying's `alternatives` after import:
+///   #let knot-replace(code: none, output: none, ..rest) = alternatives(
+///     code-chunk(code: code, ..rest),
+///     code-chunk(output: output, ..rest),
+///   )
+#let knot-replace = code-chunk
+
 #let code-chunk(
   code: none,
   output: none,

@@ -407,7 +407,7 @@ fn execute_for_node(
             let resolved = inline.options.resolve();
             let final_result = match resolved.show {
                 Show::Output | Show::Both => result,
-                Show::Code | Show::None => String::new(),
+                Show::Code | Show::None | Show::Replace => String::new(),
             };
 
             cache
