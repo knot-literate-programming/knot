@@ -1,5 +1,3 @@
-#import "lib/knot.typ": *
-
 // Codly configuration (syntax highlighting)
 #import "@preview/codly:1.3.0": *
 #show: codly-init

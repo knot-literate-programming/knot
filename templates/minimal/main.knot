@@ -1,6 +1,3 @@
-// Import Knot helpers
-#import "lib/knot.typ": *
-
 // ============================================
 // Codly Configuration (syntax highlighting)
 // ============================================
