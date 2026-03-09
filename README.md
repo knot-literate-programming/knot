@@ -141,7 +141,7 @@ We welcome bug reports, feature requests, and pull requests. See [CONTRIBUTING.m
   author  = {Klutchnikoff, Nicolas},
   title   = {{Knot: Literate programming for Typst}},
   url     = {https://github.com/knot-literate-programming/knot},
-  version = {0.3.1},
+  version = {0.3.2},
   year    = {2026}
 }
 ```

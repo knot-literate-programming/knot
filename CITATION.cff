@@ -5,7 +5,7 @@ authors:
     given-names: "Nicolas"
     orcid: "https://orcid.org/0000-0001-9349-0771"
 title: "Knot: A modern literate programming system for Typst"
-version: 0.3.1
+version: 0.3.2
 date-released: 2026-03-05
 url: "https://github.com/knot-literate-programming/knot"
 license: Apache-2.0
