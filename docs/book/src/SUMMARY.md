@@ -26,6 +26,10 @@
 
 - [knot.toml](./configuration.md)
 
+# Extending Knot
+
+- [R, Python, and Typst](./extending.md)
+
 # Tools
 
 - [VS Code](./vscode.md)
