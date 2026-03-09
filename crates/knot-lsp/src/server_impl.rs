@@ -118,18 +118,6 @@ impl KnotLanguageServer {
     ) -> anyhow::Result<serde_json::Value> {
         use anyhow::Context as _;
 
-        // Return cached info if the preview is already running.
-        if let Some(port) = self
-            .state
-            .preview_info
-            .read()
-            .await
-            .as_ref()
-            .map(|(_, p)| *p)
-        {
-            return Ok(serde_json::json!({"status": "ok", "staticServerPort": port}));
-        }
-
         let knot_path = params
             .uri
             .to_file_path()
@@ -153,6 +141,75 @@ impl KnotLanguageServer {
         let main_typ_uri = Url::from_file_path(&main_typ_path)
             .map_err(|_| anyhow::anyhow!("Cannot build URI for {}", main_typ_path.display()))?;
         let main_typ_str = main_typ_path.to_string_lossy().to_string();
+
+        // ── Early return: preview task already running ─────────────────────────
+        // If main.typ exists the state is healthy — return the cached port.
+        // If main.typ is missing (e.g. after `knot clean`) the Tinymist overlay
+        // is stale: re-open the document and kick off a full compile so that
+        // syncForward and the preview both work again without needing a manual Save.
+        if let Some(port) = self
+            .state
+            .preview_info
+            .read()
+            .await
+            .as_ref()
+            .map(|(_, p)| *p)
+        {
+            if main_typ_path.exists() {
+                return Ok(serde_json::json!({"status": "ok", "staticServerPort": port}));
+            }
+
+            log::info!("[startPreview] main.typ missing after clean — re-opening overlay");
+
+            // Re-run Phase 0 to get initial placeholder content.
+            let typ_content = {
+                let path = knot_path.clone();
+                tokio::task::spawn_blocking(move || {
+                    knot_core::compile_project_phase0(&path, knot_core::Phase0Mode::Pending)
+                })
+                .await
+                .map_err(|_| anyhow::anyhow!("Phase 0 panicked"))?
+                .context("compile_project_phase0 failed")?
+                .typ_content
+            };
+
+            // Write to disk immediately so syncForward can read it.
+            let _ = std::fs::write(&main_typ_path, &typ_content);
+
+            // Re-send didOpen so Tinymist tracks the document again.
+            {
+                let tinymist_guard = self.state.tinymist.read().await;
+                if let Some(proxy) = tinymist_guard.as_ref() {
+                    let _ = proxy
+                        .send_notification(
+                            lsp::DID_OPEN,
+                            serde_json::json!({
+                                "textDocument": {
+                                    "uri": main_typ_uri,
+                                    "languageId": "typst",
+                                    "version": 1,
+                                    "text": &typ_content,
+                                }
+                            }),
+                        )
+                        .await;
+                }
+            }
+
+            // Reset overlay so subsequent apply_update calls send didChange.
+            *self.state.tinymist_overlay.write().await =
+                TinymistOverlay::Active { next_version: 3 };
+
+            // Kick off a full compile to rebuild cache and refresh the preview.
+            let generation = self.state.compile_generation.load(Ordering::SeqCst);
+            let this = self.clone_for_task();
+            let uri = params.uri.clone();
+            tokio::spawn(async move {
+                this.do_compile(&uri, generation).await;
+            });
+
+            return Ok(serde_json::json!({"status": "ok", "staticServerPort": port}));
+        }
 
         // ── 2. Get initial content for the overlay ─────────────────────────────
         // Re-use the existing main.typ (from a previous compilation) rather than
