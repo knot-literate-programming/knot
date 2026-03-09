@@ -2,6 +2,7 @@
 
 import os
 import hashlib
+from functools import singledispatch
 from typing import Any, Optional
 
 
@@ -18,31 +19,59 @@ def current_plot():
     return fig
 
 
+@singledispatch
 def typst(obj: Any, **kwargs) -> Any:
-    """Convert Python objects to Typst representations."""
+    """Convert Python objects to Typst representations.
+
+    Dispatches on the type of *obj*. Built-in handlers are registered lazily
+    (on first call) for ``matplotlib.figure.Figure``, ``plotnine.ggplot``,
+    and ``pandas.DataFrame`` when those libraries are available.
+
+    Users can register handlers for their own types without modifying Knot::
+
+        typst.register(MyClass)(lambda obj, **kwargs: ...)
+    """
+    _register_optional_handlers()
+    impl = typst.dispatch(type(obj))
+    if impl is typst.dispatch(object):
+        print(obj)
+        return obj
+    return impl(obj, **kwargs)
+
+
+_optional_handlers_registered = False
+
+
+def _register_optional_handlers() -> None:
+    """Register built-in handlers for optional dependencies (run once)."""
+    global _optional_handlers_registered
+    if _optional_handlers_registered:
+        return
+    _optional_handlers_registered = True
+
     try:
         import matplotlib.figure
-        if isinstance(obj, matplotlib.figure.Figure):
-            return _typst_matplotlib(obj, **kwargs)
+        typst.register(matplotlib.figure.Figure)(
+            lambda fig, **kw: _typst_matplotlib(fig, **kw)
+        )
     except ImportError:
         pass
 
     try:
         from plotnine import ggplot
-        if isinstance(obj, ggplot):
-            return _typst_plotnine(obj, **kwargs)
+        typst.register(ggplot)(
+            lambda gg, **kw: _typst_plotnine(gg, **kw)
+        )
     except ImportError:
         pass
 
     try:
         import pandas as pd
-        if isinstance(obj, pd.DataFrame):
-            return _typst_dataframe(obj, **kwargs)
+        typst.register(pd.DataFrame)(
+            lambda df, **kw: _typst_dataframe(df, **kw)
+        )
     except ImportError:
         pass
-
-    print(obj)
-    return obj
 
 
 def _typst_matplotlib(fig, width=None, height=None, dpi=None, format=None):
