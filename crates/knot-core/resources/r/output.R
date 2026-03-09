@@ -69,8 +69,10 @@ typst.default <- function(obj, ...) {
   dpi <- if (!is.null(dpi)) dpi else as.integer(Sys.getenv("KNOT_FIG_DPI", "300"))
   format <- if (!is.null(format)) format else Sys.getenv("KNOT_FIG_FORMAT", "svg")
 
-  # Create stable hash
-  hash <- digest::digest(plot_obj, algo = "xxhash64")
+  # Include dimensions in hash so that changing fig-width/fig-height produces a
+  # new filename.  This forces Tinymist (and any other renderer with a file
+  # cache) to re-read the file rather than reusing a cached version.
+  hash <- digest::digest(list(plot_obj, width, height, dpi, format), algo = "xxhash64")
   filename <- sprintf("plot_%s.%s", hash, format)
   filepath <- file.path(.get_base_dir(), filename)
 
