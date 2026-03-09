@@ -23,44 +23,55 @@ def current_plot():
 def typst(obj: Any, **kwargs) -> Any:
     """Convert Python objects to Typst representations.
 
-    Dispatches on the type of *obj*. Built-in handlers are registered for
-    ``matplotlib.figure.Figure``, ``plotnine.ggplot``, and
-    ``pandas.DataFrame`` when those libraries are available.
+    Dispatches on the type of *obj*. Built-in handlers are registered lazily
+    (on first call) for ``matplotlib.figure.Figure``, ``plotnine.ggplot``,
+    and ``pandas.DataFrame`` when those libraries are available.
 
-    Users can register their own handlers without modifying Knot::
+    Users can register handlers for their own types without modifying Knot::
 
         typst.register(MyClass)(lambda obj, **kwargs: ...)
     """
-    print(obj)
-    return obj
+    _register_optional_handlers()
+    impl = typst.dispatch(type(obj))
+    if impl is typst.dispatch(object):
+        print(obj)
+        return obj
+    return impl(obj, **kwargs)
 
 
-try:
-    import matplotlib.figure
+_optional_handlers_registered = False
 
-    @typst.register(matplotlib.figure.Figure)
-    def _(fig, **kwargs):
-        return _typst_matplotlib(fig, **kwargs)
-except ImportError:
-    pass
 
-try:
-    from plotnine import ggplot
+def _register_optional_handlers() -> None:
+    """Register built-in handlers for optional dependencies (run once)."""
+    global _optional_handlers_registered
+    if _optional_handlers_registered:
+        return
+    _optional_handlers_registered = True
 
-    @typst.register(ggplot)
-    def _(gg, **kwargs):
-        return _typst_plotnine(gg, **kwargs)
-except ImportError:
-    pass
+    try:
+        import matplotlib.figure
+        typst.register(matplotlib.figure.Figure)(
+            lambda fig, **kw: _typst_matplotlib(fig, **kw)
+        )
+    except ImportError:
+        pass
 
-try:
-    import pandas as pd
+    try:
+        from plotnine import ggplot
+        typst.register(ggplot)(
+            lambda gg, **kw: _typst_plotnine(gg, **kw)
+        )
+    except ImportError:
+        pass
 
-    @typst.register(pd.DataFrame)
-    def _(df, **kwargs):
-        return _typst_dataframe(df, **kwargs)
-except ImportError:
-    pass
+    try:
+        import pandas as pd
+        typst.register(pd.DataFrame)(
+            lambda df, **kw: _typst_dataframe(df, **kw)
+        )
+    except ImportError:
+        pass
 
 
 def _typst_matplotlib(fig, width=None, height=None, dpi=None, format=None):
