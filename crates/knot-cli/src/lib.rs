@@ -79,7 +79,7 @@ pub fn compile_to_string(file: &Path, compiler: &mut Compiler) -> Result<(String
         parent.join(format!(".{}.typ", stem.to_string_lossy()))
     };
 
-    let fixed_source = fix_paths_in_typst(&typst_source, &typ_output_path)?;
+    let fixed_source = knot_core::fix_paths_in_typst(&typst_source, &typ_output_path)?;
     Ok((fixed_source, typ_output_path))
 }
 
@@ -91,42 +91,6 @@ pub fn compile_file(file: &Path, output_path: Option<&PathBuf>) -> Result<PathBu
     let typ_output_path = output_path.cloned().unwrap_or(typ_default_path);
     fs::write(&typ_output_path, fixed_source).context("Failed to write Typst file")?;
     Ok(typ_output_path)
-}
-
-/// Converts absolute cache paths to relative paths in _knot_files/
-fn fix_paths_in_typst(source: &str, typ_file: &Path) -> Result<String> {
-    use knot_core::Defaults;
-    use once_cell::sync::Lazy;
-    use regex::Regex;
-    use std::collections::HashSet;
-
-    static PATH_REGEX: Lazy<Regex> =
-        Lazy::new(|| Regex::new(r#""(/[^"]+\.knot_cache/[^"]+)""#).unwrap());
-
-    let typ_dir = typ_file.parent().context("No parent dir")?;
-    let local_files_dir = typ_dir.join(Defaults::LANGUAGE_FILES_DIR);
-    fs::create_dir_all(&local_files_dir)?;
-
-    let mut processed_files = HashSet::new();
-
-    let result = PATH_REGEX.replace_all(source, |caps: &regex::Captures| {
-        let abs_path_str = &caps[1];
-        let abs_path = Path::new(abs_path_str);
-        let filename_os = abs_path.file_name().unwrap();
-        let filename = filename_os.to_string_lossy();
-
-        if !processed_files.contains(filename_os) {
-            let dest_path = local_files_dir.join(filename.as_ref());
-            if abs_path.exists() {
-                let _ = fs::copy(abs_path, &dest_path);
-            }
-            processed_files.insert(filename_os.to_owned());
-        }
-
-        format!("\"{}/{}\"", Defaults::LANGUAGE_FILES_DIR, filename)
-    });
-
-    Ok(result.to_string())
 }
 
 /// Format a .knot file
