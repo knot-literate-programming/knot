@@ -172,7 +172,10 @@ fn push_code_arg(
     resolved_options: &ResolvedChunkOptions,
     args: &mut Vec<String>,
 ) {
-    if matches!(resolved_options.show, Show::Both | Show::Code | Show::Replace) {
+    if matches!(
+        resolved_options.show,
+        Show::Both | Show::Code | Show::Replace
+    ) {
         let code_str = if !codly_options.is_empty() {
             let local_call = format_local_call(codly_options);
             format!(
@@ -196,7 +199,10 @@ fn push_output_arg(
     resolved_options: &ResolvedChunkOptions,
     args: &mut Vec<String>,
 ) {
-    if !matches!(resolved_options.show, Show::Both | Show::Output | Show::Replace) {
+    if !matches!(
+        resolved_options.show,
+        Show::Both | Show::Output | Show::Replace
+    ) {
         args.push("output: none".to_string());
         return;
     }
@@ -702,8 +708,14 @@ mod tests {
             &output_data,
             &ChunkExecutionState::Ready,
         );
-        assert!(result.contains("#knot-replace("), "should call #knot-replace");
-        assert!(!result.contains("#code-chunk("), "should not call #code-chunk");
+        assert!(
+            result.contains("#knot-replace("),
+            "should call #knot-replace"
+        );
+        assert!(
+            !result.contains("#code-chunk("),
+            "should not call #code-chunk"
+        );
         assert!(result.contains("code:"), "should include code arg");
         assert!(result.contains("output:"), "should include output arg");
         assert!(!result.contains("layout:"), "should not include layout arg");
