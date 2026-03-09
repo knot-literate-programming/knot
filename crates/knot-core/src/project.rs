@@ -422,9 +422,10 @@ fn assemble_project_typ(
         assembled = assembled.replace("/* KNOT-CODLY-INIT */", &codly_init);
     }
 
-    // 3. Wrap with BEGIN-FILE / END-FILE.
+    // 3. Prepend the inlined lib.typ, then wrap with BEGIN-FILE / END-FILE.
     Ok(format!(
-        "// BEGIN-FILE {main_file_name}\n{}\n// END-FILE {main_file_name}\n",
+        "{}\n// BEGIN-FILE {main_file_name}\n{}\n// END-FILE {main_file_name}\n",
+        crate::LIB_TYP.trim_end(),
         assembled.trim()
     ))
 }

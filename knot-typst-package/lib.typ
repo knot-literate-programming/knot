@@ -7,12 +7,37 @@
 //
 // It is intentionally a companion to the Knot CLI and is not useful
 // on its own. For this reason it is not published on Typst Universe:
-// the right version is always bundled with the knot binary and copied
-// into your project by `knot init`. Do not import it from Universe.
+// the right version is always bundled with the knot binary and prepended
+// automatically by the assembler. You do not need to import or copy it.
 //
 // IMPORTANT: This file should contain ONLY rendering functions,
 // not document configuration (Codly, figure numbering, etc.).
 // Document configuration belongs in your main.knot file.
+
+/// Visual styles for chunk execution states (live preview only — not in final PDF).
+/// These appear during `knot watch --preview` and VS Code preview when chunks are
+/// pending execution, recently modified, or inert due to an upstream error.
+/// Override entries here to customize the preview feedback; chunk presentation
+/// styles (background, inset, etc.) belong in knot.toml or chunk options instead.
+#let knot-state-styles = (
+  pending: (
+    stroke: 2pt + rgb("#f97316"),
+  ),
+  modified: (
+    stroke: (
+      thickness: 5pt,
+      paint: rgb("#fcd34d"),
+      dash: "densely-dotted",
+      join: "round",
+    ),
+  ),
+  "modified-cascade": (
+    stroke: (thickness: 1pt, paint: rgb("#fcd34d"), dash: "dashed"),
+  ),
+  inert: (
+    overlay-fill: white.transparentize(40%),
+  ),
+)
 
 #let code-chunk(
   code: none,
@@ -40,6 +65,7 @@
   is-pending: false,
   is-modified: false,
   is-modified-cascade: false,
+  state-styles: knot-state-styles,
   ..rest,
 ) = {
   // Ensure warnings and errors are arrays (defensive check)
@@ -53,8 +79,10 @@
 
   // Wrap code in styled block
   let code-block = if code != none {
-    // Visual state borders: Pending (orange) > Modified (amber strong) > ModifiedCascade (amber muted) > default.
-    let effective-stroke = if is-pending { 2pt + rgb("#f97316") } else if is-modified { 2pt + rgb("#d97706") } else if is-modified-cascade { 1pt + rgb("#fcd34d") } else { code-stroke }
+    // Visual state borders: driven by state-styles dict (customizable via knot-state-styles).
+    let effective-stroke = if is-pending { state-styles.pending.stroke } else if is-modified {
+      state-styles.modified.stroke
+    } else if is-modified-cascade { state-styles.at("modified-cascade").stroke } else { code-stroke }
     let b = block(
       fill: code-background,
       stroke: effective-stroke,
@@ -67,7 +95,7 @@
       // Use a clipping block to contain the overlay perfectly
       block(width: 100%, clip: true, radius: code-radius)[
         #b
-        #place(top + left, rect(width: 100%, height: 5000pt, fill: white.transparentize(40%)))
+        #place(top + left, rect(width: 100%, height: 5000pt, fill: state-styles.inert.overlay-fill))
       ]
     } else {
       b
@@ -157,6 +185,6 @@
     )[
       #set text(fill: white, size: 0.95em)
       #e
-    ])
+    ]),
   )
 }

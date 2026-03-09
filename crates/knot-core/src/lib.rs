@@ -40,6 +40,12 @@ pub use project::{
     ProjectOutput, compile_project_full, compile_project_phase0, compile_project_phase0_unsaved,
 };
 
+/// Typst library embedded in the binary, prepended to every assembled `.typ` file.
+///
+/// Provides `code-chunk` and `knot-state-styles`. Inlined by the assembler so
+/// projects do not need a `lib/` directory or an `#import` statement.
+pub const LIB_TYP: &str = include_str!("../../../knot-typst-package/lib.typ");
+
 /// R helper scripts embedded in the binary, loaded into every R executor session.
 ///
 /// Each entry is `(filename, source_code)`. Scripts are sourced in order.

@@ -7,9 +7,8 @@ use log::info;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-// Embed the minimal template and helper packages
+// Embed the minimal template
 static MINIMAL_TEMPLATE: Dir = include_dir!("$CARGO_MANIFEST_DIR/../../templates/minimal");
-static TYPST_HELPER: &str = include_str!("../../../knot-typst-package/lib.typ");
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -213,17 +212,8 @@ fn init(project_name: &PathBuf) -> Result<()> {
         .context("Failed to extract template")?;
     println!("  ✓ Copied template files");
 
-    // Create lib/ directory
-    let lib_dir = project_name.join("lib");
-    fs::create_dir_all(&lib_dir).context("Failed to create lib/ directory")?;
-
-    // Copy Typst helper (still needed - imported by user in .knot files)
-    let typst_helper_path = lib_dir.join("knot.typ");
-    fs::write(&typst_helper_path, TYPST_HELPER).context("Failed to write lib/knot.typ")?;
-    println!("  ✓ Copied lib/knot.typ");
-
-    // Note: R and Python helpers are now embedded in the binary and loaded
-    // directly by the executors, so we don't need to copy them to lib/
+    // Note: lib/knot.typ is no longer copied — it is prepended automatically
+    // by the assembler. R and Python helpers are also embedded in the binary.
 
     println!("\n✅ Project created successfully!");
     println!("\nNext steps:");
