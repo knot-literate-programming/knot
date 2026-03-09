@@ -18,6 +18,8 @@ use std::path::PathBuf;
 /// - Serialized options (eval, show, cache, graphics, etc.)
 /// - Previous chunk hash (for sequential invalidation)
 /// - Dependencies hash (for file-based invalidation)
+/// - Scripts version (fingerprint of embedded R/Python helpers — ensures
+///   cache entries are invalidated whenever the runtime scripts change)
 pub fn get_chunk_hash(
     code: &str,
     options: &ChunkOptions,
@@ -26,8 +28,12 @@ pub fn get_chunk_hash(
 ) -> String {
     let options_str = serde_json::to_string(options).unwrap_or_default();
     let chunk_content = format!(
-        "{}|{}|{}|{}",
-        code, options_str, previous_hash, dependencies_hash
+        "{}|{}|{}|{}|{}",
+        code,
+        options_str,
+        previous_hash,
+        dependencies_hash,
+        *crate::SCRIPTS_VERSION,
     );
 
     let mut hasher = Sha256::new();
@@ -41,6 +47,7 @@ pub fn get_chunk_hash(
 /// - Code content
 /// - Options (show, eval, digits)
 /// - Previous inline expression hash (for sequential invalidation)
+/// - Scripts version (same invalidation guarantee as chunk hashes)
 pub fn get_inline_expr_hash(
     code: &str,
     options: &crate::parser::InlineOptions,
@@ -52,7 +59,13 @@ pub fn get_inline_expr_hash(
         "show={:?},eval={},digits={:?}",
         resolved.show, resolved.eval, resolved.digits
     );
-    let inline_content = format!("{}|{}|{}", code, options_str, previous_hash);
+    let inline_content = format!(
+        "{}|{}|{}|{}",
+        code,
+        options_str,
+        previous_hash,
+        *crate::SCRIPTS_VERSION,
+    );
 
     let mut hasher = Sha256::new();
     hasher.update(inline_content.as_bytes());
