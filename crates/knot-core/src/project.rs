@@ -436,7 +436,7 @@ fn assemble_project_typ(
 /// Cached artefacts (plot images, data files) live in an absolute `.knot_cache/`
 /// path.  This function copies those files into `_knot_files/` next to the
 /// `.typ` file and rewrites the embedded path strings accordingly.
-fn fix_paths_in_typst(source: &str, typ_file: &Path) -> Result<String> {
+pub fn fix_paths_in_typst(source: &str, typ_file: &Path) -> Result<String> {
     static PATH_REGEX: Lazy<Regex> =
         Lazy::new(|| Regex::new(r#""(/[^"]+\.knot_cache/[^"]+)""#).unwrap());
 
