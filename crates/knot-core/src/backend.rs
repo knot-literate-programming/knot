@@ -309,7 +309,6 @@ fn push_presentation_args(resolved_options: &ResolvedChunkOptions, args: &mut Ve
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

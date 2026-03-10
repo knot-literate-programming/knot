@@ -96,7 +96,9 @@ pub(super) fn format_error_block_for_node(
 ) -> String {
     let error_msg = error_msg.replace('"', "\\\"");
     let (node_kind, node_name) = match kind {
-        PlannedNodeKind::Chunk { node, .. } => ("chunk", node.label.as_deref().unwrap_or("unnamed")),
+        PlannedNodeKind::Chunk { node, .. } => {
+            ("chunk", node.label.as_deref().unwrap_or("unnamed"))
+        }
         PlannedNodeKind::Inline { .. } => ("inline expression", "inline"),
     };
     format!(
