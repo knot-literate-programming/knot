@@ -391,7 +391,7 @@ define_options! {
 pub struct Chunk {
     pub index: usize, // Ordinal position in document (0-based)
     pub language: String,
-    pub name: Option<String>,
+    pub label: Option<String>,
     pub code: String,
     pub base_indentation: String,
     pub options: ChunkOptions,
@@ -413,12 +413,12 @@ impl Chunk {
     pub fn format(&self, formatted_code: Option<&str>, indentation: Option<&str>) -> String {
         let mut out = String::new();
 
-        // 1. Header: ```{lang name}
+        // 1. Header: ```{lang label}
         out.push_str("```{");
         out.push_str(&self.language);
-        if let Some(name) = self.name.as_deref().filter(|n| !n.trim().is_empty()) {
+        if let Some(label) = self.label.as_deref().filter(|n| !n.trim().is_empty()) {
             out.push(' ');
-            out.push_str(name);
+            out.push_str(label);
         }
         out.push_str("}\n");
 

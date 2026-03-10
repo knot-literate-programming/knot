@@ -44,7 +44,7 @@ Done!
 
     // Verify we parsed the chunk
     assert_eq!(doc.chunks.len(), 1);
-    assert_eq!(doc.chunks[0].name, Some("test".to_string()));
+    assert_eq!(doc.chunks[0].label, Some("test".to_string()));
     assert_eq!(doc.chunks[0].options.eval, Some(true));
     assert_eq!(
         doc.chunks[0].options.show,
@@ -80,9 +80,9 @@ print(y)
     let doc = Document::parse(source);
 
     assert_eq!(doc.chunks.len(), 3);
-    assert_eq!(doc.chunks[0].name, Some("setup".to_string()));
-    assert_eq!(doc.chunks[1].name, Some("compute".to_string()));
-    assert_eq!(doc.chunks[2].name, Some("output".to_string()));
+    assert_eq!(doc.chunks[0].label, Some("setup".to_string()));
+    assert_eq!(doc.chunks[1].label, Some("compute".to_string()));
+    assert_eq!(doc.chunks[2].label, Some("output".to_string()));
 }
 
 #[test]
@@ -99,7 +99,7 @@ x <- 5
     let doc = Document::parse(source);
 
     assert_eq!(doc.chunks.len(), 1);
-    assert_eq!(doc.chunks[0].name, None);
+    assert_eq!(doc.chunks[0].label, None);
 }
 
 #[test]

@@ -14,6 +14,13 @@
 // not document configuration (Codly, figure numbering, etc.).
 // Document configuration belongs in your main.knot file.
 
+/// Default configuration for chunk figure presentation.
+/// Override in your document to change supplement text, e.g.:
+///   #let knot-chunk-defaults = (supplement: "Fragment")
+#let knot-chunk-defaults = (
+  supplement: "Chunk",
+)
+
 /// Visual styles for chunk execution states (live preview only — not in final PDF).
 /// These appear during `knot watch --preview` and VS Code preview when chunks are
 /// pending execution, recently modified, or inert due to an upstream error.
@@ -42,6 +49,8 @@
 #let code-chunk(
   code: none,
   output: none,
+  label: none,
+  caption: none,
   warnings: (),
   errors: (),
   warnings-position: "below", // "below" or "inline"
@@ -171,7 +180,7 @@
   // Warnings below: appended after main-content (inline: already embedded above)
   let below-warnings = if warnings-position == "inline" { () } else { warning-blocks }
 
-  stack(
+  let body = stack(
     dir: ttb,
     spacing: 0.5em,
     main-content,
@@ -187,6 +196,19 @@
       #e
     ]),
   )
+
+  // Wrap in #figure() when a label or caption is provided
+  if label != none or caption != none {
+    figure(
+      body,
+      kind: raw,
+      supplement: knot-chunk-defaults.supplement,
+      caption: caption,
+    )
+    if label != none { std.label(label) }
+  } else {
+    body
+  }
 }
 
 /// Presentation replacement: shows code on overlay 1, output on overlay 2
