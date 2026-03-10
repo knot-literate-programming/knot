@@ -17,7 +17,7 @@ pub fn get_document_symbols(text: &str) -> Option<Vec<DocumentSymbol>> {
     for chunk in &doc.chunks {
         // Create a symbol for each chunk
         let name = chunk
-            .name
+            .label
             .clone()
             .unwrap_or_else(|| format!("Unnamed {} chunk", chunk.language));
 
