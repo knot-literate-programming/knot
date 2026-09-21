@@ -321,25 +321,25 @@ impl Compiler {
         let project_root_ref = &project_root;
 
         let chain_results: Vec<ChainResult> = std::thread::scope(|s| {
-            let handles: Vec<_> = chain_data
-                .into_iter()
-                .map(|(lang, nodes, exec)| {
-                    let cache = Arc::clone(&cache);
-                    let chain_progress = progress.clone();
-                    s.spawn(move || {
-                        run_language_chain(
-                            lang,
-                            nodes,
-                            exec,
-                            cache,
-                            backend,
-                            config_ref,
-                            project_root_ref,
-                            chain_progress,
-                        )
-                    })
-                })
-                .collect();
+            // Start every chain before joining any of them. A lazy spawn/join
+            // iterator would accidentally serialize R and Python execution.
+            let mut handles = Vec::with_capacity(chain_data.len());
+            for (lang, nodes, exec) in chain_data {
+                let cache = Arc::clone(&cache);
+                let chain_progress = progress.clone();
+                handles.push(s.spawn(move || {
+                    run_language_chain(
+                        lang,
+                        nodes,
+                        exec,
+                        cache,
+                        backend,
+                        config_ref,
+                        project_root_ref,
+                        chain_progress,
+                    )
+                }));
+            }
 
             handles
                 .into_iter()

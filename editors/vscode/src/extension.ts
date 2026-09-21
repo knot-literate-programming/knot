@@ -35,6 +35,10 @@ let client: LanguageClient | undefined;
 let compilationStatusBar: StatusBarItem;
 let suppressAutoSync = false;
 
+type StartPreviewResult =
+    | { status: 'ok'; staticServerPort: number }
+    | { status: 'error'; message: string };
+
 // ---------------------------------------------------------------------------
 // Chunk background decorations
 // ---------------------------------------------------------------------------
@@ -437,12 +441,12 @@ async function openPreview(outputChannel: OutputChannel): Promise<void> {
             async (progress) => {
                 progress.report({ message: 'Compiling...' });
 
-                const result = await client!.sendRequest('knot/startPreview', {
+                const result = await client!.sendRequest<StartPreviewResult>('knot/startPreview', {
                     uri: knotUri.toString(),
                 });
 
                 if (result?.status !== 'ok' || !result?.staticServerPort) {
-                    throw new Error(result?.message ?? 'unknown error from knot/startPreview');
+                    throw new Error(result?.status === 'error' ? result.message : 'unknown error from knot/startPreview');
                 }
 
                 await env.openExternal(Uri.parse(`http://127.0.0.1:${result.staticServerPort}/?task=knot-preview`));

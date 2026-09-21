@@ -30,12 +30,16 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
 
   test:
     name: Tests
     runs-on: ${{ matrix.os }}
+    env:
+      MPLBACKEND: Agg
+      MPLCONFIGDIR: ${{ runner.temp }}/knot-matplotlib
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
@@ -73,11 +77,29 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Run tests (excluding knot-cli)
-        run: cargo test --workspace --exclude knot-cli
+      - name: Record runtime versions
+        run: |
+          rustc --version
+          cargo --version
+          python3 --version
+          python3 -m pip freeze
+          Rscript -e 'sessionInfo(); print(sapply(c("ggplot2", "svglite", "jsonlite", "digest"), function(p) as.character(packageVersion(p))))'
+
+      - name: Run workspace tests (no Typst required)
+        run: cargo test --workspace --locked
 
       - name: Run knot-core integration tests (R and Python)
-        run: cargo test -p knot-core -- --ignored
+        run: cargo test -p knot-core --locked -- --ignored
+
+      - name: Setup Typst for PDF integration tests
+        uses: typst-community/setup-typst@v5
+        with:
+          typst-version: '0.15.1'
+
+      - name: Run CLI PDF integration tests
+        run: |
+          typst --version
+          cargo test -p knot-cli --locked --test integration_pdf -- --ignored
 
 
   vscode-extension:
@@ -99,8 +121,16 @@ jobs:
         working-directory: editors/vscode
         run: npm run compile
 
+      - name: Check types and lint
+        working-directory: editors/vscode
+        run: |
+          node --version
+          npm --version
+          npm ls --depth=0
+          npm run typecheck
+          npm run lint
+
       - name: Verify package can be created
         working-directory: editors/vscode
         run: |
-          npm install -g @vscode/vsce
-          vsce package --out test.vsix
+          npm exec -- vsce package --out test.vsix
