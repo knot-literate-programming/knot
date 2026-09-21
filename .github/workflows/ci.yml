@@ -37,7 +37,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       MPLBACKEND: Agg
-      MPLCONFIGDIR: ${{ runner.temp }}/knot-matplotlib
     strategy:
       fail-fast: false
       matrix:
@@ -86,9 +85,13 @@ jobs:
           Rscript -e 'sessionInfo(); print(sapply(c("ggplot2", "svglite", "jsonlite", "digest"), function(p) as.character(packageVersion(p))))'
 
       - name: Run workspace tests (no Typst required)
+        env:
+          MPLCONFIGDIR: ${{ runner.temp }}/knot-matplotlib
         run: cargo test --workspace --locked
 
       - name: Run knot-core integration tests (R and Python)
+        env:
+          MPLCONFIGDIR: ${{ runner.temp }}/knot-matplotlib
         run: cargo test -p knot-core --locked -- --ignored
 
       - name: Setup Typst for PDF integration tests
