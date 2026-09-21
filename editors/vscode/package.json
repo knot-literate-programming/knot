@@ -256,7 +256,8 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run clean && npm run bundle -- --production",
+    "vscode:prepublish": "npm run typecheck && npm run clean && npm run bundle -- --production",
+    "typecheck": "tsc --noEmit",
     "compile": "npm run bundle",
     "bundle": "node esbuild.js",
     "clean": "node -e \"require('fs').rmSync('out', { recursive: true, force: true })\"",
