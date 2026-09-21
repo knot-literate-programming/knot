@@ -33,6 +33,19 @@ The writable Matplotlib directory avoids relying on a user-level font cache.
 These tests cover interpreter execution, errors, timeouts, figures, tables,
 inline expressions, mixed-language documents and session snapshots.
 
+## Cache regression tests
+
+`cache_correctness.rs` exercises document isolation, dependency roots, planning,
+artifact copying, corrupted files, cold/warm/clean builds, Python snapshot replay,
+and R/Python freeze restoration. The default suite also uses a fake executor to
+check freeze contracts and inert cascades without installing interpreters.
+
+```bash
+cargo test -p knot-core --locked --test cache_correctness
+# With the R/Python requirements above:
+cargo test -p knot-core --locked --test cache_correctness -- --include-ignored
+```
+
 ## CLI and PDF integration tests
 
 ```bash

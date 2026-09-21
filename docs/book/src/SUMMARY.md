@@ -15,6 +15,7 @@
 - [Code Chunks](./chunks.md)
 - [Inline Expressions](./inline.md)
 - [Chunk Options Reference](./chunk-options.md)
+- [Cache and Execution State](./caching.md)
 
 # Outputs
 

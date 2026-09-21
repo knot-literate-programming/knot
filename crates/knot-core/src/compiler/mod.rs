@@ -74,7 +74,7 @@ pub struct Compiler {
 impl Compiler {
     /// Create a new compiler, searching for knot.toml starting from the given file path.
     pub fn new(knot_file_path: &Path) -> Result<Self> {
-        let project_root = Config::find_project_root(knot_file_path)?;
+        let project_root = Config::find_project_root(knot_file_path)?.canonicalize()?;
 
         let config_path = project_root.join("knot.toml");
         let config = if config_path.exists() {
@@ -83,18 +83,15 @@ impl Compiler {
             Config::default()
         };
 
-        let file_stem = knot_file_path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("main");
-        let cache_dir = get_cache_dir(&project_root, file_stem);
+        let cache_dir = get_cache_dir(&project_root, knot_file_path.canonicalize()?);
 
         info!("📦 Cache directory: {}", cache_dir.display());
 
         let executor_manager = ExecutorManager::with_timeout(
             cache_dir.clone(),
             Duration::from_secs(config.execution.timeout_secs),
-        );
+        )
+        .with_working_directory(project_root.clone());
 
         Ok(Self {
             executor_manager,
@@ -198,6 +195,7 @@ impl Compiler {
 
         let mut planned = Vec::with_capacity(nodes.len());
         let mut last_hash_per_lang: HashMap<String, String> = HashMap::new();
+        let mut invalidated = HashSet::new();
 
         for node in nodes {
             let (lang, source_start, source_end) = match &node {
@@ -215,11 +213,22 @@ impl Compiler {
                         .as_deref()
                         .map(String::from)
                         .unwrap_or_else(|| format!("chunk-{}", chunk.index));
-                    let hash = compute_hash(&chunk.code, &chunk_options, &previous_hash)?;
+                    let hash = compute_hash(
+                        &lang,
+                        &chunk.code,
+                        &chunk_options,
+                        &previous_hash,
+                        &self.project_root,
+                    )?;
                     let need = if !resolved_options.eval {
                         ExecutionNeed::Skip
-                    } else if resolved_options.cache && cache.has_cached_result(&hash) {
-                        ExecutionNeed::CacheHit(cache.get_cached_result(&hash)?)
+                    } else if resolved_options.cache
+                        && !invalidated.contains(&lang)
+                        && let Ok(attempt) = cache.get_cached_result(&hash)
+                        && (matches!(attempt, crate::executors::ExecutionAttempt::RuntimeError(_))
+                            || cache.snapshot_is_valid(&hash))
+                    {
+                        ExecutionNeed::CacheHit(attempt)
                     } else {
                         ExecutionNeed::MustExecute
                     };
@@ -236,11 +245,18 @@ impl Compiler {
                 }
                 ExecutableNode::InlineExpr(inline) => {
                     let resolved = inline.options.resolve();
-                    let hash =
-                        cache.get_inline_expr_hash(&inline.code, &inline.options, &previous_hash);
+                    let hash = cache.get_inline_expr_hash(
+                        &lang,
+                        &inline.code,
+                        &inline.options,
+                        &previous_hash,
+                    );
                     let need = if !resolved.eval {
                         ExecutionNeed::Skip
-                    } else if cache.has_cached_inline_result(&hash) {
+                    } else if !invalidated.contains(&lang)
+                        && cache.has_cached_inline_result(&hash)
+                        && cache.snapshot_is_valid(&hash)
+                    {
                         ExecutionNeed::CacheHitInline(cache.get_cached_inline_result(&hash)?)
                     } else {
                         ExecutionNeed::MustExecute
@@ -249,7 +265,12 @@ impl Compiler {
                 }
             };
 
-            last_hash_per_lang.insert(lang.clone(), hash.clone());
+            if matches!(need, ExecutionNeed::MustExecute) {
+                invalidated.insert(lang.clone());
+            }
+            if !matches!(need, ExecutionNeed::Skip) {
+                last_hash_per_lang.insert(lang.clone(), hash.clone());
+            }
             planned.push(PlannedNode {
                 kind,
                 lang,
@@ -281,6 +302,31 @@ impl Compiler {
         backend: &TypstBackend,
         progress: Option<std::sync::mpsc::Sender<ProgressEvent>>,
     ) -> Result<Vec<ExecutedNode>> {
+        // Each compile starts with fresh interpreters. Cached prefixes are restored
+        // explicitly; removed variables must not survive a previous compilation.
+        self.executor_manager.shutdown_all();
+        {
+            let mut cache = cache.lock().unwrap();
+            cache.metadata.freeze_objects.clear();
+            cache.metadata.chunks.retain(|entry| {
+                planned.iter().any(|node| {
+                    node.hash == entry.hash
+                        && matches!(
+                            node.need,
+                            ExecutionNeed::CacheHit(_) | ExecutionNeed::CacheHitInline(_)
+                        )
+                })
+            });
+            cache.metadata.inline_expressions.retain(|entry| {
+                planned.iter().any(|node| {
+                    node.hash == entry.hash
+                        && matches!(
+                            node.need,
+                            ExecutionNeed::CacheHit(_) | ExecutionNeed::CacheHitInline(_)
+                        )
+                })
+            });
+        }
         // Step 1: group nodes by language, preserving document order via indices.
         let groups = group_by_language(planned);
 
@@ -302,7 +348,6 @@ impl Compiler {
 
         // Clone immutable data once so threads can borrow it without capturing `self`.
         let config = self.config.clone();
-        let project_root = self.project_root.clone();
 
         // Step 3: build per-chain inputs (each chain owns its executor).
         let chain_data = groups
@@ -318,7 +363,6 @@ impl Compiler {
 
         // Reborrow as references so closures can copy them (references are Copy).
         let config_ref = &config;
-        let project_root_ref = &project_root;
 
         let chain_results: Vec<ChainResult> = std::thread::scope(|s| {
             // Start every chain before joining any of them. A lazy spawn/join
@@ -335,7 +379,6 @@ impl Compiler {
                         cache,
                         backend,
                         config_ref,
-                        project_root_ref,
                         chain_progress,
                     )
                 }));
@@ -768,8 +811,22 @@ mod tests {
     #[test]
     fn test_compute_hash_consistency() {
         let chunk = test_helpers::create_test_chunk("r", "x <- 1", None, false);
-        let hash1 = compute_hash(&chunk.code, &chunk.options, "prev_hash").unwrap();
-        let hash2 = compute_hash(&chunk.code, &chunk.options, "prev_hash").unwrap();
+        let hash1 = compute_hash(
+            &chunk.language,
+            &chunk.code,
+            &chunk.options,
+            "prev_hash",
+            Path::new("."),
+        )
+        .unwrap();
+        let hash2 = compute_hash(
+            &chunk.language,
+            &chunk.code,
+            &chunk.options,
+            "prev_hash",
+            Path::new("."),
+        )
+        .unwrap();
         assert_eq!(hash1, hash2);
     }
 
@@ -777,16 +834,44 @@ mod tests {
     fn test_compute_hash_changes_with_code() {
         let chunk1 = test_helpers::create_test_chunk("r", "x <- 1", None, false);
         let chunk2 = test_helpers::create_test_chunk("r", "x <- 2", None, false);
-        let hash1 = compute_hash(&chunk1.code, &chunk1.options, "prev").unwrap();
-        let hash2 = compute_hash(&chunk2.code, &chunk2.options, "prev").unwrap();
+        let hash1 = compute_hash(
+            &chunk1.language,
+            &chunk1.code,
+            &chunk1.options,
+            "prev",
+            Path::new("."),
+        )
+        .unwrap();
+        let hash2 = compute_hash(
+            &chunk2.language,
+            &chunk2.code,
+            &chunk2.options,
+            "prev",
+            Path::new("."),
+        )
+        .unwrap();
         assert_ne!(hash1, hash2);
     }
 
     #[test]
     fn test_compute_hash_changes_with_previous() {
         let chunk = test_helpers::create_test_chunk("r", "x <- 1", None, false);
-        let hash1 = compute_hash(&chunk.code, &chunk.options, "prev_1").unwrap();
-        let hash2 = compute_hash(&chunk.code, &chunk.options, "prev_2").unwrap();
+        let hash1 = compute_hash(
+            &chunk.language,
+            &chunk.code,
+            &chunk.options,
+            "prev_1",
+            Path::new("."),
+        )
+        .unwrap();
+        let hash2 = compute_hash(
+            &chunk.language,
+            &chunk.code,
+            &chunk.options,
+            "prev_2",
+            Path::new("."),
+        )
+        .unwrap();
         assert_ne!(hash1, hash2);
     }
 
@@ -801,10 +886,24 @@ mod tests {
 
         let mut chunk = test_helpers::create_test_chunk("r", "x <- 1", None, false);
         chunk.options.depends = vec![dep1];
-        let hash1 = compute_hash(&chunk.code, &chunk.options, "prev").unwrap();
+        let hash1 = compute_hash(
+            &chunk.language,
+            &chunk.code,
+            &chunk.options,
+            "prev",
+            Path::new("."),
+        )
+        .unwrap();
 
         chunk.options.depends = vec![dep2];
-        let hash2 = compute_hash(&chunk.code, &chunk.options, "prev").unwrap();
+        let hash2 = compute_hash(
+            &chunk.language,
+            &chunk.code,
+            &chunk.options,
+            "prev",
+            Path::new("."),
+        )
+        .unwrap();
 
         assert_ne!(hash1, hash2);
     }

@@ -437,37 +437,49 @@ fn assemble_project_typ(
 /// path.  This function copies those files into `_knot_files/` next to the
 /// `.typ` file and rewrites the embedded path strings accordingly.
 pub fn fix_paths_in_typst(source: &str, typ_file: &Path) -> Result<String> {
-    static PATH_REGEX: Lazy<Regex> =
-        Lazy::new(|| Regex::new(r#""(/[^"]+\.knot_cache/[^"]+)""#).unwrap());
-
+    static PATH_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r#""((?:\\.|[^"\\])*)""#).unwrap());
+    use sha2::{Digest, Sha256};
     let typ_dir = typ_file
         .parent()
         .context("No parent directory for .typ file")?;
-    let local_files_dir = typ_dir.join(Defaults::LANGUAGE_FILES_DIR);
-    fs::create_dir_all(&local_files_dir)?;
-
     let mut processed = HashSet::new();
-
-    let result = PATH_REGEX.replace_all(source, |caps: &regex::Captures| {
-        let abs_path_str = &caps[1];
-        let abs_path = Path::new(abs_path_str);
-        // The regex guarantees a non-empty path segment after `.knot_cache/`,
-        // so file_name() is always Some. We skip the copy on the impossible None.
-        let Some(filename_os) = abs_path.file_name() else {
-            return format!("\"{}\"", abs_path_str);
+    let mut result = String::new();
+    let mut end = 0;
+    for matched in PATH_REGEX.find_iter(source) {
+        result.push_str(&source[end..matched.start()]);
+        end = matched.end();
+        let Ok(decoded) = serde_json::from_str::<String>(matched.as_str()) else {
+            result.push_str(matched.as_str());
+            continue;
         };
-        let filename = filename_os.to_string_lossy();
-
-        if !processed.contains(filename_os) {
-            let dest = local_files_dir.join(filename.as_ref());
-            if abs_path.exists() {
-                let _ = fs::copy(abs_path, &dest);
-            }
-            processed.insert(filename_os.to_owned());
+        let path = Path::new(&decoded);
+        if !path.is_absolute() || !path.components().any(|c| c.as_os_str() == ".knot_cache") {
+            result.push_str(matched.as_str());
+            continue;
         }
-
-        format!("\"{}/{}\"", Defaults::LANGUAGE_FILES_DIR, filename)
-    });
-
-    Ok(result.to_string())
+        let filename = path.file_name().context("Cache artifact has no filename")?;
+        let namespace = format!(
+            "{:x}",
+            Sha256::digest(path.parent().unwrap().as_os_str().as_encoded_bytes())
+        );
+        let relative = Path::new(Defaults::LANGUAGE_FILES_DIR)
+            .join(namespace)
+            .join(filename);
+        if processed.insert(path.to_path_buf()) {
+            let destination = typ_dir.join(&relative);
+            fs::create_dir_all(destination.parent().unwrap())?;
+            fs::copy(path, &destination).with_context(|| {
+                format!(
+                    "Cannot copy cache artifact {} to {}",
+                    path.display(),
+                    destination.display()
+                )
+            })?;
+        }
+        result.push('"');
+        result.push_str(&crate::backend::escape_typst_path(&relative));
+        result.push('"');
+    }
+    result.push_str(&source[end..]);
+    Ok(result)
 }

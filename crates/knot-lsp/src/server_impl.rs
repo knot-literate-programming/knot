@@ -1011,16 +1011,15 @@ impl KnotLanguageServer {
             Ok(root) => root,
             Err(_) => return,
         };
-        let file_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("main");
-        let cache_dir = get_cache_dir(&project_root, file_stem);
+        let cache_dir = get_cache_dir(&project_root, &path);
 
         // Lazy-init: create an ExecutorManager for this URI if one doesn't
         // exist yet (hover/completion in R/Python chunks require it).
         {
             let mut executors = self.state.executors.write().await;
-            executors
-                .entry(uri.clone())
-                .or_insert_with(|| ExecutorManager::new(cache_dir.clone()));
+            executors.entry(uri.clone()).or_insert_with(|| {
+                ExecutorManager::new(cache_dir.clone()).with_working_directory(project_root.clone())
+            });
         }
 
         if let Ok(cache) = Cache::new(cache_dir) {
@@ -1032,18 +1031,38 @@ impl KnotLanguageServer {
     /// Reload the most recent executor session snapshot for one language if it
     /// differs from the one already loaded (avoids redundant I/O on every save).
     async fn try_load_snapshot(&self, uri: &Url, cache: &Cache, language: &str, extension: &str) {
+        let reload_key = format!("{}::{}", uri, language);
         let last_chunk = match cache
             .metadata
             .chunks
             .iter()
-            .filter(|c| c.language == language && cache.has_snapshot(&c.hash, extension))
+            .filter(|c| {
+                c.language == language && c.error.is_none() && cache.snapshot_is_valid(&c.hash)
+            })
             .max_by_key(|c| c.index)
         {
             Some(c) => c,
-            None => return,
+            None => {
+                if let Some(manager) = self.state.executors.write().await.get_mut(uri) {
+                    drop(manager.take(language));
+                }
+                self.state
+                    .loaded_snapshot_hash
+                    .write()
+                    .await
+                    .remove(&reload_key);
+                return;
+            }
         };
 
-        let reload_key = format!("{}::{}", uri, language);
+        let Some(snapshot) = cache.metadata.snapshots.get(&last_chunk.hash) else {
+            return;
+        };
+        let mut files: Vec<_> = snapshot.files.iter().collect();
+        files.sort_unstable();
+        // The same execution hash can acquire a new state after cache:false or
+        // repair. Compare the validated contents, not just the source hash.
+        let snapshot_identity = format!("{}:{files:?}", last_chunk.hash);
 
         if self
             .state
@@ -1051,7 +1070,7 @@ impl KnotLanguageServer {
             .read()
             .await
             .get(&reload_key)
-            == Some(&last_chunk.hash)
+            == Some(&snapshot_identity)
         {
             return; // Already up to date
         }
@@ -1059,15 +1078,24 @@ impl KnotLanguageServer {
         let snapshot_path = cache.get_snapshot_path(&last_chunk.hash, extension);
         let chunk_index = last_chunk.index;
 
-        if let Some(manager) = self.state.executors.write().await.get_mut(uri)
-            && let Ok(executor) = manager.get_executor(language)
-            && executor.load_session(&snapshot_path).is_ok()
-        {
+        let mut managers = self.state.executors.write().await;
+        let Some(manager) = managers.get_mut(uri) else {
+            return;
+        };
+        // Loading into a reused session would retain variables deleted since
+        // the previous snapshot.
+        drop(manager.take(language));
+        let restored = manager.get_executor(language).is_ok_and(|executor| {
+            executor.load_session(&snapshot_path).is_ok()
+                && cache.restore_constants(&last_chunk.hash, executor).is_ok()
+        });
+        drop(managers);
+        if restored {
             self.state
                 .loaded_snapshot_hash
                 .write()
                 .await
-                .insert(reload_key, last_chunk.hash.clone());
+                .insert(reload_key, snapshot_identity);
             self.client
                 .log_message(
                     MessageType::INFO,

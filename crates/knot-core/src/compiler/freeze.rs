@@ -3,12 +3,10 @@
 
 use crate::cache::{Cache, FreezeObjectInfo};
 use crate::compiler::pipeline::PlannedNode;
-use crate::defaults::Defaults;
 use crate::executors::KnotExecutor;
 use crate::executors::side_channel::RuntimeError;
 use crate::parser::ast::Chunk;
 use anyhow::{Context, Result};
-use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use super::pipeline::PlannedNodeKind;
@@ -27,14 +25,14 @@ fn freeze_key(lang: &str, name: &str) -> String {
 /// successfully executed chunks, so an executor is always present).
 pub(super) fn register_freeze_objects(
     chunk: &Chunk,
+    names: &[String],
     exec: &mut Box<dyn KnotExecutor>,
     cache: &Arc<Mutex<Cache>>,
-    project_root: &Path,
 ) -> Result<()> {
     let chunk_name = chunk.label.as_deref().unwrap_or("unnamed").to_string();
-    let cache_dir = project_root.join(Defaults::CACHE_DIR_NAME);
+    let cache_dir = cache.lock().unwrap().cache_dir.clone();
 
-    for obj_name in &chunk.options.freeze {
+    for obj_name in names {
         let obj_hash = exec
             .hash_object(obj_name)
             .context(format!("Failed to hash freeze object '{}'", obj_name))?;
@@ -135,4 +133,156 @@ pub(super) fn check_freeze_contract(
     }
 
     Ok(None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::TypstBackend;
+    use crate::config::Config;
+    use crate::executors::{
+        ConstantObjectHandler, ExecutionAttempt, ExecutionOutput, ExecutionResult, GraphicsOptions,
+        LanguageExecutor,
+    };
+    use crate::{Compiler, Document, Phase0Mode};
+    use std::path::Path;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct FakeExecutor {
+        value: String,
+        calls: Arc<AtomicUsize>,
+    }
+    impl LanguageExecutor for FakeExecutor {
+        fn initialize(&mut self) -> Result<()> {
+            Ok(())
+        }
+        fn execute(&mut self, code: &str, _: &GraphicsOptions) -> Result<ExecutionAttempt> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            if code.trim() == "error" {
+                return Ok(ExecutionAttempt::RuntimeError(RuntimeError {
+                    message: Some("failure".into()),
+                    call: None,
+                    line: None,
+                    traceback: vec![],
+                }));
+            }
+            if code.trim() == "mutate" {
+                self.value = "changed".into();
+            }
+            Ok(ExecutionAttempt::Success(ExecutionOutput {
+                result: ExecutionResult::Text(String::new()),
+                warnings: vec![],
+            }))
+        }
+        fn execute_inline(&mut self, _: &str) -> Result<String> {
+            unreachable!()
+        }
+        fn query(&mut self, _: &str) -> Result<String> {
+            unreachable!()
+        }
+    }
+    impl KnotExecutor for FakeExecutor {
+        fn save_session(&mut self, path: &Path) -> Result<()> {
+            Ok(std::fs::write(path, &self.value)?)
+        }
+        fn load_session(&mut self, _: &Path) -> Result<()> {
+            unreachable!()
+        }
+        fn snapshot_extension(&self) -> &'static str {
+            "fake"
+        }
+    }
+    impl ConstantObjectHandler for FakeExecutor {
+        fn hash_object(&mut self, name: &str) -> Result<String> {
+            assert_eq!(name, "x", "Only declared frozen names should be checked");
+            Ok(self.value.clone())
+        }
+        fn save_constant(&mut self, _: &str, hash: &str, dir: &Path) -> Result<()> {
+            std::fs::create_dir_all(dir.join("objects"))?;
+            Ok(std::fs::write(
+                dir.join("objects").join(format!("{hash}.fake")),
+                &self.value,
+            )?)
+        }
+        fn load_constant(&mut self, _: &str, _: &str, _: &Path) -> Result<()> {
+            Ok(())
+        }
+        fn remove_from_env(&mut self, _: &str) -> Result<()> {
+            Ok(())
+        }
+        fn object_extension(&self) -> &'static str {
+            "fake"
+        }
+    }
+
+    #[test]
+    fn declared_objects_pass_unchanged_and_fail_on_mutation() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("main.knot");
+        std::fs::write(&path, "").unwrap();
+        let mut compiler = Compiler::new(&path).unwrap();
+        let doc = Document::parse("```{python}\n#| freeze: [x]\nunchanged\n```".into());
+        let (planned, cache, _) = compiler
+            .plan_and_partial(&doc, "main.knot", Phase0Mode::Pending)
+            .unwrap();
+        let mut exec: Box<dyn KnotExecutor> = Box::new(FakeExecutor {
+            value: "original".into(),
+            calls: Arc::default(),
+        });
+        let chunk = &doc.chunks[0];
+        register_freeze_objects(chunk, &chunk.options.freeze, &mut exec, &cache).unwrap();
+        assert_eq!(cache.lock().unwrap().metadata.freeze_objects.len(), 1);
+        assert!(
+            check_freeze_contract(&planned[0], &mut exec, &cache)
+                .unwrap()
+                .is_none()
+        );
+        let graphics = GraphicsOptions {
+            width: 1.0,
+            height: 1.0,
+            dpi: 72,
+            format: "svg".into(),
+        };
+        exec.execute("mutate", &graphics).unwrap();
+        assert!(
+            check_freeze_contract(&planned[0], &mut exec, &cache)
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn freeze_and_runtime_errors_stop_the_language_chain_without_an_interpreter() {
+        for failing_code in ["mutate", "error"] {
+            let root = tempfile::tempdir().unwrap();
+            let path = root.path().join("main.knot");
+            std::fs::write(&path, "").unwrap();
+            let mut compiler = Compiler::new(&path).unwrap();
+            let doc = Document::parse(format!(
+                "```{{python}}\n#| freeze: [x]\nunchanged\n```\n```{{python}}\n{failing_code}\n```\n```{{python}}\nnever\n```"
+            ));
+            let (planned, cache, _) = compiler
+                .plan_and_partial(&doc, "main.knot", Phase0Mode::Pending)
+                .unwrap();
+            let calls = Arc::new(AtomicUsize::new(0));
+            let exec = Box::new(FakeExecutor {
+                value: "original".into(),
+                calls: Arc::clone(&calls),
+            });
+            let (_, _, output) = crate::compiler::execution::run_language_chain(
+                "python".into(),
+                planned.into_iter().enumerate().collect(),
+                Some(exec),
+                cache,
+                &TypstBackend::new(),
+                &Config::default(),
+                None,
+            )
+            .unwrap();
+            assert_eq!(calls.load(Ordering::SeqCst), 2);
+            assert!(output[1].1.errored);
+            assert!(!output[2].1.errored);
+            assert!(output[2].1.typst_content.contains("inert"));
+        }
+    }
 }

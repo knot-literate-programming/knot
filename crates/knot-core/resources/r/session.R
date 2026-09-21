@@ -7,7 +7,7 @@ save_session <- function(path) {
 
     # Save loaded packages
     packages_path <- sub("\\.RData$", "_packages.rds", path)
-    saveRDS(.packages(), packages_path)
+    saveRDS(list(packages = .packages(), working_directory = getwd()), packages_path)
 
     TRUE
   }, error = function(e) {
@@ -25,10 +25,12 @@ load_session <- function(path) {
     # Restore packages first
     packages_path <- sub("\\.RData$", "_packages.rds", path)
     if (file.exists(packages_path)) {
-      pkgs <- readRDS(packages_path)
+      context <- readRDS(packages_path)
+      setwd(context$working_directory)
+      pkgs <- context$packages
       # Suppress package startup messages
       invisible(lapply(pkgs, function(p) {
-        tryCatch(library(p, character.only = TRUE), error = function(e) {})
+        library(p, character.only = TRUE)
       }))
     }
 

@@ -22,7 +22,7 @@ Options can also be set globally in `knot.toml` under `[chunk-defaults]`,
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `eval` | bool | `true` | If `false`, the chunk is not executed and produces no output. |
-| `cache` | bool | `true` | If `false`, the chunk always re-executes even if its hash has not changed. |
+| `cache` | bool | `true` | If `false`, the chunk and following nodes in its language re-execute on each compilation. |
 | `freeze` | list | `[]` | Object names whose xxHash64 fingerprint must not change after this chunk. See [The Freeze Contract](./introduction.md#the-freeze-contract). |
 
 ## Display control
@@ -92,7 +92,7 @@ Refer to the codly documentation for the full list of available options.
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `depends` | list | `[]` | File paths that, when modified, invalidate this chunk's cache. Useful for chunks that read external files. |
+| `depends` | list | `[]` | File paths relative to the project root that, when modified, invalidate this chunk's cache. Useful for chunks that read external files. |
 
 Example:
 
