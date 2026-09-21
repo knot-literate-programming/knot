@@ -66,12 +66,12 @@ Sys.time()
 
 ## Labels and cross-references
 
-A labeled chunk becomes a referenceable Typst figure when it also has a caption:
+A chunk label is written in the fence header. A caption is an independent
+`caption` option:
 
 ~~~typst
-```{r}
-#| label: fig-histogram
-#| fig-cap: Distribution of simulated data
+```{r fig-histogram}
+#| caption: Distribution of simulated data
 #| show: "output"
 hist(rnorm(500), col = "steelblue")
 typst(current_plot())
@@ -80,8 +80,24 @@ typst(current_plot())
 As shown in @fig-histogram, the distribution is approximately normal.
 ~~~
 
-Without a caption, the label is still emitted as a Typst label but no `#figure`
-wrapper is added.
+Either a label or a caption creates a Typst figure of kind `raw`. A label alone
+allows cross-references without a displayed caption; a caption alone creates a
+figure without a label. A chunk with neither remains an ordinary code/output
+block. Typst controls numbering, for example with `#set figure(numbering: "1")`.
+
+To change the default supplement from "Chunk" to "Fragment", configure the
+rendering functions before the chunks:
+
+```typst
+#let knot-chunk-defaults = (supplement: "Fragment")
+#let code-chunk = code-chunk.with(..knot-chunk-defaults)
+#let knot-replace = code-chunk
+```
+
+The last line applies the same configuration to the default `show: replace`
+renderer. If you use a custom presentation renderer, keep that definition and
+have it call the configured `code-chunk`. Redefining the defaults dictionary
+alone does not change a function that has already captured its original value.
 
 ## Execution order and state
 

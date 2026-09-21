@@ -31,7 +31,7 @@ pub(super) fn register_freeze_objects(
     cache: &Arc<Mutex<Cache>>,
     project_root: &Path,
 ) -> Result<()> {
-    let chunk_name = chunk.name.as_deref().unwrap_or("unnamed").to_string();
+    let chunk_name = chunk.label.as_deref().unwrap_or("unnamed").to_string();
     let cache_dir = project_root.join(Defaults::CACHE_DIR_NAME);
 
     for obj_name in &chunk.options.freeze {
@@ -103,7 +103,7 @@ pub(super) fn check_freeze_contract(
     }
 
     let chunk_name = match &pn.kind {
-        PlannedNodeKind::Chunk { node, .. } => node.name.as_deref().unwrap_or("unnamed"),
+        PlannedNodeKind::Chunk { node, .. } => node.label.as_deref().unwrap_or("unnamed"),
         PlannedNodeKind::Inline { .. } => "inline",
     };
 

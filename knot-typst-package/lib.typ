@@ -14,6 +14,16 @@
 // not document configuration (Codly, figure numbering, etc.).
 // Document configuration belongs in your main.knot file.
 
+/// Default configuration for chunk figure presentation.
+/// Override in your document to change supplement text, e.g.:
+///   #let knot-chunk-defaults = (supplement: "Fragment")
+///   #let code-chunk = code-chunk.with(..knot-chunk-defaults)
+///   #let knot-replace = code-chunk
+/// Rebinding the dictionary alone does not change existing function closures.
+#let knot-chunk-defaults = (
+  supplement: "Chunk",
+)
+
 /// Visual styles for chunk execution states (live preview only — not in final PDF).
 /// These appear during `knot watch --preview` and VS Code preview when chunks are
 /// pending execution, recently modified, or inert due to an upstream error.
@@ -42,6 +52,9 @@
 #let code-chunk(
   code: none,
   output: none,
+  label: none,
+  caption: none,
+  supplement: knot-chunk-defaults.supplement,
   warnings: (),
   errors: (),
   warnings-position: "below", // "below" or "inline"
@@ -171,7 +184,7 @@
   // Warnings below: appended after main-content (inline: already embedded above)
   let below-warnings = if warnings-position == "inline" { () } else { warning-blocks }
 
-  stack(
+  let body = stack(
     dir: ttb,
     spacing: 0.5em,
     main-content,
@@ -187,6 +200,20 @@
       #e
     ]),
   )
+
+  // Wrap in #figure() when a label or caption is provided
+  if label != none or caption != none {
+    let chunk-figure = figure(
+      body,
+      kind: raw,
+      supplement: supplement,
+      caption: caption,
+    )
+    // Labels must be attached in markup, not joined as ordinary return values.
+    if label != none { [#chunk-figure#std.label(label)] } else { chunk-figure }
+  } else {
+    body
+  }
 }
 
 /// Presentation replacement: shows code on overlay 1, output on overlay 2

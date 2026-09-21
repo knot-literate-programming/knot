@@ -211,7 +211,7 @@ impl Compiler {
                     let (chunk_options, resolved_options, merged_codly_options) =
                         resolve_options(&chunk, &self.config, &ChunkExecutionState::Ready);
                     let name = chunk
-                        .name
+                        .label
                         .as_deref()
                         .map(String::from)
                         .unwrap_or_else(|| format!("chunk-{}", chunk.index));
@@ -585,7 +585,7 @@ pub(super) mod test_helpers {
             index: 0,
             language: language.to_string(),
             code: code.to_string(),
-            name,
+            label: name,
             base_indentation: String::new(),
             options: ChunkOptions {
                 eval: Some(eval),

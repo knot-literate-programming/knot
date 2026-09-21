@@ -123,7 +123,7 @@ pub fn parse_document(source: &str) -> Document {
                     chunks.push(Chunk {
                         index: chunk_index,
                         language: lang.to_string(),
-                        name: extract_name(header, n),
+                        label: extract_name(header, n),
                         code,
                         base_indentation: base_indent,
                         options,

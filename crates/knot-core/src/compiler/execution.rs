@@ -337,7 +337,7 @@ fn cache_chunk_error(
     {
         cache.lock().unwrap().save_error(
             chunk.index,
-            chunk.name.clone(),
+            chunk.label.clone(),
             chunk.language.clone(),
             pn.hash.clone(),
             error.clone(),
@@ -358,7 +358,7 @@ fn cache_chunk_result(
     {
         cache.lock().unwrap().save_result(
             chunk.index,
-            chunk.name.clone(),
+            chunk.label.clone(),
             chunk.language.clone(),
             pn.hash.clone(),
             output,

@@ -113,6 +113,9 @@ make it shadow the built-in version.
 |---|---|---|---|
 | `code` | content / none | `none` | Rendered code block |
 | `output` | content / none | `none` | Rendered output block |
+| `label` | string / none | `none` | Identifier attached to the chunk figure for cross-references |
+| `caption` | content / none | `none` | Figure caption, independent of the label |
+| `supplement` | string / content / function / none | `"Chunk"` | Typst figure supplement; configurable with `code-chunk.with(...)` |
 | `warnings` | array | `()` | Warning strings |
 | `errors` | array | `()` | Error strings |
 | `warnings-position` | string | `"below"` | `"below"` or `"inline"` |
@@ -137,6 +140,12 @@ make it shadow the built-in version.
 | `is-modified` | bool | `false` | Live preview: directly edited chunk (amber border) |
 | `is-modified-cascade` | bool | `false` | Live preview: hash-cascaded chunk (muted amber) |
 | `state-styles` | dict | `knot-state-styles` | Live preview style overrides |
+
+Either `label` or `caption` creates a figure of kind `raw`. Without either,
+`code-chunk` returns the code/output content directly. Custom renderers receive
+these arguments and own figure creation and label attachment as well.
+See [Labels and cross-references](./chunks.md#labels-and-cross-references) for
+configuring `knot-chunk-defaults` and binding it to the renderer.
 
 ### Overriding `knot-state-styles`
 

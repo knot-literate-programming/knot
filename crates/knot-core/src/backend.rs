@@ -89,8 +89,7 @@ impl Backend for TypstBackend {
         } else {
             "code-chunk"
         };
-        let call = format!("#{}({})", fn_name, args.join(", "));
-        wrap_with_figure(chunk, &call)
+        format!("#{}({})", fn_name, args.join(", "))
     }
 }
 
@@ -98,14 +97,16 @@ impl Backend for TypstBackend {
 // Private helpers for format_chunk()
 // ---------------------------------------------------------------------------
 
-/// Pushes lang, name/caption, is-inert, and parse errors into `args`.
+/// Pushes lang, label/caption, is-inert, and parse errors into `args`.
 fn push_base_args(chunk: &Chunk, state: &ChunkExecutionState, args: &mut Vec<String>) {
     args.push(format!("lang: \"{}\"", chunk.language));
 
-    if let Some(name) = &chunk.name {
-        args.push(format!("name: \"{}\"", name));
-    } else if let Some(caption) = &chunk.options.caption {
-        // Only pass caption to code-chunk if there is no name wrapper (no figure)
+    if let Some(label) = &chunk.label
+        && !label.trim().is_empty()
+    {
+        args.push(format!("label: \"{}\"", label));
+    }
+    if let Some(caption) = &chunk.options.caption {
         args.push(format!("caption: [{}]", caption));
     }
 
@@ -308,25 +309,6 @@ fn push_presentation_args(resolved_options: &ResolvedChunkOptions, args: &mut Ve
     }
 }
 
-/// Wraps `code_chunk_call` in a #figure() with label when the chunk has a non-empty name.
-fn wrap_with_figure(chunk: &Chunk, code_chunk_call: &str) -> String {
-    if let Some(name) = &chunk.name
-        && !name.trim().is_empty()
-    {
-        let mut figure_args = vec!["kind: raw".to_string(), "supplement: \"Chunk\"".to_string()];
-        if let Some(caption) = &chunk.options.caption {
-            figure_args.push(format!("caption: [{}]", caption));
-        }
-        return format!(
-            "#figure({})[{}]\n <{}>",
-            figure_args.join(", "),
-            code_chunk_call,
-            name.trim()
-        );
-    }
-    code_chunk_call.to_string()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -351,7 +333,7 @@ mod tests {
     fn create_test_chunk(
         language: &str,
         code: &str,
-        name: Option<String>,
+        label: Option<String>,
         show: Show,
         caption: Option<String>,
     ) -> Chunk {
@@ -364,7 +346,7 @@ mod tests {
             index: 0, // Dummy chunk for test/inline contexts
             language: language.to_string(),
             code: code.to_string(),
-            name,
+            label,
             base_indentation: String::new(),
             options: ChunkOptions {
                 eval: Some(true),

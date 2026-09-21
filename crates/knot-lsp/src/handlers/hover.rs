@@ -29,7 +29,7 @@ pub async fn handle_hover(state: &ServerState, params: HoverParams) -> Result<Op
     if let Some(chunk) = current_chunk {
         // Skip fence lines
         if line == chunk.range.start.line || line == chunk.range.end.line {
-            let name = chunk.name.as_deref().unwrap_or("unnamed");
+            let name = chunk.label.as_deref().unwrap_or("unnamed");
             let content = format!(
                 "### Knot Chunk: `{}`\n- **Language**: `{}`",
                 name, chunk.language
