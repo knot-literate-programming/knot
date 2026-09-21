@@ -4,8 +4,7 @@ Options are written as YAML comments at the top of a chunk, one per line,
 prefixed with `#|`:
 
 ~~~typst
-```{r}
-#| label: my-chunk
+```{r my-chunk}
 #| echo: false
 #| fig-width: 6
 plot(1:10)
@@ -44,8 +43,12 @@ one-line setup.
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `label` | string | — | Chunk identifier. Used as a Typst label (`<label>`) for cross-referencing. |
-| `fig-cap` | string | — | Caption for the figure wrapper (enables Typst `#figure`). |
+| `caption` | string | — | Typst content displayed as a figure caption; independent of the label. |
+
+Write the label in the fence header, e.g. ` ```{r my-chunk} `, and refer to it
+with `@my-chunk`. It is not a `#| label:` option. A label or a caption causes
+the chunk to be wrapped as a Typst figure; neither is required for the other.
+See [Labels and cross-references](./chunks.md#labels-and-cross-references).
 
 ## Figure sizing
 

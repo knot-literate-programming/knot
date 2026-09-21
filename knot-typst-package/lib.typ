@@ -17,6 +17,9 @@
 /// Default configuration for chunk figure presentation.
 /// Override in your document to change supplement text, e.g.:
 ///   #let knot-chunk-defaults = (supplement: "Fragment")
+///   #let code-chunk = code-chunk.with(..knot-chunk-defaults)
+///   #let knot-replace = code-chunk
+/// Rebinding the dictionary alone does not change existing function closures.
 #let knot-chunk-defaults = (
   supplement: "Chunk",
 )
@@ -51,6 +54,7 @@
   output: none,
   label: none,
   caption: none,
+  supplement: knot-chunk-defaults.supplement,
   warnings: (),
   errors: (),
   warnings-position: "below", // "below" or "inline"
@@ -199,13 +203,14 @@
 
   // Wrap in #figure() when a label or caption is provided
   if label != none or caption != none {
-    figure(
+    let chunk-figure = figure(
       body,
       kind: raw,
-      supplement: knot-chunk-defaults.supplement,
+      supplement: supplement,
       caption: caption,
     )
-    if label != none { std.label(label) }
+    // Labels must be attached in markup, not joined as ordinary return values.
+    if label != none { [#chunk-figure#std.label(label)] } else { chunk-figure }
   } else {
     body
   }
