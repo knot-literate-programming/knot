@@ -1,86 +1,91 @@
 # Testing
 
-## Running the tests
+## Rust checks
 
 ```bash
-# All unit tests (no R/Python required)
-cargo test --workspace --exclude knot-cli
-
-# Single crate
-cargo test -p knot-core
-
-# Include integration tests (requires R and Python installed)
-cargo test --workspace
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features --locked -- -D warnings
+cargo test --workspace --locked
 ```
 
-`knot-cli` is excluded by default because its integration tests run full
-compilations and require live R and Python installations.
+The default suite includes `knot-cli`. Its project assembly tests do not
+require Typst, R or Python. Tests requiring external interpreters or Typst
+are explicitly ignored in the default run and executed separately below.
 
----
+## R and Python integration tests
+
+Install R with `ggplot2`, `svglite`, `jsonlite` and `digest`, and Python with
+`pandas` and `matplotlib`. The executors launch `R` and `python3` from PATH;
+activate your Python virtual environment before running the tests.
+
+For headless graphics on macOS/Linux:
+
+```bash
+export MPLBACKEND=Agg
+export MPLCONFIGDIR="${TMPDIR:-/tmp}/knot-matplotlib"
+cargo test -p knot-core --locked -- --ignored
+```
+
+On PowerShell, set `$env:MPLBACKEND = 'Agg'` and
+`$env:MPLCONFIGDIR = "$env:TEMP/knot-matplotlib"` before the same Cargo command.
+The writable Matplotlib directory avoids relying on a user-level font cache.
+
+These tests cover interpreter execution, errors, timeouts, figures, tables,
+inline expressions, mixed-language documents and session snapshots.
+
+## CLI and PDF integration tests
+
+```bash
+# Project assembly, including missing/out-of-root includes: no Typst needed
+cargo test -p knot-cli --locked --test integration_build
+
+# Actual knot build subprocess, PDF output and invalid Typst: Typst required
+cargo test -p knot-cli --locked --test integration_pdf -- --ignored
+```
+
+PDF tests use plain Typst documents and require neither R/Python nor downloads
+of Typst packages. CI installs Typst 0.15.1 explicitly for this step.
+
+## VS Code extension
+
+From `editors/vscode`:
+
+```bash
+npm ci
+npm run typecheck
+npm run lint
+npm run compile
+npm exec -- vsce package --out test.vsix
+```
+
+Bundling with esbuild does not check types. `typecheck` runs `tsc --noEmit`,
+and the packaging prepublish hook also checks types before producing a VSIX.
+The packager comes from the project's locked dependencies.
 
 ## Snapshot tests
 
-`knot-core`'s backend tests use [insta](https://insta.rs) for snapshot testing.
-All snapshots live in `crates/knot-core/src/snapshots/` and
+Backend and assembler snapshots use `insta` and live under
+`crates/knot-core/src/snapshots/` and
 `crates/knot-core/src/compiler/snapshots/`.
 
-### Running and updating
-
 ```bash
-# Run snapshot tests normally
-cargo test -p knot-core
-
-# Regenerate all snapshots after intentional changes
-INSTA_UPDATE=always cargo test -p knot-core
-
-# Review pending snapshot changes interactively
+cargo test -p knot-core --locked
+# Only after an intentional output change:
+INSTA_UPDATE=always cargo test -p knot-core --locked
 cargo insta review
 ```
 
-When you add a new test using `assert_snapshot!`:
+Review changed snapshots before committing them; do not regenerate snapshots
+just to hide a test failure.
 
-1. Write the test with the `assert_snapshot!` call.
-2. Run `INSTA_UPDATE=always cargo test -p knot-core` once.
-3. Verify the generated `.snap` file looks correct.
-4. Commit both the test and the `.snap` file.
+## CI and remaining limits
 
-### What to snapshot test
+CI runs workspace tests, R/Python integration tests and CLI PDF tests on Linux,
+macOS and Windows. It records runtime and dependency versions. Rust formatting
+and Clippy run on Linux, as do extension type checks, lint, bundling and packaging.
 
-- Any function in `backend.rs` that produces `.typ` text.
-- Any assembler output in `compiler/mod.rs`.
-- Parser output for representative inputs.
-
----
-
-## Integration tests
-
-Integration tests in `knot-cli/tests/` compile actual `.knot` documents and
-verify the output. They are marked `#[ignore]` so they do not run in CI (which
-does not have R or Python). Run them manually:
-
-```bash
-cargo test -p knot-cli -- --ignored
-```
-
----
-
-## Test organisation conventions
-
-- Test functions are named `<thing>_should_<expectation_when_condition>`, for
-  example `format_chunk_should_omit_stroke_when_no_border_option`.
-- Each test has one assertion (or one `assert_snapshot!` call).
-- Tests that require external tools are `#[ignore]` with a comment explaining
-  the dependency.
-
----
-
-## Current coverage gaps
-
-The most critical gap (tracked as Technical Debt A in the master plan) is that
-the R and Python executor code paths are covered only by `#[ignore]` tests.
-The execution pipeline itself — `pipeline.rs`, `execution.rs`, `freeze.rs` —
-is exercised only by integration tests.
-
-If you add new execution logic, consider whether it can be tested with a mock
-executor that returns fixed `ExecutionAttempt` values without spawning a
-real interpreter.
+Two ignored `knot-lsp` tests require Tinymist and are not part of this CI suite.
+Neither the default tests nor VSIX packaging validate an interactive VS Code
+preview session. Concurrent editor updates and navigation still need dedicated
+coverage. Interpreter versions and R/Python package versions are recorded, but
+are not all pinned; consult the CI logs when investigating a regression.
