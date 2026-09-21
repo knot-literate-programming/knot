@@ -413,6 +413,19 @@ fn planning_classifies_hits_misses_skips_and_cascade_without_interpreters() {
         hits(&plan(&mut compiler, &changed)),
         [false, false, true, false]
     );
+    let relabeled = format!(
+        "```{{python}}\n#| eval: false\npass\n```\n{}",
+        source.replacen("{python}", "{python renamed}", 1)
+    );
+    compile(&mut compiler, &relabeled);
+    let stored = cache(root.path(), &path);
+    let entry = stored
+        .metadata
+        .chunks
+        .iter()
+        .find(|entry| entry.name.as_deref() == Some("renamed"))
+        .unwrap();
+    assert_eq!(entry.index, Document::parse(relabeled).chunks[1].index);
 }
 
 #[test]

@@ -308,14 +308,19 @@ impl Compiler {
         {
             let mut cache = cache.lock().unwrap();
             cache.metadata.freeze_objects.clear();
-            cache.metadata.chunks.retain(|entry| {
-                planned.iter().any(|node| {
-                    node.hash == entry.hash
-                        && matches!(
-                            node.need,
-                            ExecutionNeed::CacheHit(_) | ExecutionNeed::CacheHitInline(_)
-                        )
-                })
+            cache.metadata.chunks.retain_mut(|entry| {
+                let Some(node) = planned.iter().find(|node| {
+                    node.hash == entry.hash && matches!(node.need, ExecutionNeed::CacheHit(_))
+                }) else {
+                    return false;
+                };
+                if let PlannedNodeKind::Chunk { node: chunk, .. } = &node.kind {
+                    // Labels and skipped chunks can change without changing the
+                    // execution hash. Keep editor diagnostics aligned with the AST.
+                    entry.index = chunk.index;
+                    entry.name.clone_from(&chunk.label);
+                }
+                true
             });
             cache.metadata.inline_expressions.retain(|entry| {
                 planned.iter().any(|node| {
