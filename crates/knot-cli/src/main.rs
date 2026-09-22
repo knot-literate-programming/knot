@@ -57,15 +57,21 @@ enum Commands {
         /// Open the source file in the editor (VS Code)
         #[arg(long)]
         open: bool,
+        /// Return an unambiguous JSON location for editor integrations
+        #[arg(long, conflicts_with = "open")]
+        json: bool,
     },
     /// Map a line in a .knot source back to the compiled .typ file
     JumpToTyp {
-        /// The compiled .typ file
+        /// The compiled .typ file, or project directory to locate its configured output
         typ_file: PathBuf,
         /// The .knot source file (path relative to project root)
         knot_file: String,
         /// The 1-indexed line number in the .knot file
         line: usize,
+        /// Return the generated file path and line as JSON
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -102,15 +108,21 @@ fn main() -> Result<()> {
                 println!("Feature: recursive formatting coming soon. Please specify a file.");
             }
         }
-        Commands::JumpToSource { file, line, open } => {
-            jump_to_source(file, *line, *open)?;
+        Commands::JumpToSource {
+            file,
+            line,
+            open,
+            json,
+        } => {
+            jump_to_source(file, *line, *open, *json)?;
         }
         Commands::JumpToTyp {
             typ_file,
             knot_file,
             line,
+            json,
         } => {
-            jump_to_typ(typ_file, knot_file, *line)?;
+            jump_to_typ(typ_file, knot_file, *line, *json)?;
         }
     }
 
@@ -118,16 +130,17 @@ fn main() -> Result<()> {
 }
 
 /// Map a line in a compiled .typ file back to its .knot source
-fn jump_to_source(typ_file: &PathBuf, typ_line: usize, open: bool) -> Result<()> {
+fn jump_to_source(typ_file: &PathBuf, typ_line: usize, open: bool, json: bool) -> Result<()> {
     use knot_core::config::Config;
     use knot_core::sync;
 
     let content = fs::read_to_string(typ_file)
         .with_context(|| format!("Failed to read .typ file: {:?}", typ_file))?;
 
-    let project_root = Config::find_project_root(typ_file)?;
+    let project_root = Config::find_project_root(typ_file)?.canonicalize()?;
     let blocks = sync::parse_knot_markers(&content);
 
+    anyhow::ensure!(typ_line > 0, "Line numbers start at 1");
     // typ_line is 1-indexed from CLI/viewers, convert to 0-indexed for the mapper
     if let Some((knot_path, knot_line)) =
         sync::map_typ_line_to_knot(typ_line.saturating_sub(1), &blocks, &project_root)
@@ -146,6 +159,11 @@ fn jump_to_source(typ_file: &PathBuf, typ_line: usize, open: bool) -> Result<()>
             if !status.success() {
                 anyhow::bail!("Editor command failed.");
             }
+        } else if json {
+            println!(
+                "{}",
+                serde_json::json!({"file":knot_path, "line":knot_line + 1})
+            );
         } else {
             // Output format: file:line (1-indexed for IDEs)
             println!("{}", target);
@@ -158,14 +176,26 @@ fn jump_to_source(typ_file: &PathBuf, typ_line: usize, open: bool) -> Result<()>
 }
 
 /// Map a line in a .knot source back to the compiled .typ file
-fn jump_to_typ(typ_file: &PathBuf, knot_file: &str, knot_line: usize) -> Result<()> {
+fn jump_to_typ(typ_file: &PathBuf, knot_file: &str, knot_line: usize, json: bool) -> Result<()> {
     use knot_core::config::Config;
     use knot_core::sync;
 
-    let content = fs::read_to_string(typ_file)
+    anyhow::ensure!(knot_line > 0, "Line numbers start at 1");
+    let resolved;
+    let typ_file = if typ_file.is_dir() {
+        let (config, root) = Config::find_and_load(typ_file)?;
+        resolved = knot_core::ProjectPaths::resolve(&config, &root)?.main_typ_path;
+        &resolved
+    } else {
+        typ_file
+    };
+    let typ_file = typ_file
+        .canonicalize()
+        .with_context(|| format!("Compiled file not found: {}", typ_file.display()))?;
+    let content = fs::read_to_string(&typ_file)
         .with_context(|| format!("Failed to read .typ file: {:?}", typ_file))?;
 
-    let project_root = Config::find_project_root(typ_file)?;
+    let project_root = Config::find_project_root(&typ_file)?.canonicalize()?;
     let blocks = sync::parse_knot_markers(&content);
     let knot_file_path = project_root.join(knot_file);
 
@@ -177,7 +207,14 @@ fn jump_to_typ(typ_file: &PathBuf, knot_file: &str, knot_line: usize) -> Result<
         &knot_file_path,
     ) {
         // Output format: line (1-indexed)
-        println!("{}", typ_line + 1);
+        if json {
+            println!(
+                "{}",
+                serde_json::json!({"file":typ_file,"line":typ_line + 1})
+            );
+        } else {
+            println!("{}", typ_line + 1);
+        }
     } else {
         anyhow::bail!(
             "Could not map {}:{} to the compiled .typ file.",

@@ -72,7 +72,7 @@ With `--check`, exits with a non-zero status if the file would be reformatted
 ## knot jump-to-source
 
 ```bash
-knot jump-to-source <main.typ> <line> [--open]
+knot jump-to-source <main.typ> <line> [--open | --json]
 ```
 
 Maps a line number in the compiled `.typ` file back to the corresponding line in
@@ -85,10 +85,20 @@ Used internally by the VS Code extension for backward sync (PDF → source).
 ## knot jump-to-typ
 
 ```bash
-knot jump-to-typ <main.typ> <file.knot> <line>
+knot jump-to-typ <main.typ-or-project-directory> <file.knot> <line> [--json]
 ```
 
 Maps a line number in a `.knot` source file to the corresponding line in the
 compiled `.typ` file. Prints the line number to stdout.
 
-Used internally by the VS Code extension for forward sync (source → PDF).
+A project directory resolves the generated file using `document.main` from
+`knot.toml`, including when the main source is in a subdirectory. The source
+argument is relative to the project root.
+
+Both commands accept **1-based** line numbers. With `--json`, stdout contains
+`{"file":"absolute path","line":12}`. The extension uses this structured format
+to preserve spaces, Unicode and Windows drive letters. Without it, the text
+formats above remain unchanged. Unmapped positions return a non-zero exit code.
+
+Used by the VS Code command for source → generated Typst navigation; automatic
+source → PDF scrolling uses the LSP and the same core line mapper.

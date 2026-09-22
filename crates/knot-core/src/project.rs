@@ -210,9 +210,10 @@ fn assemble_project_typ(
     main_content: &str,
     main_file_name: &str,
     includes_content: &str,
-    placeholder_line: usize,
+    main_source: &str,
     config: &Config,
 ) -> Result<String> {
+    let placeholder_line = find_placeholder_line(main_source);
     // 1. Inject includes.
     let mut assembled = if !includes_content.is_empty() {
         if !main_content.contains("/* KNOT-INJECT-CHAPTERS */") {
@@ -220,10 +221,10 @@ fn assemble_project_typ(
                 "\n// #KNOT-INJECTION-START line={placeholder_line}\n{}\n// #KNOT-INJECTION-END\n",
                 includes_content.trim()
             );
-            format!("{}{}", main_content.trim_end(), wrapped)
+            format!("{main_content}{wrapped}")
         } else {
             let wrapped = format!(
-                "// #KNOT-INJECTION-START line={placeholder_line}\n{}\n// #KNOT-INJECTION-END\n",
+                "// #KNOT-INJECTION-START line={placeholder_line}\n{}\n// #KNOT-INJECTION-END",
                 includes_content.trim()
             );
             main_content.replace("/* KNOT-INJECT-CHAPTERS */", &wrapped)
@@ -245,9 +246,10 @@ fn assemble_project_typ(
 
     // 3. Prepend the inlined lib.typ, then wrap with BEGIN-FILE / END-FILE.
     Ok(format!(
-        "{}\n// BEGIN-FILE {main_file_name}\n{}\n// END-FILE {main_file_name}\n",
+        "{}\n{}\n{}",
+        crate::sync::GENERATED_MARKER,
         crate::LIB_TYP.trim_end(),
-        assembled.trim()
+        crate::sync::wrap_source(&assembled, main_file_name, main_source.lines().count())
     ))
 }
 

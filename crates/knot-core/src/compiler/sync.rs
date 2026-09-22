@@ -1,160 +1,161 @@
-//! Bidirectional source ↔ PDF navigation.
+//! Line-based navigation using source ranges captured during compilation.
 //!
-//! The compiler embeds `#KNOT-SYNC` markers in the assembled `.typ` output.
-//! This module parses those markers and maps line numbers in both directions:
-//! `.typ` → `.knot` ([`map_typ_line_to_knot`]) and `.knot` → `.typ` ([`map_knot_line_to_typ`]).
+//! New output records source lengths and replaced ranges, so navigation does not
+//! depend on a source file that may have changed since the preview was built.
 
 use once_cell::sync::Lazy;
 use regex::Regex;
-use std::fs;
 use std::path::{Path, PathBuf};
 
-static BEGIN_FILE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\s*// BEGIN-FILE (.+)$").unwrap());
-static END_FILE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\s*// END-FILE (.+)$").unwrap());
+/// First line of generated Typst documents; independent of library size or chunks.
+pub const GENERATED_MARKER: &str = "// #KNOT-GENERATED version=1";
+
+/// Wrap a source's output without trimming meaningful leading/trailing lines.
+pub fn wrap_source(content: &str, file: &str, source_lines: usize) -> String {
+    let separator = if content.is_empty() || content.ends_with('\n') {
+        ""
+    } else {
+        "\n"
+    };
+    format!("// BEGIN-FILE {file}\n{content}{separator}// END-FILE {file} lines={source_lines}\n")
+}
+
+static BEGIN_FILE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^// BEGIN-FILE (.+)$").unwrap());
+static END_FILE_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^// END-FILE (.+?)(?: lines=(\d+))?$").unwrap());
 static SYNC_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^\s*// #KNOT-SYNC source=(\S+) line=(\d+)$").unwrap());
+    Lazy::new(|| Regex::new(r"^\s*// #KNOT-SYNC source=(.+) line=(\d+)(?: end=(\d+))?$").unwrap());
 static INJECTION_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^\s*// #KNOT-INJECTION-START line=(\d+)$").unwrap());
 
-/// A `#KNOT-SYNC` marker anchoring a code chunk in the `.typ` output.
+/// A replaced source range and its generated line range (including its markers).
 #[derive(Debug, Clone)]
 pub struct ChunkMarker {
-    /// Source `.knot` file path (relative to project root).
+    /// Project-relative source name, or `INJECTION` for included content.
     pub source: String,
-    /// 1-based line in the `.knot` file where this chunk starts.
+    /// First source line, 1-based.
     pub knot_line: usize,
-    /// 0-based line in the `.typ` file where this chunk's output begins.
+    /// Last source line, 1-based; absent in older generated files.
+    pub source_end_line: Option<usize>,
+    /// First generated line, 0-based.
     pub start_line: usize,
-    /// 0-based line in the `.typ` file where this chunk's output ends.
+    /// Last generated line, 0-based.
     pub end_line: usize,
+    /// First generated content line (after the opening marker for fenced chunks).
+    pub content_line: usize,
 }
 
-/// A `BEGIN-FILE` / `END-FILE` block in the assembled `.typ`, corresponding to one `.knot` file.
+/// A source file in the assembled document. Includes form nested blocks.
 #[derive(Debug, Clone)]
 pub struct FileBlock {
-    /// Relative path of the `.knot` source file.
+    /// Source path relative to the project root.
     pub file: String,
-    /// 0-based line in the `.typ` file where this block starts.
+    /// Opening marker's line, 0-based.
     pub start_line: usize,
-    /// 0-based line in the `.typ` file where this block ends.
+    /// Closing marker's line, 0-based.
     pub end_line: usize,
-    /// All chunk markers within this block, in document order.
+    /// Source length at compilation time; absent in legacy output.
+    pub source_lines: Option<usize>,
+    /// Replaced ranges in generated order.
     pub chunks: Vec<ChunkMarker>,
 }
 
-/// Parse all `#KNOT-SYNC` / `BEGIN-FILE` / `END-FILE` markers from an assembled `.typ` string.
-pub fn parse_knot_markers(content: &str) -> Vec<FileBlock> {
-    let mut finished_blocks = Vec::new();
-    let mut block_stack: Vec<FileBlock> = Vec::new();
-    let mut current_chunk: Option<ChunkMarker> = None;
+struct Frame {
+    block: FileBlock,
+    pending: Option<ChunkMarker>,
+}
+impl Frame {
+    fn finish_range(&mut self, end_line: usize) {
+        if let Some(mut range) = self.pending.take() {
+            range.end_line = end_line;
+            self.block.chunks.push(range);
+        }
+    }
+}
 
-    for (i, line) in content.lines().enumerate() {
+/// Parse generated markers. Incomplete file blocks are never used for navigation.
+pub fn parse_knot_markers(content: &str) -> Vec<FileBlock> {
+    let mut blocks = Vec::new();
+    let mut stack: Vec<Frame> = Vec::new();
+    for (line_number, line) in content.lines().enumerate() {
         if let Some(caps) = BEGIN_FILE_RE.captures(line) {
-            let filename = caps[1].trim().to_string();
-            if let Some(parent) = block_stack.last_mut()
-                && let Some(chunk) = current_chunk.take()
-            {
-                parent.chunks.push(chunk);
-            }
-            block_stack.push(FileBlock {
-                file: filename,
-                start_line: i,
-                end_line: 0,
-                chunks: Vec::new(),
+            stack.push(Frame {
+                block: FileBlock {
+                    file: caps[1].into(),
+                    start_line: line_number,
+                    end_line: 0,
+                    source_lines: None,
+                    chunks: Vec::new(),
+                },
+                pending: None,
             });
             continue;
         }
-
         if let Some(caps) = END_FILE_RE.captures(line) {
-            let filename = caps[1].trim().to_string();
-            if let Some(mut block) = block_stack.pop() {
-                if block.file == filename {
-                    if let Some(chunk) = current_chunk.take() {
-                        block.chunks.push(chunk);
-                    }
-                    block.end_line = i;
-                    if let Some(parent) = block_stack.last_mut() {
-                        parent.chunks.push(ChunkMarker {
-                            source: block.file.clone(),
-                            knot_line: 0, // 0 = standard include
-                            start_line: block.start_line,
-                            end_line: block.end_line,
-                        });
-                    }
-                    finished_blocks.push(block);
-                } else {
-                    block_stack.push(block);
-                }
+            if stack
+                .last()
+                .is_some_and(|frame| frame.block.file == caps[1])
+                && let Some(mut frame) = stack.pop()
+            {
+                frame.block.end_line = line_number;
+                frame.block.source_lines = caps.get(2).and_then(|n| n.as_str().parse().ok());
+                blocks.push(frame.block);
             }
             continue;
         }
-
-        if let Some(caps) = INJECTION_RE.captures(line) {
-            let line_num = caps[1].parse().unwrap_or(1);
-            if let Some(block) = block_stack.last_mut() {
-                if let Some(chunk) = current_chunk.take() {
-                    block.chunks.push(chunk);
-                }
-                // Mark the start of an injection block in main.knot
-                current_chunk = Some(ChunkMarker {
-                    source: "INJECTION".to_string(),
-                    knot_line: line_num,
-                    start_line: i,
-                    end_line: 0,
-                });
-            }
+        let Some(frame) = stack.last_mut() else {
             continue;
-        }
-
-        if line.trim_end() == "// #KNOT-INJECTION-END" {
-            if let Some(block) = block_stack.last_mut() {
-                if let Some(mut chunk) = current_chunk.take() {
-                    chunk.end_line = i;
-                    block.chunks.push(chunk);
-                } else {
-                    // A BEGIN-FILE inside this injection already took the chunk from
-                    // current_chunk and pushed it with end_line=0. Fix it now.
-                    if let Some(inj) = block
-                        .chunks
-                        .iter_mut()
-                        .rev()
-                        .find(|c| c.source == "INJECTION" && c.end_line == 0)
-                    {
-                        inj.end_line = i;
-                    }
-                }
-            }
-            continue;
-        }
-
+        };
         if let Some(caps) = SYNC_RE.captures(line) {
-            if let Some(block) = block_stack.last_mut() {
-                if let Some(chunk) = current_chunk.take() {
-                    block.chunks.push(chunk);
-                }
-                current_chunk = Some(ChunkMarker {
-                    source: caps[1].to_string(),
-                    knot_line: caps[2].parse().unwrap_or(1),
-                    start_line: i,
-                    end_line: 0,
-                });
-            }
-            continue;
-        }
-
-        if line.trim_end() == "// END-KNOT-SYNC"
-            && let (Some(block), Some(mut chunk)) = (block_stack.last_mut(), current_chunk.take())
-        {
-            chunk.end_line = i;
-            block.chunks.push(chunk);
+            frame.pending = Some(ChunkMarker {
+                source: caps[1].into(),
+                knot_line: caps[2].parse().unwrap_or(0),
+                source_end_line: caps.get(3).and_then(|n| n.as_str().parse().ok()),
+                start_line: line_number,
+                end_line: line_number,
+                content_line: line_number + 1,
+            });
+        } else if let Some(caps) = INJECTION_RE.captures(line) {
+            let knot_line = caps[1].parse().unwrap_or(0);
+            frame.pending = Some(ChunkMarker {
+                source: "INJECTION".into(),
+                knot_line,
+                source_end_line: Some(knot_line),
+                start_line: line_number,
+                end_line: line_number,
+                content_line: line_number,
+            });
+        } else if matches!(line.trim(), "// END-KNOT-SYNC" | "// #KNOT-INJECTION-END") {
+            frame.finish_range(line_number);
         }
     }
-    finished_blocks
+    blocks
 }
 
-/// Map a 0-based `.typ` line number to its origin `.knot` file and 0-based line.
-///
-/// Returns `None` if the line falls inside an injected region with no stable source mapping.
+fn source_length(block: &FileBlock, path: &Path) -> Option<usize> {
+    block.source_lines.or_else(|| {
+        std::fs::read_to_string(path)
+            .ok()
+            .map(|s| s.lines().count())
+    })
+}
+
+// Older files did not record the end of each replaced source range. Keep their
+// best-effort inference isolated; current output never needs disk contents.
+fn source_end(block: &FileBlock, index: usize, path: &Path) -> Option<usize> {
+    let range = &block.chunks[index];
+    range.source_end_line.or_else(|| {
+        if let Some(next) = block.chunks.get(index + 1) {
+            let verbatim = next.start_line.checked_sub(range.end_line + 1)?;
+            next.knot_line.checked_sub(verbatim + 1)
+        } else {
+            source_length(block, path)?.checked_sub(block.end_line.checked_sub(range.end_line + 1)?)
+        }
+    })
+}
+
+/// Map a generated line to a source line (both 0-based).
+/// Library code, include-injection markers and out-of-range lines have no target.
 pub fn map_typ_line_to_knot(
     typ_line: usize,
     blocks: &[FileBlock],
@@ -162,131 +163,66 @@ pub fn map_typ_line_to_knot(
 ) -> Option<(PathBuf, usize)> {
     let block = blocks
         .iter()
-        .find(|b| typ_line >= b.start_line && typ_line <= b.end_line)?;
-    let knot_file = project_root.join(&block.file);
-
-    if typ_line == block.start_line {
-        return Some((knot_file, 0));
-    }
-
-    let containing_chunk = block
-        .chunks
-        .iter()
-        .find(|c| typ_line >= c.start_line && typ_line <= c.end_line);
-    if let Some(chunk) = containing_chunk {
-        if chunk.knot_line > 0 && chunk.source != "INJECTION" {
-            return Some((knot_file, chunk.knot_line.saturating_sub(1)));
+        .filter(|b| typ_line > b.start_line && typ_line < b.end_line)
+        .min_by_key(|b| b.end_line - b.start_line)?;
+    let path = project_root.join(block.file.replace('\\', "/"));
+    let mut source_line = typ_line - block.start_line - 1;
+    for (index, range) in block.chunks.iter().enumerate() {
+        if typ_line < range.start_line {
+            break;
         }
-        return None; // Inside injection: let the inner block handle it
+        if typ_line <= range.end_line {
+            return (range.source != "INJECTION" && range.knot_line > 0)
+                .then(|| (path, range.knot_line - 1));
+        }
+        source_line = source_end(block, index, &path)? + typ_line - range.end_line - 1;
     }
-
-    // Next Reference Point: Next Chunk, Next Injection, or End of File
-    let next_marker = block
-        .chunks
-        .iter()
-        .find(|c| c.start_line > typ_line && c.knot_line > 0);
-
-    if let Some(next) = next_marker {
-        let delta = next.start_line.saturating_sub(typ_line);
-        return Some((
-            knot_file,
-            next.knot_line.saturating_sub(1).saturating_sub(delta),
-        ));
+    if source_length(block, &path).is_some_and(|length| source_line >= length) {
+        return None;
     }
-
-    // End of file reference
-    if let Ok(content) = fs::read_to_string(&knot_file) {
-        let total_knot_lines = content.lines().count();
-        let delta_from_end = block.end_line.saturating_sub(typ_line);
-        return Some((knot_file, total_knot_lines.saturating_sub(delta_from_end)));
-    }
-
-    Some((
-        knot_file,
-        typ_line.saturating_sub(block.start_line).saturating_sub(1),
-    ))
+    Some((path, source_line))
 }
 
-/// Map a 0-based `.knot` line number to its corresponding 0-based `.typ` line.
-///
-/// Returns `None` if no mapping can be established (e.g. file not found in blocks).
+fn normalized_name(name: &str) -> String {
+    name.replace('\\', "/")
+        .split('/')
+        .filter(|part| !part.is_empty() && *part != ".")
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// Map a source line to generated content (both 0-based).
+/// Every line within a code chunk maps to its rendered block.
+/// No source file read is needed for current-format output.
 pub fn map_knot_line_to_typ(
     knot_file: &str,
     knot_line: usize,
     blocks: &[FileBlock],
     knot_file_path: &Path,
 ) -> Option<usize> {
-    let block = blocks.iter().find(|b| b.file == knot_file)?;
-    let chunks = &block.chunks;
-
-    if chunks.is_empty() {
-        return Some(block.start_line.saturating_add(1).saturating_add(knot_line));
-    }
-
-    let first_real = chunks.iter().find(|c| c.knot_line > 0);
-    if let Some(first) = first_real
-        && knot_line < first.knot_line.saturating_sub(1)
-    {
-        return Some(block.start_line.saturating_add(1).saturating_add(knot_line));
-    }
-
-    for k in 0..chunks.len() {
-        if chunks[k].knot_line == 0 {
-            continue;
-        }
-
-        let mut next_real = None;
-        for next in chunks.iter().skip(k + 1) {
-            if next.knot_line > 0 {
-                next_real = Some(next);
-                break;
-            }
-        }
-
-        let close_fence = if let Some(next) = next_real {
-            let verbatim_typ_lines = next
-                .start_line
-                .saturating_sub(chunks[k].end_line)
-                .saturating_sub(1);
-            next.knot_line
-                .saturating_sub(2)
-                .saturating_sub(verbatim_typ_lines)
-        } else if let Ok(content) = fs::read_to_string(knot_file_path) {
-            let total_knot_lines = content.lines().count();
-            let verbatim_after_in_typ = block
-                .end_line
-                .saturating_sub(1)
-                .saturating_sub(chunks[k].end_line);
-            total_knot_lines
-                .saturating_sub(1)
-                .saturating_sub(verbatim_after_in_typ)
+    let name = normalized_name(knot_file);
+    let block = blocks.iter().find(|block| {
+        let candidate = normalized_name(&block.file);
+        if cfg!(windows) {
+            candidate.eq_ignore_ascii_case(&name)
         } else {
-            chunks[k].knot_line
-        };
-
-        if knot_line <= close_fence {
-            return Some(chunks[k].start_line.saturating_add(1));
+            candidate == name
         }
-
-        let verbatim_start = close_fence.saturating_add(1);
-        if let Some(next) = next_real {
-            if knot_line < next.knot_line.saturating_sub(1) {
-                return Some(
-                    chunks[k]
-                        .end_line
-                        .saturating_add(1)
-                        .saturating_add(knot_line.saturating_sub(verbatim_start)),
-                );
-            }
-        } else {
-            return Some(
-                chunks[k]
-                    .end_line
-                    .saturating_add(1)
-                    .saturating_add(knot_line.saturating_sub(verbatim_start)),
-            );
-        }
+    })?;
+    if source_length(block, knot_file_path).is_some_and(|length| knot_line >= length) {
+        return None;
     }
-
-    Some(block.start_line.saturating_add(1).saturating_add(knot_line))
+    let mut typ_line = block.start_line + 1 + knot_line;
+    for (index, range) in block.chunks.iter().enumerate() {
+        let start = range.knot_line.checked_sub(1)?;
+        if knot_line < start {
+            break;
+        }
+        let end = source_end(block, index, knot_file_path)?;
+        if knot_line < end {
+            return (range.source != "INJECTION").then_some(range.content_line);
+        }
+        typ_line = range.end_line + 1 + knot_line.checked_sub(end)?;
+    }
+    (typ_line < block.end_line).then_some(typ_line)
 }

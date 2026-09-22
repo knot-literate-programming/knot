@@ -79,7 +79,15 @@ pub fn compile_to_string(file: &Path, compiler: &mut Compiler) -> Result<(String
         parent.join(format!(".{}.typ", stem.to_string_lossy()))
     };
 
-    let fixed_source = knot_core::fix_paths_in_typst(&typst_source, &typ_output_path)?;
+    let root = knot_core::Config::find_project_root(file)?.canonicalize()?;
+    let file = file.canonicalize()?;
+    let source_name = file.strip_prefix(&root).unwrap_or(&file).to_string_lossy();
+    let wrapped = format!(
+        "{}\n{}",
+        knot_core::sync::GENERATED_MARKER,
+        knot_core::sync::wrap_source(&typst_source, &source_name, doc.source.lines().count())
+    );
+    let fixed_source = knot_core::fix_paths_in_typst(&wrapped, &typ_output_path)?;
     Ok((fixed_source, typ_output_path))
 }
 

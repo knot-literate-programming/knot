@@ -446,8 +446,14 @@ pub fn assemble_pass(executed: &[ExecutedNode], source: &str, source_file: &str)
 
         if node.is_chunk {
             output.push_str(&format!(
-                "// #KNOT-SYNC source={} line={}\n",
-                source_file, node.source_line,
+                "// #KNOT-SYNC source={} line={} end={}\n",
+                source_file,
+                node.source_line,
+                source[..node.source_end]
+                    .bytes()
+                    .filter(|b| *b == b'\n')
+                    .count()
+                    + 1,
             ));
             output.push_str(&node.typst_content);
             if !node.typst_content.is_empty() && !node.typst_content.ends_with('\n') {
@@ -460,8 +466,12 @@ pub fn assemble_pass(executed: &[ExecutedNode], source: &str, source_file: &str)
 
         // Advance past the closing fence's trailing newline for chunks.
         last_pos = node.source_end;
-        if node.is_chunk && last_pos < source.len() && source.as_bytes()[last_pos] == b'\n' {
-            last_pos += 1;
+        if node.is_chunk {
+            if source[last_pos..].starts_with("\r\n") {
+                last_pos += 2;
+            } else if source[last_pos..].starts_with('\n') {
+                last_pos += 1;
+            }
         }
     }
 
@@ -723,7 +733,7 @@ mod tests {
         let node = make_executed_node(0, chunk_end, "#code-chunk()", true, 1);
         let result = assemble_pass(&[node], source, "test.knot");
         assert!(
-            result.contains("// #KNOT-SYNC source=test.knot line=1\n"),
+            result.contains("// #KNOT-SYNC source=test.knot line=1 end=3\n"),
             "Missing opening sync marker, got:\n{result}"
         );
         assert!(
