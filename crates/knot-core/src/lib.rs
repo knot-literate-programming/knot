@@ -37,8 +37,8 @@ pub use defaults::Defaults;
 pub use graphics::{GraphicsDefaults, ResolvedGraphicsOptions, resolve_graphics_options};
 pub use parser::{Chunk, ChunkOptions, Document, InlineExpr, ResolvedChunkOptions};
 pub use project::{
-    ProjectOutput, compile_project_full, compile_project_phase0, compile_project_phase0_unsaved,
-    fix_paths_in_typst,
+    ProjectOutput, ProjectPaths, compile_project_full, compile_project_phase0,
+    compile_project_phase0_unsaved, fix_paths_in_typst,
 };
 
 /// Typst library embedded in the binary, prepended to every assembled `.typ` file.

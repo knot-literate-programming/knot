@@ -283,22 +283,11 @@ fn watch_setup() -> Result<(PathBuf, Vec<PathBuf>, PathBuf)> {
     let current_dir = std::env::current_dir().context("Failed to get current directory")?;
     let (config, project_root) = Config::find_and_load(&current_dir)?;
 
-    let main_file_name = config.document.main.clone().ok_or_else(|| {
-        anyhow::anyhow!(
-            "No 'main' file specified in knot.toml.\n\
-             Add: [document]\n     main = \"main.knot\""
-        )
-    })?;
-
-    let main_file = project_root.join(&main_file_name);
-    if !main_file.exists() {
-        anyhow::bail!(
-            "Main file not found: {:?}\n\
-             Specified in knot.toml as: {}",
-            main_file,
-            main_file_name
-        );
-    }
+    let knot_core::ProjectPaths {
+        main_file,
+        main_typ_path,
+        ..
+    } = knot_core::ProjectPaths::resolve(&config, &project_root)?;
 
     info!("📄 Main file: {}", main_file.display());
     info!("📁 Project root: {}", project_root.display());
@@ -310,14 +299,7 @@ fn watch_setup() -> Result<(PathBuf, Vec<PathBuf>, PathBuf)> {
         info!("   - {}", file.display());
     }
 
-    let typ_output_path = {
-        let stem = main_file
-            .file_stem()
-            .unwrap_or(std::ffi::OsStr::new("main"));
-        project_root.join(format!("{}.typ", stem.to_string_lossy()))
-    };
-
-    Ok((project_root, watched_files, typ_output_path))
+    Ok((project_root, watched_files, main_typ_path))
 }
 
 /// Collects the list of files that should trigger a rebuild when changed.

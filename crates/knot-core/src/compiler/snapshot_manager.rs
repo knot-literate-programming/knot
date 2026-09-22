@@ -3,7 +3,7 @@
 
 use crate::cache::{Cache, SnapshotEntry, hashing::hash_file};
 use crate::executors::KnotExecutor;
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use std::collections::HashMap;
 
 pub struct SnapshotManager {
@@ -57,19 +57,9 @@ impl SnapshotManager {
         let Some(exec) = self.exec.as_deref_mut() else {
             return Ok(());
         };
-        if !cache.snapshot_is_valid(previous_hash) {
-            bail!(
-                "Cannot restore {lang} state: snapshot {previous_hash} is missing or changed; rebuild the document"
-            );
-        }
-        let snapshot_path = cache.get_snapshot_path(previous_hash, exec.snapshot_extension());
-        exec.load_session(&snapshot_path).with_context(|| {
-            format!(
-                "Failed to restore {lang} snapshot {}",
-                snapshot_path.display()
-            )
-        })?;
-        cache.restore_constants(previous_hash, exec)?;
+        cache
+            .restore_snapshot(previous_hash, exec)
+            .with_context(|| format!("Cannot restore {lang} state"))?;
         self.loaded_hash = Some(previous_hash.to_string());
         Ok(())
     }
