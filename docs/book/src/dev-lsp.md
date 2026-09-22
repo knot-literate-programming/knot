@@ -29,7 +29,7 @@ The key insight: Knot compiles `.knot` → virtual `.typ`. The editor works on
 ## Coordinate translation
 
 `position_mapper.rs` maintains a mapping between `.knot` line numbers and
-virtual `.typ` line numbers. This mapping is rebuilt on every compile.
+virtual `.typ` line numbers. This mapping is rebuilt on every buffer update.
 
 For every LSP request that carries a position (definition, hover, completion,
 formatting), `knot-lsp`:
@@ -39,8 +39,8 @@ formatting), `knot-lsp`:
 3. Forwards the request to Tinymist with the translated position.
 4. Maps the response positions back to `.knot` coordinates.
 
-The mapping is exposed by `knot-core` via `compile_project_full`'s
-`ProjectOutput.source_map`.
+The generated document also contains `BEGIN-FILE` and `KNOT-SYNC` markers used
+for navigation between assembled output and source files.
 
 ---
 
@@ -61,51 +61,95 @@ Tinymist:
 
 ## Preview lifecycle
 
+### Project coordination
+
+`compilation.rs` owns one generation counter, cancellation token and publication
+mutex per canonical project root. The main document and its includes share that
+coordinator; different projects remain independent.
+
+Typing registers a new generation immediately. Only the Phase-0 work is debounced
+(300 ms), so a running save/Run request is invalidated before the debounce expires.
+Save and `knot/compile` use the same pipeline. Closing a buffer renders disk state;
+cleaning the project also invalidates pending work. Shutdown cancels all projects.
+
+A request captures all open buffers in its project and their LSP versions.
+`ProjectBuild::prepare` reads configuration and remaining sources once and seeds a
+private cache under `.knot_cache/.build-*`. Preparation and publication share the
+project mutex, so the seed cannot observe a partially published cache. Interpreter
+execution runs outside that mutex. Included documents use the same source snapshot
+as the main document.
+
+### Publication
+
+`ProjectBuild` separates computation from publication:
+
+1. Phase 0 renders cached results and pending/modified placeholders privately.
+2. Full compilation executes includes, then streams completed main-file chunks.
+   Intermediate output does not commit cache metadata.
+3. Final publication commits artifacts and caches, then atomically replaces the
+   generated Typst file. Metadata is copied after the files it references.
+
+For every publication, the LSP holds the project mutex and checks the generation
+before touching shared files, sending a Tinymist overlay, refreshing Knot runtime
+diagnostics, or sending completion. A newer generation cannot register midway
+through these actions. Old workers finish in private storage and cannot publish.
+Runtime diagnostics are also checked against the captured document version.
+
+`knot/compilationStarted`, `knot/compilationInvalidated` and
+`knot/compilationComplete` carry `uri`, `project`, `generation` and `versions`;
+completion also carries `success`. The extension checks generations and its own
+current buffer versions, including includes, before displaying “Up to date”.
+Failed preparation/publication ends the current spinner with a failure status.
+
+Cancellation is cooperative: an interpreter call already running finishes or
+reaches its configured timeout. Subsequent chunks are skipped, and workers are
+joined before their private workspace is removed. Knot cannot undo arbitrary
+user-code side effects such as writing a data file or making a network request.
+
+The mutex coordinates **one LSP process**. Independent CLI processes, including
+VS Code's separate Build PDF command, must not write to the same project at the
+same time. Cross-process locking is not implemented. Publication uses atomic
+replacement per file, not a crash-atomic transaction across every cache file.
+
+### Cost of isolation
+
+Private cache copies add disk I/O and temporary storage. A local release-mode
+probe on Apple Silicon (three warm runs, Python bytearray state saved in two
+snapshots) measured the following medians:
+
+| Total committed cache | Direct compiler planning | Prepare + Phase 0 + publication |
+|---|---:|---:|
+| About 2 KiB | < 1 ms | about 1 ms |
+| 32 MiB | 98 ms | 125 ms |
+| 128 MiB | 394 ms | 509 ms |
+
+The preparation/copy portion was about 26 ms and 114 ms for the larger cases.
+Snapshot integrity checking already accounts for most of the planning time.
+These are an indicative local microbenchmark, not an interactive latency budget:
+they exclude the 300 ms debounce, Tinymist rendering, concurrent requests, and
+final interpreter-session synchronization. Large projects merit further profiling
+before optimizing cache copies or snapshot validation.
+
 ### Starting the preview
 
-`knot/startPreview` (a custom LSP method) triggers:
+`knot/startPreview` serializes startup for that project. Under the publication
+mutex it opens the generated Typst overlay (or renders Phase 0 when no output
+exists). It releases the mutex before waiting for `tinymist.doStartPreview`.
+The response includes a project-specific `taskId` and `staticServerPort`; the
+extension opens that task in the browser. Further starts reuse the project port.
 
-1. `compile_project_phase0` — instant, no code runs.
-2. `apply_update` — sends `textDocument/didOpen` (v=1) to Tinymist.
-3. `tinymist.doStartPreview` — starts a preview task on **our** Tinymist
-   subprocess. This returns a `task_id` and a `static_server_port`.
-4. The port is stored in `ServerState.preview_info`.
-5. The response tells VS Code the URL to open: `http://127.0.0.1:{port}`.
+Each generated document has its own increasing overlay version. Startup never
+replays captured content after waiting for Tinymist: a newer compilation may
+already have published during that wait.
 
-> **Why use our own Tinymist subprocess?** The VS Code extension has its own
-> Tinymist instance, but we cannot obtain its preview task ID. Our subprocess
-> is under our control, so we can obtain both the task ID (needed for forward
-> sync) and the static server port.
+### Diagnostics from Tinymist
 
-### Compilation on save
-
-`did_save` in `server_impl.rs`:
-
-1. Increments `compile_generation` (stale-guard).
-2. Spawns `do_compile(generation)` in a background thread.
-
-`do_compile`:
-
-1. **Phase 0** (instant): `compile_project_phase0(Phase0Mode::Pending)` →
-   orange placeholders → `apply_update` → Tinymist sees the `.typ` change.
-2. **Streaming**: `compile_project_full(path, Some(callback))` — for each
-   chunk that finishes, `apply_update` → Tinymist.
-3. **Final**: last `apply_update` + `refresh_diagnostics`.
-
-At every `apply_update` call, the generation is checked — if a newer `didSave`
-has arrived, the in-flight compile is silently abandoned.
-
-### Phase 0 on change
-
-`did_change` triggers `do_phase0_only` (not `do_compile`):
-
-1. `compile_project_phase0_unsaved(content, Phase0Mode::Modified)` — uses
-   the in-memory buffer so the preview updates while the user types.
-2. `apply_update` → Tinymist.
-
-This is what produces the amber borders while typing: modified chunks are
-rendered with state flags `is-modified` or `is-modified-cascade`, which the
-`knot-state-styles` in `lib/knot.typ` renders as amber borders.
+The proxy advertises `publishDiagnostics.versionSupport`; versioned diagnostics
+are discarded when they do not match the current source buffer. Tinymist 0.15.2
+still sends unversioned diagnostics and does not implement diagnostic pull requests
+(verified locally). These remain accepted for compatibility, so they cannot carry
+the same freshness guarantee as Knot runtime diagnostics. Stronger correlation of
+upstream diagnostics remains part of subsequent LSP work.
 
 ---
 
@@ -123,8 +167,7 @@ Tinymist sends a `window/showDocument` notification when the user clicks in
 the PDF. `handle_tinymist_show_document` in `server_impl.rs`:
 
 1. Receives the `.typ` file path + line.
-2. Maps the line back to a `.knot` file + line using `compile_project_full`'s
-   source map.
+2. Maps the line back to a `.knot` file + line using the generated source markers.
 3. Sends `window/showDocument` to VS Code with the `.knot` coordinates.
 
 ---
@@ -136,5 +179,5 @@ the PDF. `handle_tinymist_show_document` in `server_impl.rs`:
 2. **If it is Knot-specific**: add a handler in `handlers/`, register it
    in `server_impl.rs`'s request dispatch, and add any state to `ServerState`
    in `state.rs`.
-3. **If it is a custom method** (like `knot/startPreview`): add a match arm
-   in the custom-method dispatcher in `server_impl.rs`.
+3. **If it is a custom method** (like `knot/startPreview`): register it with
+   `LspService::build` in `main.rs`.

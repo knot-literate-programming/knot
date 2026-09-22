@@ -216,6 +216,7 @@ impl TinymistProxy {
             "capabilities": {
                 "textDocument": {
                     "diagnostic": {},
+                    "publishDiagnostics": { "versionSupport": true },
                     "hover": { "contentFormat": ["markdown", "plaintext"] },
                     "completion": {},
                 }

@@ -87,7 +87,7 @@ fn skipped_nodes_do_not_advance_execution_state() {
 }
 
 #[test]
-fn copied_artifacts_preserve_namespaces_refresh_content_and_report_missing_files() {
+fn copied_artifacts_are_immutable_and_report_missing_files() {
     let root = tempfile::tempdir().unwrap();
     let a = root.path().join(".knot_cache/a/plot.svg");
     let b = root.path().join(".knot_cache/b/plot.svg");
@@ -125,10 +125,10 @@ fn copied_artifacts_preserve_namespaces_refresh_content_and_report_missing_files
         "second"
     );
     fs::write(&a, "updated").unwrap();
-    assert_eq!(fix_paths_in_typst(&source, &typ).unwrap(), output);
+    assert_ne!(fix_paths_in_typst(&source, &typ).unwrap(), output);
     assert_eq!(
         fs::read_to_string(root.path().join(&paths[0])).unwrap(),
-        "updated"
+        "first"
     );
     fs::remove_file(&a).unwrap();
     assert!(fix_paths_in_typst(&source, &typ).is_err());

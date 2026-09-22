@@ -17,6 +17,7 @@
 
 pub mod backend;
 pub mod cache;
+pub mod cancellation;
 pub mod compiler;
 pub mod config;
 pub mod defaults;

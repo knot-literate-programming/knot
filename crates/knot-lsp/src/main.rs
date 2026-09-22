@@ -7,6 +7,7 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
+mod compilation;
 mod diagnostics;
 mod handlers;
 mod lsp_methods;
@@ -60,6 +61,13 @@ pub(crate) enum KnotCompilationComplete {}
 impl tower_lsp::lsp_types::notification::Notification for KnotCompilationComplete {
     type Params = serde_json::Value;
     const METHOD: &'static str = "knot/compilationComplete";
+}
+
+/// A newer edit superseded any previous compilation status.
+pub(crate) enum KnotCompilationInvalidated {}
+impl tower_lsp::lsp_types::notification::Notification for KnotCompilationInvalidated {
+    type Params = serde_json::Value;
+    const METHOD: &'static str = "knot/compilationInvalidated";
 }
 
 struct KnotLanguageServer {
@@ -168,6 +176,7 @@ impl LanguageServer for KnotLanguageServer {
     }
 
     async fn shutdown(&self) -> Result<()> {
+        self.state.compilations.cancel_all().await;
         if let Some(proxy) = self.state.tinymist.write().await.as_mut() {
             let _ = proxy.shutdown().await;
         }
@@ -177,7 +186,13 @@ impl LanguageServer for KnotLanguageServer {
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri;
         let text = params.text_document.text;
-        self.update_document(&uri, &text).await;
+        if !self
+            .update_document(&uri, &text, params.text_document.version)
+            .await
+        {
+            return;
+        }
+        self.queue_compile(&uri, false, true).await;
         self.publish_combined_diagnostics(&uri).await;
         self.sync_with_cache(&uri).await;
         self.forward_to_tinymist(lsp::DID_OPEN, &uri).await;
@@ -187,53 +202,48 @@ impl LanguageServer for KnotLanguageServer {
         let uri = params.text_document.uri;
         if let Some(change) = params.content_changes.first() {
             let text = change.text.clone();
-            self.update_document(&uri, &text).await;
+            if !self
+                .update_document(&uri, &text, params.text_document.version)
+                .await
+            {
+                return;
+            }
+            self.queue_compile(&uri, false, true).await;
             self.publish_combined_diagnostics(&uri).await;
             self.forward_to_tinymist(lsp::DID_CHANGE, &uri).await;
         }
+    }
 
-        // Debounce a Phase-0-only compile: cancel the previous handle and
-        // schedule a new one.  After 300 ms of inactivity the plan pass runs
-        // (no execution — safe even with mid-typing incomplete chunk code).
-        {
-            let mut handles = self.state.debounce_handles.lock().await;
-            if let Some(h) = handles.remove(&uri) {
-                h.abort();
-            }
+    async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        let uri = params.text_document.uri;
+        self.state.documents.write().await.remove(&uri);
+        self.state.executors.write().await.remove(&uri);
+        let prefix = format!("{uri}::");
+        self.state
+            .loaded_snapshot_hash
+            .write()
+            .await
+            .retain(|key, _| !key.starts_with(&prefix));
+        // Invalidate a snapshot containing the discarded buffer and render disk state.
+        self.queue_compile(&uri, false, false).await;
+        let proxy = self.state.tinymist.read().await.as_ref().cloned();
+        if let Some(proxy) = proxy {
+            let _ = proxy
+                .send_notification(
+                    lsp::DID_CLOSE,
+                    serde_json::json!({
+                        "textDocument": { "uri": transform::to_virtual_uri(&uri) }
+                    }),
+                )
+                .await;
         }
-        let this = self.clone_for_task();
-        let uri_clone = uri.clone();
-        let handle = tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-            this.do_phase0_only(&uri_clone).await;
-        });
-        self.state.debounce_handles.lock().await.insert(uri, handle);
+        self.client.publish_diagnostics(uri, vec![], None).await;
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
-        use std::sync::atomic::Ordering;
-
         let uri = params.text_document.uri;
-
-        // Cancel any pending Phase-0 debounce — do_compile covers Phase 0 too.
-        {
-            let mut handles = self.state.debounce_handles.lock().await;
-            if let Some(h) = handles.remove(&uri) {
-                h.abort();
-            }
-        }
-
-        // Forward the syntactic mask to Tinymist (hover, completion, etc.).
+        self.queue_compile(&uri, true, false).await;
         self.forward_to_tinymist(lsp::DID_SAVE, &uri).await;
-
-        // Bump the generation counter so any in-progress compilation knows it
-        // is now stale and can skip sending preview updates.
-        let generation = self.state.compile_generation.fetch_add(1, Ordering::SeqCst) + 1;
-
-        let this = self.clone_for_task();
-        tokio::spawn(async move {
-            this.do_compile(&uri, generation).await;
-        });
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
@@ -276,7 +286,21 @@ impl LanguageServer for KnotLanguageServer {
                 && let Ok(uri) = Url::parse(&s).or_else(|_| Url::from_file_path(&s))
                 && let Ok(path) = uri.to_file_path()
             {
-                let _ = knot_core::clean_project(Some(&path));
+                let root = knot_core::Config::find_project_root(&path)
+                    .and_then(|root| Ok(root.canonicalize()?))
+                    .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+                let request = self.state.compilations.begin(root).await;
+                let Some(_guard) = request.publication().await else {
+                    return Ok(None);
+                };
+                knot_core::clean_project(Some(&path))
+                    .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+                let (_, versions) = self.open_buffers(&request.root).await;
+                self.client
+                    .send_notification::<KnotCompilationInvalidated>(serde_json::json!({
+                        "uri":uri,"project":request.root,"generation":request.id,"versions":versions
+                    }))
+                    .await;
                 return Ok(Some(serde_json::json!({"status": "success"})));
             }
         }

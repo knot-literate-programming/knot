@@ -151,6 +151,10 @@ mod tests {
     struct FakeExecutor {
         value: String,
         calls: Arc<AtomicUsize>,
+        pause: Option<(
+            std::sync::mpsc::Sender<()>,
+            Mutex<std::sync::mpsc::Receiver<()>>,
+        )>,
     }
     impl LanguageExecutor for FakeExecutor {
         fn initialize(&mut self) -> Result<()> {
@@ -158,6 +162,14 @@ mod tests {
         }
         fn execute(&mut self, code: &str, _: &GraphicsOptions) -> Result<ExecutionAttempt> {
             self.calls.fetch_add(1, Ordering::SeqCst);
+            if let Some((started, release)) = self.pause.take() {
+                started.send(()).unwrap();
+                release
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(std::time::Duration::from_secs(10))
+                    .unwrap();
+            }
             if code.trim() == "error" {
                 return Ok(ExecutionAttempt::RuntimeError(RuntimeError {
                     message: Some("failure".into()),
@@ -228,6 +240,7 @@ mod tests {
         let mut exec: Box<dyn KnotExecutor> = Box::new(FakeExecutor {
             value: "original".into(),
             calls: Arc::default(),
+            pause: None,
         });
         let chunk = &doc.chunks[0];
         register_freeze_objects(chunk, &chunk.options.freeze, &mut exec, &cache).unwrap();
@@ -268,6 +281,7 @@ mod tests {
             let exec = Box::new(FakeExecutor {
                 value: "original".into(),
                 calls: Arc::clone(&calls),
+                pause: None,
             });
             let (_, _, output) = crate::compiler::execution::run_language_chain(
                 "python".into(),
@@ -277,6 +291,7 @@ mod tests {
                 &TypstBackend::new(),
                 &Config::default(),
                 None,
+                &Default::default(),
             )
             .unwrap();
             assert_eq!(calls.load(Ordering::SeqCst), 2);
@@ -284,5 +299,50 @@ mod tests {
             assert!(!output[2].1.errored);
             assert!(output[2].1.typst_content.contains("inert"));
         }
+    }
+    #[test]
+    fn cancellation_during_execution_stops_before_caching_or_the_next_chunk() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("main.knot");
+        std::fs::write(&path, "").unwrap();
+        let doc = Document::parse("```{python}\nfirst\n```\n```{python}\nnever\n```".into());
+        let (planned, cache, _) = Compiler::new(&path)
+            .unwrap()
+            .plan_and_partial(&doc, "main.knot", Phase0Mode::Pending)
+            .unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let cancellation = crate::cancellation::Cancellation::default();
+        let (started_tx, started) = std::sync::mpsc::channel();
+        let (release, released) = std::sync::mpsc::channel();
+        let exec = Box::new(FakeExecutor {
+            value: "original".into(),
+            calls: Arc::clone(&calls),
+            pause: Some((started_tx, Mutex::new(released))),
+        });
+        let worker = std::thread::spawn({
+            let cache = Arc::clone(&cache);
+            let cancellation = cancellation.clone();
+            move || {
+                crate::compiler::execution::run_language_chain(
+                    "python".into(),
+                    planned.into_iter().enumerate().collect(),
+                    Some(exec),
+                    cache,
+                    &TypstBackend::new(),
+                    &Config::default(),
+                    None,
+                    &cancellation,
+                )
+            }
+        });
+        started
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap();
+        cancellation.cancel();
+        release.send(()).unwrap();
+        assert!(worker.join().unwrap().is_err());
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(cache.lock().unwrap().metadata.chunks.is_empty());
+        assert!(cache.lock().unwrap().metadata.snapshots.is_empty());
     }
 }

@@ -12,21 +12,20 @@
 //!   placeholders.  Near-instant.  Reads all files from disk.
 //!
 //! - [`compile_project_phase0_unsaved`] — same as above but substitutes the
-//!   provided in-memory content for one file (main or include).  Used by the
-//!   LSP to show preview updates while the user is typing, before saving.
+//!   provided in-memory content for one file (main or include). The LSP uses
+//!   [`ProjectBuild`] directly to capture all open buffers and gate publication.
 //!
 //! - [`compile_project_full`] — full compilation (plan + execute + assemble).
 //!   If an `on_progress` callback is supplied, a fully assembled `.typ` string
 //!   is passed to it after each chunk of the main file completes, enabling
 //!   incremental preview updates.
 
-use crate::backend::TypstBackend;
-use crate::compiler::Compiler;
+mod build;
+use crate::Phase0Mode;
 use crate::config::Config;
 use crate::defaults::Defaults;
-use crate::parser::Document;
-use crate::{Phase0Mode, ProgressEvent, assemble_pass, planned_to_partial_nodes};
 use anyhow::{Context, Result};
+pub use build::ProjectBuild;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::HashSet;
@@ -132,7 +131,7 @@ pub fn compile_project_phase0(start_path: &Path, mode: Phase0Mode) -> Result<Pro
 /// read from `unsaved_content` instead of from disk.  Every other project
 /// file (main or includes) is still read from disk.
 ///
-/// Used by the LSP to compile the current buffer before the user saves, so
+/// Allows callers to compile one current buffer before saving, so
 /// the preview updates as they type (Typst-text changes are visible
 /// instantly; modified chunk code shows as a placeholder instead of
 /// executing potentially incomplete code).
@@ -159,239 +158,37 @@ pub fn compile_project_full(
     start_path: &Path,
     on_progress: Option<Box<dyn Fn(String) + Send>>,
 ) -> Result<ProjectOutput> {
-    let (config, project_root) = Config::find_and_load(start_path)?;
-    let ProjectPaths {
-        main_file,
-        main_file_name,
-        main_typ_path,
-    } = ProjectPaths::resolve(&config, &project_root)?;
-
-    // Compile all includes fully first (sequential, usually all cache hits).
-    let includes_content =
-        compile_includes(&config, &project_root, false, None, Phase0Mode::Pending)?;
-
-    // Read and parse the main file.
-    let main_source = fs::read_to_string(&main_file)
-        .with_context(|| format!("Cannot read main file: {}", main_file.display()))?;
-    let doc = Document::parse(main_source.clone());
-    let placeholder_line = find_placeholder_line(&main_source);
-    let mut main_compiler = Compiler::new(&main_file)?;
-
-    let typ_content = if on_progress.is_some() {
-        // ----------------------------------------------------------------
-        // Streaming mode: plan first, then execute with per-chunk updates.
-        // ----------------------------------------------------------------
-
-        let backend = TypstBackend::new();
-        let (planned, cache, _) =
-            main_compiler.plan_and_partial(&doc, &main_file_name, Phase0Mode::Pending)?;
-
-        // Initialise the partial buffer: cache hits → real content,
-        // MustExecute → pending placeholder (orange — compilation in progress).
-        let mut partial = planned_to_partial_nodes(&planned, &backend, Phase0Mode::Pending);
-
-        // Internal channel: execute thread → this thread.
-        let (prog_tx, prog_rx) = std::sync::mpsc::channel::<ProgressEvent>();
-
-        // Run execute_and_assemble_streaming in a dedicated OS thread.
-        // It is a blocking, CPU-bound call — unsuitable for an async context.
-        let execute_handle = std::thread::spawn({
-            let source = main_source.clone();
-            let source_file = main_file_name.clone();
-            move || -> Result<String> {
-                main_compiler.execute_and_assemble_streaming(
-                    planned,
-                    cache,
-                    &source,
-                    &source_file,
-                    Some(prog_tx),
-                )
-            }
-        });
-
-        // Receive ProgressEvents; after each one, rebuild the full project
-        // .typ and call the progress callback.
-        for event in prog_rx {
-            partial[event.doc_idx] = event.executed;
-            let partial_main = assemble_pass(&partial, &main_source, &main_file_name);
-            let partial_fixed = fix_paths_in_typst(&partial_main, &main_typ_path)?;
-            let assembled = assemble_project_typ(
-                &partial_fixed,
-                &main_file_name,
-                &includes_content,
-                placeholder_line,
-                &config,
-            )?;
-            if let Some(ref f) = on_progress {
-                f(assembled);
-            }
-        }
-
-        // The channel closed → execute thread has finished.
-        let final_main = execute_handle
-            .join()
-            .map_err(|_| anyhow::anyhow!("Execution thread panicked"))??;
-        let final_fixed = fix_paths_in_typst(&final_main, &main_typ_path)?;
-        assemble_project_typ(
-            &final_fixed,
-            &main_file_name,
-            &includes_content,
-            placeholder_line,
-            &config,
-        )?
-    } else {
-        // ----------------------------------------------------------------
-        // Non-streaming mode (e.g. knot watch → PDF).
-        // ----------------------------------------------------------------
-        let final_main = main_compiler.compile(&doc, &main_file_name)?;
-        let final_fixed = fix_paths_in_typst(&final_main, &main_typ_path)?;
-        assemble_project_typ(
-            &final_fixed,
-            &main_file_name,
-            &includes_content,
-            placeholder_line,
-            &config,
-        )?
-    };
-
-    fs::write(&main_typ_path, &typ_content)?;
-    Ok(ProjectOutput {
-        typ_content,
-        main_typ_path,
-        project_root,
-    })
+    let build = std::sync::Arc::new(ProjectBuild::prepare(
+        start_path,
+        &Default::default(),
+        Default::default(),
+    )?);
+    let progress = on_progress.map(|callback| {
+        let build = std::sync::Arc::clone(&build);
+        Box::new(move |output: ProjectOutput| {
+            build.publish(&output, false)?;
+            callback(output.typ_content);
+            Ok(())
+        }) as Box<dyn Fn(ProjectOutput) -> Result<()> + Send>
+    });
+    let output = build.compile(progress)?;
+    build.publish(&output, true)?;
+    Ok(output)
 }
 
-// ---------------------------------------------------------------------------
-// Private helpers
-// ---------------------------------------------------------------------------
-
-/// Core of Phase 0.  `unsaved` overrides one file's disk content with an
-/// in-memory string (used for typing-time preview in the LSP).
 fn compile_phase0_inner(
     start_path: &Path,
     unsaved: Option<(&Path, &str)>,
     mode: Phase0Mode,
 ) -> Result<ProjectOutput> {
-    let (config, project_root) = Config::find_and_load(start_path)?;
-    let ProjectPaths {
-        main_file,
-        main_file_name,
-        main_typ_path,
-    } = ProjectPaths::resolve(&config, &project_root)?;
-
-    let includes_content = compile_includes(&config, &project_root, true, unsaved, mode)?;
-
-    let main_source = read_or_override(&main_file, unsaved)
-        .with_context(|| format!("Cannot read main file: {}", main_file.display()))?;
-    let doc = Document::parse(main_source.clone());
-    let mut compiler = Compiler::new(&main_file)?;
-    let (_, _, phase0_main) = compiler.plan_and_partial(&doc, &main_file_name, mode)?;
-    let phase0_main_fixed = fix_paths_in_typst(&phase0_main, &main_typ_path)?;
-
-    let placeholder_line = find_placeholder_line(&main_source);
-    let typ_content = assemble_project_typ(
-        &phase0_main_fixed,
-        &main_file_name,
-        &includes_content,
-        placeholder_line,
-        &config,
-    )?;
-
-    fs::write(&main_typ_path, &typ_content)?;
-    Ok(ProjectOutput {
-        typ_content,
-        main_typ_path,
-        project_root,
-    })
-}
-
-/// Read `path` from disk, or return the override content if `path` matches
-/// the unsaved file.  Uses canonical path comparison where possible.
-fn read_or_override(path: &Path, unsaved: Option<(&Path, &str)>) -> Result<String> {
-    if let Some((unsaved_path, unsaved_content)) = unsaved {
-        let matches = path == unsaved_path || {
-            // Fallback: canonical comparison (handles symlinks, relative paths, etc.)
-            matches!(
-                (path.canonicalize(), unsaved_path.canonicalize()),
-                (Ok(a), Ok(b)) if a == b
-            )
-        };
-        if matches {
-            return Ok(unsaved_content.to_string());
-        }
-    }
-    fs::read_to_string(path).with_context(|| format!("Cannot read file: {}", path.display()))
-}
-
-/// Compile all included files and return the concatenated Typst content
-/// ready to be injected at `/* KNOT-INJECT-CHAPTERS */`.
-///
-/// When `phase0 = true`, uses [`Compiler::plan_and_partial`] (no execution).
-/// When `phase0 = false`, uses [`Compiler::compile`] (full execution).
-/// `unsaved` optionally overrides one file's disk content.
-/// `mode` controls how `MustExecute` chunks are rendered in Phase 0.
-fn compile_includes(
-    config: &Config,
-    project_root: &Path,
-    phase0: bool,
-    unsaved: Option<(&Path, &str)>,
-    mode: Phase0Mode,
-) -> Result<String> {
-    let includes = match &config.document.includes {
-        Some(inc) if !inc.is_empty() => inc,
-        _ => return Ok(String::new()),
-    };
-
-    let canonical_root = project_root
-        .canonicalize()
-        .context("Cannot canonicalize project root")?;
-
-    let mut content = String::new();
-
-    for include_name in includes {
-        let include_path = project_root.join(include_name);
-        let canonical_include = include_path
-            .canonicalize()
-            .with_context(|| format!("Included file not found: {include_name}"))?;
-
-        if !canonical_include.starts_with(&canonical_root) {
-            anyhow::bail!("Security: included file '{include_name}' is outside the project root.");
-        }
-
-        let source = read_or_override(&include_path, unsaved)
-            .with_context(|| format!("Cannot read include: {include_name}"))?;
-        let doc = Document::parse(source);
-
-        let source_file = include_path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or(include_name)
-            .to_string();
-
-        // Hidden .typ path used only to anchor fix_paths_in_typst.
-        let stem = include_path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("include");
-        let typ_anchor = project_root.join(format!(".{stem}.typ"));
-
-        let mut compiler = Compiler::new(&include_path)?;
-        let chapter_content = if phase0 {
-            let (_, _, phase0_typ) = compiler.plan_and_partial(&doc, &source_file, mode)?;
-            fix_paths_in_typst(&phase0_typ, &typ_anchor)?
-        } else {
-            let full_typ = compiler.compile(&doc, &source_file)?;
-            fix_paths_in_typst(&full_typ, &typ_anchor)?
-        };
-
-        content.push_str(&format!(
-            "// BEGIN-FILE {include_name}\n{}\n// END-FILE {include_name}\n\n",
-            chapter_content.trim()
-        ));
-    }
-
-    Ok(content)
+    let buffers = unsaved
+        .into_iter()
+        .map(|(path, text)| (path.to_path_buf(), text.to_string()))
+        .collect();
+    let build = ProjectBuild::prepare(start_path, &buffers, Default::default())?;
+    let output = build.phase0(mode)?;
+    build.publish(&output, false)?;
+    Ok(output)
 }
 
 /// Return the 1-based line number of the `/* KNOT-INJECT-CHAPTERS */`
@@ -484,7 +281,10 @@ pub fn fix_paths_in_typst(source: &str, typ_file: &Path) -> Result<String> {
         let filename = path.file_name().context("Cache artifact has no filename")?;
         let namespace = format!(
             "{:x}",
-            Sha256::digest(path.parent().unwrap().as_os_str().as_encoded_bytes())
+            Sha256::digest(
+                fs::read(path)
+                    .with_context(|| format!("Cannot read cache artifact {}", path.display()))?
+            )
         );
         let relative = Path::new(Defaults::LANGUAGE_FILES_DIR)
             .join(namespace)

@@ -5,27 +5,13 @@ use knot_core::executors::ExecutorManager;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::RwLock;
 use tower_lsp::lsp_types::{Diagnostic, Url};
 
-/// In-memory overlay state for `main.typ` in the Tinymist subprocess.
-///
-/// The overlay allows Tinymist to update the browser preview instantly (without
-/// waiting for macOS FSEvents debouncing) by keeping the file content in memory.
-///
-/// Transition: `Inactive → Active` when `textDocument/didOpen` is sent.
-/// The overlay becomes `Active` in `do_start_preview` after the first preview
-/// starts; it stays `Active` for the lifetime of the LSP session.
+/// Version counter for an opened generated Typst overlay. An absent map entry
+/// means didOpen has not been sent; each project has its own entry.
 pub enum TinymistOverlay {
-    /// `textDocument/didOpen` not yet sent.
-    /// Tinymist monitors the disk file (normal mode).
-    Inactive,
-
-    /// `textDocument/didOpen` sent with version = 1.
-    /// Tinymist holds the file in memory.
-    /// `next_version`: version number for the next `textDocument/didChange`.
-    /// Starts at 2 (1 is reserved for `didOpen`).
+    /// Next didChange version (didOpen uses 1).
     Active { next_version: u64 },
 }
 
@@ -51,27 +37,12 @@ pub struct DocumentState {
 
 /// Centralized state for the Knot Language Server
 ///
-/// All fields are `Arc<RwLock<…>>` so cloning shares the same underlying
-/// data — it does NOT deep-copy the state.  This is intentional: clones are
-/// used to hand the state to background tasks (`clone_for_task`) while keeping
-/// everything in sync.
+/// Cloning shares all state with background tasks.
 ///
-/// # Lock ordering
-///
-/// To prevent deadlocks, locks must **never** be held simultaneously across
-/// two different fields.  All handlers follow the pattern of releasing one
-/// guard before acquiring another (using scoped blocks `{ let g = …; … }`).
-///
-/// If a future change requires holding two locks at the same time, the
-/// required acquisition order is:
-///
-/// ```text
-/// documents → tinymist_overlay → tinymist → executors → formatter → (path overrides)
-/// ```
-///
-/// Always acquire locks in this order and release them in reverse order.
-/// In practice: acquire `tinymist_overlay` (write, get/increment version, release),
-/// **then** acquire `tinymist` (read, get proxy, release). Never hold both simultaneously.
+/// Acquire a project publication gate before individual state locks. Preview
+/// startup takes its project startup lock before that gate. Never acquire a gate
+/// while holding a document, overlay, proxy, or executor lock. Release each state
+/// lock before acquiring another; clone the proxy before awaiting its I/O.
 #[derive(Clone)]
 pub struct ServerState {
     /// Per-document state
@@ -84,20 +55,14 @@ pub struct ServerState {
 
     /// Active preview task managed by our tinymist subprocess.
     /// Stores `(task_id, static_server_port)` once `knot/startPreview` succeeds.
-    pub preview_info: Arc<RwLock<Option<(String, u16)>>>,
+    pub preview_info: Arc<RwLock<HashMap<PathBuf, (String, u16)>>>,
 
     /// In-memory overlay state for `main.typ` in Tinymist.
     /// See [`TinymistOverlay`] for the state machine.
-    pub tinymist_overlay: Arc<RwLock<TinymistOverlay>>,
+    pub tinymist_overlay: Arc<RwLock<HashMap<PathBuf, TinymistOverlay>>>,
 
-    /// Monotonic counter incremented on every `did_save`.
-    /// Background compile tasks skip stale preview writes when this has changed.
-    pub compile_generation: Arc<AtomicU64>,
-
-    /// Per-document debounce handles for the Phase-0-only compile triggered by
-    /// `did_change`.  The previous handle is aborted on each new keystroke so
-    /// only the last one (after the typing pause) actually fires.
-    pub debounce_handles: Arc<Mutex<HashMap<Url, tokio::task::JoinHandle<()>>>>,
+    /// Per-project request ordering and publication gates.
+    pub compilations: Arc<crate::compilation::Projects>,
 
     /// Global configuration and caches
     pub air_path_override: Arc<RwLock<Option<PathBuf>>>,
@@ -113,10 +78,9 @@ impl ServerState {
             tinymist: Arc::new(RwLock::new(None)),
             executors: Arc::new(RwLock::new(HashMap::new())),
             formatter: Arc::new(RwLock::new(None)),
-            preview_info: Arc::new(RwLock::new(None)),
-            tinymist_overlay: Arc::new(RwLock::new(TinymistOverlay::Inactive)),
-            compile_generation: Arc::new(AtomicU64::new(0)),
-            debounce_handles: Arc::new(Mutex::new(HashMap::new())),
+            preview_info: Arc::new(RwLock::new(HashMap::new())),
+            tinymist_overlay: Arc::new(RwLock::new(HashMap::new())),
+            compilations: Arc::new(crate::compilation::Projects::default()),
             air_path_override: Arc::new(RwLock::new(None)),
             ruff_path_override: Arc::new(RwLock::new(None)),
             tinymist_path_override: Arc::new(RwLock::new(None)),

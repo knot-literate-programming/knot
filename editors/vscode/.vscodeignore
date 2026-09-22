@@ -16,6 +16,7 @@ node_modules/**
 **/*.map
 
 # Docs / test files
+tests/**
 vsc-extension-quickstart.md
 TEST-SIMPLE.md
 TESTING.md

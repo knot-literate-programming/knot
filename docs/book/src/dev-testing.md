@@ -46,6 +46,21 @@ cargo test -p knot-core --locked --test cache_correctness
 cargo test -p knot-core --locked --test cache_correctness -- --include-ignored
 ```
 
+## Publication and concurrency regressions
+
+`project_publication.rs` checks coherent buffer capture, private rendering,
+cancelled publication, and published Python/R artifacts and snapshots surviving
+workspace cleanup. The runtime cases run with the ignored core suite above.
+The fake executor test pauses inside a chunk, cancels it, and verifies that neither
+a result nor a snapshot is cached and the following chunk never executes.
+
+LSP tests use barriers/channels rather than sleeps to force publication ordering.
+They cover typing invalidation, independent projects, main/include buffer capture,
+failed preparation/publication, and an old worker finishing after the new result
+has been published. The last case checks real Typst/cache files and completion
+notifications. VS Code's `npm test` checks late events, include edits, failures,
+local version changes and independent project generations without launching VS Code.
+
 ## CLI and PDF integration tests
 
 ```bash
@@ -67,6 +82,7 @@ From `editors/vscode`:
 npm ci
 npm run typecheck
 npm run lint
+npm test
 npm run compile
 npm exec -- vsce package --out test.vsix
 ```
@@ -99,6 +115,6 @@ and Clippy run on Linux, as do extension type checks, lint, bundling and packagi
 
 Two ignored `knot-lsp` tests require Tinymist and are not part of this CI suite.
 Neither the default tests nor VSIX packaging validate an interactive VS Code
-preview session. Concurrent editor updates and navigation still need dedicated
-coverage. Interpreter versions and R/Python package versions are recorded, but
+preview session. Navigation and unversioned upstream Tinymist diagnostics still
+need dedicated coverage. Interpreter versions and R/Python package versions are recorded, but
 are not all pinned; consult the CI logs when investigating a regression.

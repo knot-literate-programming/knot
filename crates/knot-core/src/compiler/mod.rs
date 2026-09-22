@@ -69,6 +69,7 @@ pub struct Compiler {
     config: Config,
     project_root: PathBuf,
     cache_dir: PathBuf,
+    cancellation: crate::cancellation::Cancellation,
 }
 
 impl Compiler {
@@ -78,7 +79,20 @@ impl Compiler {
         let project_root = project_root.canonicalize()?;
 
         let cache_dir = get_cache_dir(&project_root, knot_file_path.canonicalize()?);
+        Ok(Self::with_context(
+            config,
+            project_root,
+            cache_dir,
+            Default::default(),
+        ))
+    }
 
+    pub(crate) fn with_context(
+        config: Config,
+        project_root: PathBuf,
+        cache_dir: PathBuf,
+        cancellation: crate::cancellation::Cancellation,
+    ) -> Self {
         info!("📦 Cache directory: {}", cache_dir.display());
 
         let executor_manager = ExecutorManager::with_timeout(
@@ -87,12 +101,13 @@ impl Compiler {
         )
         .with_working_directory(project_root.clone());
 
-        Ok(Self {
+        Self {
             executor_manager,
             config,
             project_root,
             cache_dir,
-        })
+            cancellation,
+        }
     }
 
     /// Reset all active executors to a clean state.
@@ -138,9 +153,11 @@ impl Compiler {
         source_file: &str,
         progress: Option<std::sync::mpsc::Sender<ProgressEvent>>,
     ) -> Result<String> {
+        self.cancellation.check()?;
         let backend = TypstBackend::new();
         let executed = self.execute_pass(planned, Arc::clone(&cache), &backend, progress)?;
         let typst_output = assemble_pass(&executed, source, source_file);
+        self.cancellation.check()?;
         cache.lock().unwrap().save_metadata()?;
         info!("✓ All nodes processed.");
         Ok(typst_output)
@@ -155,6 +172,7 @@ impl Compiler {
     }
 
     fn prepare(&mut self, doc: &Document) -> Result<(Vec<PlannedNode>, Arc<Mutex<Cache>>)> {
+        self.cancellation.check()?;
         let cache = Arc::new(Mutex::new(Cache::new(self.cache_dir.clone())?));
         let nodes = build_executable_nodes(doc);
         info!("🔧 Processing {} executable nodes...", nodes.len());
@@ -351,6 +369,7 @@ impl Compiler {
 
         // Reborrow as references so closures can copy them (references are Copy).
         let config_ref = &config;
+        let cancellation = &self.cancellation;
 
         let chain_results: Vec<ChainResult> = std::thread::scope(|s| {
             // Start every chain before joining any of them. A lazy spawn/join
@@ -368,6 +387,7 @@ impl Compiler {
                         backend,
                         config_ref,
                         chain_progress,
+                        cancellation,
                     )
                 }));
             }
