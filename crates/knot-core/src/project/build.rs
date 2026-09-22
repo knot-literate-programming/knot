@@ -1,7 +1,5 @@
 //! Isolated build workspace. Only explicit publication touches shared outputs.
-use super::{
-    ProjectOutput, ProjectPaths, assemble_project_typ, find_placeholder_line, fix_paths_in_typst,
-};
+use super::{ProjectOutput, ProjectPaths, assemble_project_typ, fix_paths_in_typst};
 use crate::{
     Compiler, Config, Document, Phase0Mode, ProgressEvent, assemble_pass, planned_to_partial_nodes,
 };
@@ -128,7 +126,7 @@ impl ProjectBuild {
                 &self.fix(main)?,
                 &self.main.name,
                 includes,
-                find_placeholder_line(&self.main.text),
+                &self.main.text,
                 &self.config,
             )?,
             main_typ_path: self.paths.main_typ_path.clone(),
@@ -141,22 +139,16 @@ impl ProjectBuild {
             self.cancellation.check()?;
             let mut compiler = self.compiler(source);
             let doc = Document::parse(source.text.clone());
-            // Keep the existing source-marker convention; navigation evolves separately.
-            let name = source
-                .path
-                .file_name()
-                .and_then(|p| p.to_str())
-                .unwrap_or(&source.name);
+            let name = &source.name;
             let result = if full {
                 compiler.compile(&doc, name)?
             } else {
                 compiler.plan_and_partial(&doc, name, mode)?.2
             };
-            content.push_str(&format!(
-                "// BEGIN-FILE {}\n{}\n// END-FILE {}\n\n",
-                source.name,
-                self.fix(&result)?.trim(),
-                source.name
+            content.push_str(&crate::sync::wrap_source(
+                &self.fix(&result)?,
+                &source.name,
+                source.text.lines().count(),
             ));
         }
         Ok(content)

@@ -1,7 +1,7 @@
+import { isKnotCompiledTyp, parseNavigationLocation, NavigationLocation } from './navigation';
 import { CompilationStatus, CompilationEvent } from './compilationStatus';
 // Knot VS Code Extension - LSP Client
 import * as path from 'path';
-import * as fs from 'fs';
 import {
     workspace,
     ExtensionContext,
@@ -30,7 +30,7 @@ import {
     ExecuteCommandRequest,
 } from 'vscode-languageclient/node';
 import { KnotProjectProvider } from './projectExplorer';
-import { resolveBinaryPath, findProjectRoot, parseMainFromToml, runKnotCommand, isKnotCompiledTyp } from './utils';
+import { resolveBinaryPath, findProjectRoot, runKnotCommand } from './utils';
 
 let client: LanguageClient | undefined;
 let compilationStatusBar: StatusBarItem;
@@ -115,6 +115,26 @@ function refreshChunkDecorations(): void {
 let syncDebounceTimer: ReturnType<typeof setTimeout> | undefined;
 let forwardSyncTimer: ReturnType<typeof setTimeout> | undefined;
 
+let navigationTimer: ReturnType<typeof setTimeout> | undefined;
+
+async function sourceLocation(file: string, line: string, output: OutputChannel): Promise<NavigationLocation> {
+    const binary = resolveBinaryPath('knot', output);
+    return parseNavigationLocation(await runKnotCommand(binary, ['jump-to-source', file, line, '--json'], output));
+}
+
+async function revealLocation(location: NavigationLocation, viewColumn = ViewColumn.One): Promise<void> {
+    const document = await workspace.openTextDocument(Uri.file(location.file));
+    const position = new Position(location.line, 0);
+    if (navigationTimer) clearTimeout(navigationTimer);
+    suppressAutoSync = true;
+    try {
+        await window.showTextDocument(document, { selection: new Range(position, position), viewColumn, preserveFocus: false });
+    } finally {
+        // Prevent opening the generated document from immediately navigating back.
+        navigationTimer = setTimeout(() => { suppressAutoSync = false; }, 500);
+    }
+}
+
 /**
  * Handles URIs in the form of vscode://knot-dev.knot/jump?file=...&line=...
  */
@@ -130,19 +150,7 @@ class KnotUriHandler implements UriHandler {
             if (file && line) {
                 this.outputChannel.appendLine(`[URI Handler] Jump request for ${file}:${line}`);
                 try {
-                    const knotBinary = resolveBinaryPath('knot', this.outputChannel);
-                    const result = await runKnotCommand(knotBinary, ['jump-to-source', file, line], this.outputChannel);
-                    
-                    if (result && result.includes(':')) {
-                        const [knotFile, lineStr] = result.split(':');
-                        const knotLine = parseInt(lineStr, 10) - 1;
-                        const knotUri = Uri.file(knotFile);
-                        const targetDoc = await workspace.openTextDocument(knotUri);
-                        await window.showTextDocument(targetDoc, {
-                            selection: new Range(new Position(knotLine, 0), new Position(knotLine, 0)),
-                            viewColumn: ViewColumn.One
-                        });
-                    }
+                    await revealLocation(await sourceLocation(file, line, this.outputChannel));
                 } catch (e) {
                     this.outputChannel.appendLine(`[URI Handler] Mapping failed: ${e}`);
                 }
@@ -225,29 +233,11 @@ export async function activate(context: ExtensionContext) {
             syncDebounceTimer = setTimeout(async () => {
                 syncDebounceTimer = undefined;
                 try {
-                    const knotBinary = resolveBinaryPath('knot', outputChannel);
-                    const result = await runKnotCommand(knotBinary, ['jump-to-source', typFileName, (typLine + 1).toString()], outputChannel);
-                    
-                    if (result && result.includes(':')) {
-                        const [knotFile, lineStr] = result.split(':');
-                        const knotLine = parseInt(lineStr, 10) - 1;
-                        
-                        if (window.activeTextEditor?.document.fileName === typFileName) {
-                            await commands.executeCommand('workbench.action.closeActiveEditor');
-                        }
-
-                        const knotUri = Uri.file(knotFile);
-                        const pos = new Position(knotLine, 0);
-                        const targetDoc = await workspace.openTextDocument(knotUri);
-                        
-                        suppressAutoSync = true;
-                        await window.showTextDocument(targetDoc, {
-                            selection: new Range(pos, pos),
-                            viewColumn: ViewColumn.One,
-                            preserveFocus: false,
-                        });
-                        setTimeout(() => { suppressAutoSync = false; }, 500);
-                    }
+                    const location = await sourceLocation(typFileName, (typLine + 1).toString(), outputChannel);
+                    const active = window.activeTextEditor;
+                    if (active?.document.fileName !== typFileName || active.selection.active.line !== typLine) return;
+                    // Keep the generated editor open; navigation must not discard user edits.
+                    await revealLocation(location);
                 } catch (e) {
                     outputChannel.appendLine(`[auto-sync] Error: ${e}`);
                 }
@@ -310,28 +300,12 @@ export async function activate(context: ExtensionContext) {
             const projectRoot = findProjectRoot(path.dirname(knotFilePath));
             if (!projectRoot) { return; }
 
-            const tomlPath = path.join(projectRoot, 'knot.toml');
-            const mainFile = parseMainFromToml(tomlPath);
-            const mainStem = path.basename(mainFile, path.extname(mainFile));
-            const mainTypPath = path.join(projectRoot, `${mainStem}.typ`);
-            
-            if (!fs.existsSync(mainTypPath)) {
-                window.showErrorMessage(`Compiled file not found: ${mainTypPath}`);
-                return;
-            }
-
             const knotRelFile = path.relative(projectRoot, knotFilePath);
             try {
                 const knotBinary = resolveBinaryPath('knot', outputChannel);
-                const result = await runKnotCommand(knotBinary, ['jump-to-typ', mainTypPath, knotRelFile, (knotLine + 1).toString()], outputChannel);
-                const mappedTypLine = parseInt(result, 10) - 1;
-
-                const typUri = Uri.file(mainTypPath);
-                const typDoc = await workspace.openTextDocument(typUri);
-                await window.showTextDocument(typDoc, {
-                    selection: new Range(new Position(mappedTypLine, 0), new Position(mappedTypLine, 0)),
-                    viewColumn: ViewColumn.Active
-                });
+                // Let Rust resolve knot.toml; no second, partial TOML parser here.
+                const result = await runKnotCommand(knotBinary, ['jump-to-typ', projectRoot, knotRelFile, (knotLine + 1).toString(), '--json'], outputChannel);
+                await revealLocation(parseNavigationLocation(result), ViewColumn.Active);
             } catch (e) {
                 window.showErrorMessage(`Jump to Typ failed: ${e}`);
             }
@@ -536,13 +510,8 @@ async function jumpToKnotSource(outputChannel: OutputChannel): Promise<void> {
     if (!isKnotCompiledTyp(doc.fileName)) return;
     const typLine = editor.selection.active.line;
     try {
-        const knotBinary = resolveBinaryPath('knot', outputChannel);
-        const result = await runKnotCommand(knotBinary, ['jump-to-source', doc.fileName, (typLine + 1).toString()], outputChannel);
-        if (result && result.includes(':')) {
-            const [file, line] = result.split(':');
-            const pos = new Position(parseInt(line, 10) - 1, 0);
-            const targetDoc = await workspace.openTextDocument(Uri.file(file));
-            await window.showTextDocument(targetDoc, { selection: new Range(pos, pos), viewColumn: ViewColumn.One });
-        }
-    } catch { /* ignore */ }
+        await revealLocation(await sourceLocation(doc.fileName, (typLine + 1).toString(), outputChannel));
+    } catch (error) {
+        window.showErrorMessage(`Jump to source failed: ${error}`);
+    }
 }

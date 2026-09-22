@@ -72,19 +72,3 @@ export function parseMainFromToml(tomlPath: string): string {
         return 'main.knot';
     }
 }
-
-/**
- * Check whether a file path looks like a knot-compiled .typ file
- */
-export function isKnotCompiledTyp(filePath: string): boolean {
-    try {
-        const fd = fs.openSync(filePath, 'r');
-        const buffer = Buffer.alloc(4096);
-        const bytesRead = fs.readSync(fd, buffer, 0, 4096, 0);
-        fs.closeSync(fd);
-        const preview = buffer.subarray(0, bytesRead).toString('utf-8');
-        return preview.includes('// BEGIN-FILE') && preview.includes('// #KNOT-SYNC');
-    } catch {
-        return false;
-    }
-}

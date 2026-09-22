@@ -842,6 +842,7 @@ dependencies = [
  "once_cell",
  "pathdiff",
  "regex",
+ "serde_json",
  "tempfile",
  "toml",
 ]
