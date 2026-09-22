@@ -52,6 +52,7 @@ struct ChainContext<'a> {
     lang: &'a str,
     cache: &'a Arc<Mutex<Cache>>,
     backend: &'a TypstBackend,
+    cancellation: &'a crate::cancellation::Cancellation,
 }
 
 /// Group planned nodes by language, preserving their original document indices.
@@ -73,6 +74,8 @@ pub(super) fn group_by_language(
 ///
 /// When `progress` is `Some`, a [`ProgressEvent`] is sent after each node
 /// completes. `Sender::send` is non-blocking and safe to call from any thread.
+// The cancellation flag spans both the interpreter and persistence boundaries.
+#[expect(clippy::too_many_arguments)]
 pub(super) fn run_language_chain(
     lang: String,
     nodes: Vec<(usize, PlannedNode)>,
@@ -81,17 +84,20 @@ pub(super) fn run_language_chain(
     backend: &TypstBackend,
     config: &Config,
     progress: Option<Sender<ProgressEvent>>,
+    cancellation: &crate::cancellation::Cancellation,
 ) -> Result<ChainOutput> {
     let ctx = ChainContext {
         lang: &lang,
         cache: &cache,
         backend,
+        cancellation,
     };
     let mut sm = SnapshotManager::new(exec);
     let mut indexed = Vec::with_capacity(nodes.len());
     let mut broken = false;
 
     for (doc_idx, pn) in nodes {
+        cancellation.check()?;
         let (is_chunk, source_line) = match &pn.kind {
             PlannedNodeKind::Chunk { node, .. } => (true, (node.range.start.line + 1) as u32),
             PlannedNodeKind::Inline { .. } => (false, 0),
@@ -241,6 +247,7 @@ fn handle_must_execute(
             Ok(a) => a,
         };
 
+        ctx.cancellation.check()?;
         // Runtime error → cache it, then cascade Inert.
         let output = match attempt {
             ExecutionAttempt::RuntimeError(error) => {

@@ -16,7 +16,7 @@ use knot_core::parser::parse_document;
 use tower_lsp::lsp_types::*;
 
 /// Generate diagnostics for a document
-pub fn get_diagnostics(uri: &Url, text: &str) -> Vec<Diagnostic> {
+pub fn get_diagnostics(uri: &Url, text: &str, include_runtime: bool) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
     // Create a mapper for reliable position conversions
@@ -83,7 +83,8 @@ pub fn get_diagnostics(uri: &Url, text: &str) -> Vec<Diagnostic> {
     }
 
     // 2. Runtime Diagnostics (from Cache)
-    if let Ok(path) = uri.to_file_path()
+    if include_runtime
+        && let Ok(path) = uri.to_file_path()
         && let Ok(project_root) = Config::find_project_root(&path)
     {
         let cache_dir = get_cache_dir(&project_root, &path);

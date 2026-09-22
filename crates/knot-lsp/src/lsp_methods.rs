@@ -2,6 +2,7 @@
 pub mod text_document {
     pub const DID_OPEN: &str = "textDocument/didOpen";
     pub const DID_CHANGE: &str = "textDocument/didChange";
+    pub const DID_CLOSE: &str = "textDocument/didClose";
     pub const DID_SAVE: &str = "textDocument/didSave";
     pub const FORMATTING: &str = "textDocument/formatting";
     pub const HOVER: &str = "textDocument/hover";

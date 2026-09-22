@@ -67,5 +67,14 @@ of process-global state. Use explicit initialization, declared dependencies and
 `cache: false` where execution must happen on every build.
 
 Old cache formats are not migrated. They can be removed with `knot clean`.
-Copied artifacts in `_knot_files/` are isolated by source directory, refreshed
-when assembled, and report copy failures rather than leaving stale output.
+Copied artifacts in `_knot_files/` are addressed by content hash. An updated
+figure gets a different path, so an older preview keeps its own image. Identical
+artifacts are reused across builds. Missing files and copy failures are reported.
+Unused artifact directories are removed by `knot clean`.
+
+Project builds execute against private cache copies and commit them only during
+explicit publication. The LSP admits publications only from its current project
+generation. This prevents a superseded save or Run request from overwriting the
+current Typst document, figures, snapshots or metadata. A running interpreter call
+may finish before cancellation takes effect; external side effects in user code
+are not reversible. Independent CLI processes are not coordinated by the LSP.

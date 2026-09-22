@@ -132,6 +132,7 @@ jobs:
           npm ls --depth=0
           npm run typecheck
           npm run lint
+          npm test
 
       - name: Verify package can be created
         working-directory: editors/vscode

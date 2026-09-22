@@ -1,3 +1,4 @@
+import { CompilationStatus, CompilationEvent } from './compilationStatus';
 // Knot VS Code Extension - LSP Client
 import * as path from 'path';
 import * as fs from 'fs';
@@ -33,10 +34,38 @@ import { resolveBinaryPath, findProjectRoot, parseMainFromToml, runKnotCommand, 
 
 let client: LanguageClient | undefined;
 let compilationStatusBar: StatusBarItem;
+const compilationStatus = new CompilationStatus();
+let statusTimer: ReturnType<typeof setTimeout> | undefined;
+
+function showStatus(text?: string, hideAfter?: number): void {
+    if (statusTimer) clearTimeout(statusTimer);
+    statusTimer = undefined;
+    if (!compilationStatusBar) return;
+    if (!text) { compilationStatusBar.hide(); return; }
+    compilationStatusBar.text = text;
+    compilationStatusBar.show();
+    if (hideAfter) statusTimer = setTimeout(() => compilationStatusBar.hide(), hideAfter);
+}
+
+function documentVersions(): Map<string, number> {
+    return new Map(workspace.textDocuments.map(doc => [doc.uri.toString(), doc.version]));
+}
+
+function renderCompilationStatus(): void {
+    const doc = window.activeTextEditor?.document;
+    if (!doc || doc.languageId !== 'knot') { showStatus(); return; }
+    const state = compilationStatus.forDocument(doc.uri.toString(), doc.version);
+    void commands.executeCommand('setContext', 'knot.documentHasChanges', state !== 'success');
+    const labels = {
+        running: '$(sync~spin) Compiling...', modified: '$(edit) Changes pending',
+        success: '$(check) Up to date', failed: '$(warning) Compilation failed',
+    };
+    showStatus(labels[state], state === 'success' || state === 'failed' ? 3000 : undefined);
+}
 let suppressAutoSync = false;
 
 type StartPreviewResult =
-    | { status: 'ok'; staticServerPort: number }
+    | { status: 'ok'; staticServerPort: number; taskId: string }
     | { status: 'error'; message: string };
 
 // ---------------------------------------------------------------------------
@@ -136,6 +165,7 @@ export async function activate(context: ExtensionContext) {
     context.subscriptions.push(
         window.onDidChangeActiveTextEditor((editor) => {
             if (editor) applyChunkDecorations(editor);
+            renderCompilationStatus();
         })
     );
     context.subscriptions.push(
@@ -155,7 +185,8 @@ export async function activate(context: ExtensionContext) {
     context.subscriptions.push(
         workspace.onDidChangeTextDocument((event) => {
             if (event.document.languageId === 'knot' && event.contentChanges.length > 0) {
-                commands.executeCommand('setContext', 'knot.documentHasChanges', true);
+                compilationStatus.edit(event.document.uri.toString());
+                renderCompilationStatus();
             }
         })
     );
@@ -332,16 +363,19 @@ export async function activate(context: ExtensionContext) {
 
         client = new LanguageClient('knotLanguageServer', 'Knot Language Server', serverOptions, clientOptions);
 
-        // Compilation lifecycle notifications from knot-lsp.
-        client.onNotification('knot/compilationStarted', (_params: { uri: string }) => {
-            compilationStatusBar.text = '$(sync~spin) Compiling...';
-            compilationStatusBar.show();
+        // Reject obsolete generations and verify versions locally: a text change
+        // can reach VS Code before its didChange reaches the server.
+        client.onNotification('knot/compilationStarted', (params: CompilationEvent) => {
+            compilationStatus.begin(params, true, documentVersions());
+            renderCompilationStatus();
         });
-
-        client.onNotification('knot/compilationComplete', (params: { uri: string; success: boolean }) => {
-            commands.executeCommand('setContext', 'knot.documentHasChanges', false);
-            compilationStatusBar.text = params.success ? '$(check) Up to date' : '$(warning) Compilation failed';
-            setTimeout(() => compilationStatusBar.hide(), 3000);
+        client.onNotification('knot/compilationInvalidated', (params: CompilationEvent) => {
+            compilationStatus.begin(params, false, documentVersions());
+            renderCompilationStatus();
+        });
+        client.onNotification('knot/compilationComplete', (params: CompilationEvent & { success: boolean }) => {
+            compilationStatus.complete(params, documentVersions());
+            renderCompilationStatus();
         });
 
         client.start();
@@ -432,8 +466,7 @@ async function openPreview(outputChannel: OutputChannel): Promise<void> {
 
     const knotUri = editor.document.uri;
 
-    compilationStatusBar.text = '$(sync~spin) Starting Knot preview...';
-    compilationStatusBar.show();
+    showStatus('$(sync~spin) Starting Knot preview...');
 
     try {
         await window.withProgress(
@@ -449,18 +482,17 @@ async function openPreview(outputChannel: OutputChannel): Promise<void> {
                     throw new Error(result?.status === 'error' ? result.message : 'unknown error from knot/startPreview');
                 }
 
-                await env.openExternal(Uri.parse(`http://127.0.0.1:${result.staticServerPort}/?task=knot-preview`));
+                await env.openExternal(Uri.parse(`http://127.0.0.1:${result.staticServerPort}/?task=${encodeURIComponent(result.taskId)}`));
 
                 // Keep focus on the .knot editor
                 const knotDoc = await workspace.openTextDocument(knotUri);
                 await window.showTextDocument(knotDoc, { viewColumn: ViewColumn.One, preserveFocus: false });
 
-                compilationStatusBar.text = '$(check) Preview ready!';
-                setTimeout(() => compilationStatusBar.hide(), 2000);
+                renderCompilationStatus();
             }
         );
     } catch (e) {
-        compilationStatusBar.hide();
+        showStatus();
         outputChannel.appendLine(`[preview] Failed: ${e}`);
         window.showErrorMessage(`Failed to start preview: ${e}`);
     }
@@ -477,8 +509,7 @@ async function buildProject(outputChannel: OutputChannel): Promise<void> {
         return;
     }
 
-    compilationStatusBar.text = '$(sync~spin) Building PDF...';
-    compilationStatusBar.show();
+    showStatus('$(sync~spin) Building PDF...');
 
     try {
         await window.withProgress(
@@ -489,11 +520,10 @@ async function buildProject(outputChannel: OutputChannel): Promise<void> {
                 await runKnotCommand(knotBinary, ['build'], outputChannel, projectRoot);
             }
         );
-        compilationStatusBar.text = '$(check) PDF built!';
-        setTimeout(() => compilationStatusBar.hide(), 3000);
+        showStatus('$(check) PDF built!', 3000);
         window.showInformationMessage('PDF built successfully!');
     } catch (e) {
-        compilationStatusBar.hide();
+        showStatus();
         outputChannel.appendLine(`[build] Failed: ${e}`);
         window.showErrorMessage(`Build failed: ${e}`);
     }
