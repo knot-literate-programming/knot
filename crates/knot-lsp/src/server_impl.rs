@@ -53,11 +53,20 @@ impl KnotLanguageServer {
         .await
         {
             Ok(Some(edit)) => {
-                let _ = self.client.apply_edit(edit).await;
+                let response = self.client.apply_edit(edit).await?;
+                if !response.applied {
+                    return Err(tower_lsp::jsonrpc::Error::invalid_params(format!(
+                        "Editor did not apply formatting: {}",
+                        response
+                            .failure_reason
+                            .as_deref()
+                            .unwrap_or("edit rejected")
+                    )));
+                }
                 Ok(serde_json::json!({"status": "success"}))
             }
             Ok(None) => Ok(serde_json::json!({"status": "no_changes"})),
-            Err(_) => Err(tower_lsp::jsonrpc::Error::internal_error()),
+            Err(error) => Err(error),
         }
     }
 
