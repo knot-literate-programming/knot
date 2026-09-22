@@ -59,26 +59,28 @@ impl CodeFormatter {
     }
 
     fn format_r(&self, code: &str) -> Result<String> {
-        let temp_file = std::env::temp_dir().join(format!("knot_fmt_{}.R", uuid::Uuid::new_v4()));
+        let temp_file = tempfile::Builder::new()
+            .prefix("knot_fmt_")
+            .suffix(".R")
+            .tempfile()
+            .context("Failed to create R formatting file")?;
 
-        std::fs::write(&temp_file, code).context("Failed to write R code to temp file")?;
+        std::fs::write(temp_file.path(), code).context("Failed to write R code to temp file")?;
 
         let output = self
             .air_command()
             .arg("format")
-            .arg(&temp_file)
+            .arg(temp_file.path())
             .output()
             .context("Failed to execute 'air'. Is it installed?")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            let _ = std::fs::remove_file(&temp_file);
             anyhow::bail!("Air formatting failed: {}", stderr);
         }
 
         let formatted =
-            std::fs::read_to_string(&temp_file).context("Failed to read formatted R code")?;
-        let _ = std::fs::remove_file(&temp_file);
+            std::fs::read_to_string(temp_file.path()).context("Failed to read formatted R code")?;
         Ok(formatted)
     }
 

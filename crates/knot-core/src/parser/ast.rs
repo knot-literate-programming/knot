@@ -545,7 +545,7 @@ impl Document {
         super::winnow_parser::parse_document(&source)
     }
 
-    /// Format the document by normalizing all its chunks and inlines.
+    /// Format the document by normalizing its chunks and preserving inline expressions.
     ///
     /// # Arguments
     /// * `code_formatter` - Optional closure to format code within chunks.
@@ -587,13 +587,9 @@ impl Document {
                     last_pos = chunk.end_byte;
                 }
                 Node::Inline(inline) => {
-                    // Normalize inline: ` {lang} code ` -> ` {lang} code `
-                    // (keeping it simple for now, can be improved)
-                    formatted_text.push_str(&format!(
-                        "`{{{}}} {}`",
-                        inline.language,
-                        inline.code.trim()
-                    ));
+                    // Rebuilding only language/code would discard execution options
+                    // such as output=false. Inline expressions remain verbatim.
+                    formatted_text.push_str(&self.source[inline.start..inline.end]);
                     last_pos = inline.end;
                 }
             }
