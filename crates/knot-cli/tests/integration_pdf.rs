@@ -157,3 +157,61 @@ fn chunk_figure_supplement_can_be_configured() {
         "Fragment",
     );
 }
+
+#[path = "common/formatters.rs"]
+mod formatters;
+
+#[test]
+#[ignore = "requires Typst on PATH"]
+fn formatting_preserves_rendered_content_of_a_mixed_document() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    formatters::install_formatters(&root.join("bin"));
+    fs::write(root.join("knot.toml"), "[document]\nmain = 'main.knot'\n").unwrap();
+    fs::write(root.join("main.knot"), "#let value= 2\n= Title\nValue #value. Inline `{r, eval=false} unavailable`.\n\n```{r sample}\n#| eval: false\n#| caption: Example\n\nx <- 1\n```\n\n```{python}\n#| eval: false\n\nx = 1\n```\n").unwrap();
+    let render = || {
+        let build = Command::new(env!("CARGO_BIN_EXE_knot"))
+            .arg("build")
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert!(
+            build.status.success(),
+            "{}",
+            String::from_utf8_lossy(&build.stderr)
+        );
+        // Fix the creation time so the comparison measures rendered content.
+        let rendered = Command::new("typst")
+            .args([
+                "compile",
+                "--root",
+                ".",
+                "--creation-timestamp",
+                "0",
+                "main.typ",
+                "stable.pdf",
+            ])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert!(
+            rendered.status.success(),
+            "{}",
+            String::from_utf8_lossy(&rendered.stderr)
+        );
+        fs::read(root.join("stable.pdf")).unwrap()
+    };
+    let before = render();
+    let formatted = Command::new(env!("CARGO_BIN_EXE_knot"))
+        .args(["format", "main.knot"])
+        .env("PATH", root.join("bin"))
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(
+        formatted.status.success(),
+        "{}",
+        String::from_utf8_lossy(&formatted.stderr)
+    );
+    assert!(render() == before, "Formatting changed the rendered PDF");
+}

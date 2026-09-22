@@ -25,14 +25,10 @@ pub struct DocumentState {
     pub mapper: PositionMapper,
     /// Whether this document is successfully opened in the Tinymist proxy
     pub opened_in_tinymist: bool,
-    /// Current version of the virtual Typst document in Tinymist
-    pub virtual_version: i32,
     /// Knot-specific diagnostics
     pub knot_diagnostics: Vec<Diagnostic>,
     /// Tinymist-specific diagnostics (mapped to Knot positions)
     pub tinymist_diagnostics: Vec<Diagnostic>,
-    /// Whether we have already notified the user about a formatting failure for this document
-    pub formatting_error_notified: bool,
 }
 
 /// Centralized state for the Knot Language Server

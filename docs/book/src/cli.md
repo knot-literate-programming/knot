@@ -78,11 +78,20 @@ argument, finds `knot.toml` from the current directory or its parents and format
 once; unrelated files are not scanned. Declared sources must remain inside the
 project root.
 
-The CLI formats R blocks with **Air** and Python blocks with **Ruff**, found on
-`PATH`, and normalizes Knot chunk headers/options. It preserves Typst text and
-inline expressions, including their execution options. Typst formatting through
-Tinymist is provided by the editor, not this command. Neither R nor Python code
-is executed during formatting.
+The CLI and the editor use the same document formatter: **Air** for R blocks,
+**Ruff** for Python blocks, and embedded **Typstyle 0.15.1** for Typst text.
+Air/Ruff are found on `PATH` by the CLI; no Typstyle executable or Tinymist process
+is needed for formatting. Neither R nor Python code is executed.
+
+Document style is fixed across both clients: two spaces, width 80, no prose
+wrapping and no import reordering. Editor tab settings and Tinymist formatter
+settings do not override this Knot document style. Use the same Air/Ruff versions
+in your terminal and editor for matching code-block results.
+
+Knot protects executable blocks and inline expressions before Typst formatting,
+then restores them only if all placeholders remain intact and in order. Inline
+code and options are preserved verbatim; block headers/options are normalized.
+Typst syntax errors or reconstruction failures abort formatting without writing.
 
 `--check` prints `Would format <path>` for each changed file and writes nothing.
 It exits with **0** when all selected files are already formatted, or **1** when

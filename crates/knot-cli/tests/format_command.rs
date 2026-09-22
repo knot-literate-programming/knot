@@ -3,39 +3,12 @@ use std::{
     fs,
     path::Path,
     process::{Command, Output},
-    sync::OnceLock,
 };
 
-fn install_formatters(bin: &Path) {
-    static FIXTURE: OnceLock<tempfile::TempDir> = OnceLock::new();
-    let fixture = FIXTURE.get_or_init(|| {
-        let dir = tempfile::tempdir().unwrap();
-        let result = Command::new("rustc")
-            .arg(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/tests/fixtures/formatter.rs"
-            ))
-            .arg("-o")
-            .arg(dir.path().join("formatter.exe"))
-            .output()
-            .unwrap();
-        assert!(
-            result.status.success(),
-            "{}",
-            String::from_utf8_lossy(&result.stderr)
-        );
-        dir
-    });
-    fs::create_dir_all(bin).unwrap();
-    for name in ["air", "ruff"] {
-        let name = if cfg!(windows) {
-            format!("{name}.exe")
-        } else {
-            name.into()
-        };
-        fs::copy(fixture.path().join("formatter.exe"), bin.join(name)).unwrap();
-    }
-}
+#[path = "common/formatters.rs"]
+mod formatters;
+use formatters::install_formatters;
+
 fn run(root: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_knot"))
         .arg("format")
@@ -130,7 +103,8 @@ fn formatter_failure_keeps_every_project_source_unchanged() {
         assert_eq!(output.status.code(), Some(1));
         let error = String::from_utf8_lossy(&output.stderr);
         assert!(
-            error.contains("bad.knot:1")
+            error.contains("bad.knot")
+                && error.contains("line 1")
                 && error.contains("Air formatting failed")
                 && error.contains("fixture parse error"),
             "{error}"
@@ -183,14 +157,18 @@ fn missing_project_or_declared_file_is_an_error_without_writes() {
 }
 
 #[test]
-fn inline_execution_options_and_typst_text_survive_formatting() {
+fn inline_execution_options_survive_typst_formatting() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
-    let source = "#let x =  2\nValue: `{r, output=false} x <- 15` and `{python}  1 + 2 `.\n";
+    let source = "#let x =  2\nValue: `{r, eval=false} x <- 15` and `{python}  1 + 2 `.\n";
     fs::write(root.join("main.knot"), source).unwrap();
-    success(&run(root, &["main.knot", "--check"]));
-    success(&run(root, &["main.knot"]));
+    assert_eq!(run(root, &["main.knot", "--check"]).status.code(), Some(1));
     assert_eq!(fs::read_to_string(root.join("main.knot")).unwrap(), source);
+    success(&run(root, &["main.knot"]));
+    let formatted = fs::read_to_string(root.join("main.knot")).unwrap();
+    assert!(formatted.contains("#let x = 2"));
+    assert!(formatted.contains("`{r, eval=false} x <- 15` and `{python}  1 + 2 `"));
+    success(&run(root, &["main.knot", "--check"]));
 }
 
 #[test]

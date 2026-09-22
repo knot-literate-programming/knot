@@ -31,8 +31,8 @@ The key insight: Knot compiles `.knot` → virtual `.typ`. The editor works on
 `position_mapper.rs` maintains a mapping between `.knot` line numbers and
 virtual `.typ` line numbers. This mapping is rebuilt on every buffer update.
 
-For every LSP request that carries a position (definition, hover, completion,
-formatting), `knot-lsp`:
+For Typst requests forwarded to Tinymist (for example hover and completion),
+`knot-lsp`:
 
 1. Checks if the document is a `.knot` file.
 2. Maps the `.knot` position to the corresponding `.typ` position.
@@ -53,7 +53,7 @@ Tinymist:
 |---|---|---|
 | Completion | `handlers/completion.rs` | `#\| ` triggers chunk-option completion |
 | Hover | `handlers/hover.rs` | Hover over option names shows docs from `OptionMetadata` |
-| Formatting | `handlers/formatting.rs` | Air (R) + Ruff (Python) + Tinymist (Typst) |
+| Formatting | `handlers/formatting.rs` | Shared `knot-core::formatting` engine: Air + Ruff + embedded Typstyle |
 | Diagnostics | `diagnostics.rs` | Merges parse errors + runtime errors from cache |
 | Symbols | `symbols.rs` | Document symbols for the `.knot` file |
 
@@ -181,3 +181,15 @@ the PDF. `handle_tinymist_show_document` in `server_impl.rs`:
    in `state.rs`.
 3. **If it is a custom method** (like `knot/startPreview`): register it with
    `LspService::build` in `main.rs`.
+
+## Shared document formatting
+
+The CLI and LSP call `knot_core::formatting::format_document`. The LSP runs it on a
+blocking worker and checks the source version before returning a whole-document
+edit. It no longer opens or updates a Tinymist overlay for formatting.
+
+The core validates Knot blocks, formats their code, and substitutes unique opaque
+raw placeholders before invoking the pinned Typstyle library. Reconstruction
+checks placeholder identity, uniqueness and order; any mismatch is an error.
+This formatting representation is separate from the virtual document used for
+hover, completion and diagnostics, whose positions must remain aligned.

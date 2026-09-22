@@ -23,6 +23,7 @@ toml = "1"
 uuid = { version = "1.0", features = ["v4"] }
 xxhash-rust = { version = "0.8", features = ["xxh64"] }
 serde_yaml = "0.9.34"
+typstyle-core = "=0.15.1"
 
 [dev-dependencies]
 insta = "1"
