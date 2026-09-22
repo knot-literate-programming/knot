@@ -12,7 +12,8 @@ const execFileAsync = promisify(execFile);
  */
 export async function runKnotCommand(knotPath: string, args: string[], outputChannel?: OutputChannel, cwd?: string): Promise<string> {
     try {
-        const { stdout } = await execFileAsync(knotPath, args, cwd ? { cwd } : {});
+        const { stdout, stderr } = await execFileAsync(knotPath, args, cwd ? { cwd } : {});
+        if (stderr.trim()) outputChannel?.appendLine(stderr.trimEnd());
         return stdout.trim();
     } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
