@@ -17,7 +17,6 @@ use crate::parser::Show;
 use anyhow::{Context, Result};
 use log::info;
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
@@ -53,7 +52,6 @@ struct ChainContext<'a> {
     lang: &'a str,
     cache: &'a Arc<Mutex<Cache>>,
     backend: &'a TypstBackend,
-    project_root: &'a Path,
 }
 
 /// Group planned nodes by language, preserving their original document indices.
@@ -75,10 +73,6 @@ pub(super) fn group_by_language(
 ///
 /// When `progress` is `Some`, a [`ProgressEvent`] is sent after each node
 /// completes. `Sender::send` is non-blocking and safe to call from any thread.
-// All arguments are required: lang+nodes (chain identity), exec (executor ownership),
-// cache (shared state), backend+config+project_root (render context), progress (streaming).
-// Grouping them into a struct would not reduce coupling and would scatter the call sites.
-#[expect(clippy::too_many_arguments)]
 pub(super) fn run_language_chain(
     lang: String,
     nodes: Vec<(usize, PlannedNode)>,
@@ -86,14 +80,12 @@ pub(super) fn run_language_chain(
     cache: Arc<Mutex<Cache>>,
     backend: &TypstBackend,
     config: &Config,
-    project_root: &Path,
     progress: Option<Sender<ProgressEvent>>,
 ) -> Result<ChainOutput> {
     let ctx = ChainContext {
         lang: &lang,
         cache: &cache,
         backend,
-        project_root,
     };
     let mut sm = SnapshotManager::new(exec);
     let mut indexed = Vec::with_capacity(nodes.len());
@@ -176,16 +168,11 @@ fn process_node(
                         output,
                         state,
                     );
-                    {
-                        let cache_guard = ctx.cache.lock().unwrap();
-                        sm.update_after_node(
-                            ctx.lang,
-                            &pn.hash,
-                            &pn.previous_hash,
-                            &cache_guard,
-                            ctx.project_root,
-                        )?;
-                    }
+                    SnapshotManager::activate_cached(
+                        ctx.lang,
+                        &pn.hash,
+                        &mut ctx.cache.lock().unwrap(),
+                    )?;
                     Ok((content, false))
                 }
             }
@@ -194,31 +181,12 @@ fn process_node(
         ExecutionNeed::CacheHitInline(result) => {
             info!("  ✓ [cached inline]");
             let result_clone = result.clone();
-            {
-                let cache_guard = ctx.cache.lock().unwrap();
-                sm.update_after_node(
-                    ctx.lang,
-                    &pn.hash,
-                    &pn.previous_hash,
-                    &cache_guard,
-                    ctx.project_root,
-                )?;
-            }
+            SnapshotManager::activate_cached(ctx.lang, &pn.hash, &mut ctx.cache.lock().unwrap())?;
             Ok((result_clone, false))
         }
 
         ExecutionNeed::Skip => {
             let content = skip_output(pn, ctx.backend, state);
-            {
-                let cache_guard = ctx.cache.lock().unwrap();
-                sm.update_after_node(
-                    ctx.lang,
-                    &pn.hash,
-                    &pn.previous_hash,
-                    &cache_guard,
-                    ctx.project_root,
-                )?;
-            }
             Ok((content, false))
         }
 
@@ -239,11 +207,11 @@ fn handle_must_execute(
     // Lock only for the read, release before executing.
     {
         let cache_guard = ctx.cache.lock().unwrap();
-        sm.restore_if_needed(ctx.lang, &pn.previous_hash, &cache_guard, ctx.project_root)?;
+        sm.restore_if_needed(ctx.lang, &pn.previous_hash, &cache_guard)?;
     }
 
     // All executor interactions are confined to this block so that the borrow
-    // of sm.exec ends before sm.update_after_node is called below.
+    // of sm.exec ends before sm.record_execution is called below.
     let output = {
         // Language not supported: show an error block and cascade Inert.
         // Not cached — an unsupported language is not a deterministic runtime state.
@@ -263,7 +231,7 @@ fn handle_must_execute(
 
         // Infrastructure failure (process crash, timeout…): error block, cascade Inert.
         // Not cached — not a deterministic runtime state.
-        let attempt = match execute_for_node(pn, exec, ctx.cache) {
+        let attempt = match execute_for_node(pn, exec) {
             Err(e) => {
                 return Ok((
                     format_error_block_for_node(&pn.kind, ctx.lang, &e.to_string()),
@@ -285,13 +253,6 @@ fn handle_must_execute(
             ExecutionAttempt::Success(output) => output,
         };
 
-        // Successful execution: register freeze objects if declared.
-        if let PlannedNodeKind::Chunk { node: chunk, .. } = &pn.kind
-            && !chunk.options.freeze.is_empty()
-        {
-            register_freeze_objects(chunk, exec, ctx.cache, ctx.project_root)?;
-        }
-
         // Check freeze contract.
         // IMPORTANT: save_result is only called when the contract passes.
         // A violating chunk must NOT be cached as success — if it were,
@@ -305,20 +266,26 @@ fn handle_must_execute(
             ));
         }
 
+        // Successful execution: register freeze objects if declared.
+        if let PlannedNodeKind::Chunk { node: chunk, data } = &pn.kind
+            && !data.chunk_options.freeze.is_empty()
+        {
+            register_freeze_objects(chunk, &data.chunk_options.freeze, exec, ctx.cache)?;
+        }
+
         output
     }; // exec (and its borrow of sm.exec) is released here.
 
     // Contract OK: persist result to cache, advance snapshot pointer.
+    sm.record_execution(ctx.lang, &pn.hash, &mut ctx.cache.lock().unwrap())?;
     cache_chunk_result(pn, &output, ctx.cache)?;
+    if matches!(pn.kind, PlannedNodeKind::Inline { .. })
+        && let ExecutionResult::Text(text) = &output.result
     {
-        let cache_guard = ctx.cache.lock().unwrap();
-        sm.update_after_node(
-            ctx.lang,
-            &pn.hash,
-            &pn.previous_hash,
-            &cache_guard,
-            ctx.project_root,
-        )?;
+        ctx.cache
+            .lock()
+            .unwrap()
+            .save_inline_result(pn.hash.clone(), text)?;
     }
     Ok((
         format_executed_node(pn, &output, ctx.backend, &ChunkExecutionState::Ready),
@@ -380,7 +347,6 @@ fn cache_chunk_result(
 fn execute_for_node(
     pn: &PlannedNode,
     exec: &mut Box<dyn KnotExecutor>,
-    cache: &Arc<Mutex<Cache>>,
 ) -> Result<ExecutionAttempt> {
     match &pn.kind {
         PlannedNodeKind::Chunk { node: chunk, data } => {
@@ -409,11 +375,6 @@ fn execute_for_node(
                 Show::Output | Show::Both => result,
                 Show::Code | Show::None | Show::Replace => String::new(),
             };
-
-            cache
-                .lock()
-                .unwrap()
-                .save_inline_result(pn.hash.clone(), &final_result)?;
 
             Ok(ExecutionAttempt::Success(ExecutionOutput {
                 result: ExecutionResult::Text(final_result),

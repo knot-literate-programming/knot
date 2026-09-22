@@ -41,16 +41,22 @@ pub(super) fn resolve_options(
 
 /// Computes the chunk hash from code, options, previous hash, and file dependencies.
 ///
-/// Freeze objects are intentionally excluded from the hash: their immutability
-/// is enforced by the snapshot mechanism, and cache invalidation propagates
-/// correctly through hash chaining (`previous_hash`).
+/// Dependencies resolve against the project root, independent of process cwd.
 pub(super) fn compute_hash(
+    language: &str,
     code: &str,
     chunk_options: &ChunkOptions,
     previous_hash: &str,
+    project_root: &std::path::Path,
 ) -> Result<String> {
-    let deps_hash = hash_dependencies(&chunk_options.depends)?;
+    let dependencies: Vec<_> = chunk_options
+        .depends
+        .iter()
+        .map(|path| project_root.join(path))
+        .collect();
+    let deps_hash = hash_dependencies(&dependencies)?;
     Ok(hashing::get_chunk_hash(
+        language,
         code,
         chunk_options,
         previous_hash,

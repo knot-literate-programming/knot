@@ -1,214 +1,138 @@
-//! Snapshot Management for Incremental Compilation
-//!
-//! Handles loading, saving, and restoring language runtime state (snapshots)
-//! to enable incremental compilation and state persistence across chunks.
-//!
-//! The `SnapshotManager` owns the executor for its language chain, so that
-//! snapshot operations (`restore_if_needed`, `update_after_node`) can access
-//! the executor directly without requiring it to be threaded through every
-//! call site as a `&mut Option<Box<dyn KnotExecutor>>`.
+//! Snapshot state follows the executed prefix of one language chain.
 #![allow(missing_docs)]
 
-use crate::cache::Cache;
-use crate::defaults::Defaults;
+use crate::cache::{Cache, SnapshotEntry, hashing::hash_file};
 use crate::executors::KnotExecutor;
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use std::collections::HashMap;
-use std::path::Path;
-
-/// Returns up to the first 8 characters of a hash string, safe for any length.
-fn short_hash(h: &str) -> &str {
-    &h[..h.len().min(8)]
-}
 
 pub struct SnapshotManager {
-    /// Tracks the hash of the snapshot currently loaded in the executor.
-    loaded_snapshot_per_lang: HashMap<String, String>,
-    /// The executor owned by this manager (one per language chain).
+    loaded_hash: Option<String>,
     exec: Option<Box<dyn KnotExecutor>>,
 }
 
 impl SnapshotManager {
     pub fn new(exec: Option<Box<dyn KnotExecutor>>) -> Self {
         Self {
-            loaded_snapshot_per_lang: HashMap::new(),
+            loaded_hash: None,
             exec,
         }
     }
 
-    /// Consume the manager and return the executor back to the caller.
-    ///
-    /// Called at the end of a language chain so the executor can be returned
-    /// to the `ExecutorManager`.
     pub fn into_executor(self) -> Option<Box<dyn KnotExecutor>> {
         self.exec
     }
 
-    /// Returns a mutable reference to the executor box, or `None` if the
-    /// language is not supported.  Callers that require an executor handle the
-    /// `None` case once; method calls on the box are auto-dereffed through
-    /// `Box<dyn KnotExecutor>` transparently.
     pub fn executor_mut(&mut self) -> Option<&mut Box<dyn KnotExecutor>> {
         self.exec.as_mut()
     }
 
-    /// Ensure the executor is in the state corresponding to `previous_hash`.
-    ///
-    /// If the executor is `None` (language not started), returns `Ok(())`
-    /// immediately.
+    /// Activate the freeze declarations from this prefix, without starting an
+    /// interpreter or pretending that cached code has just executed.
+    pub fn activate_cached(lang: &str, hash: &str, cache: &mut Cache) -> Result<()> {
+        let frozen = cache
+            .metadata
+            .snapshots
+            .get(hash)
+            .context("Missing snapshot metadata for cached execution")?
+            .freeze_objects
+            .clone();
+        cache
+            .metadata
+            .freeze_objects
+            .retain(|_, info| info.language != lang);
+        cache.metadata.freeze_objects.extend(frozen);
+        Ok(())
+    }
+
     pub fn restore_if_needed(
         &mut self,
         lang: &str,
         previous_hash: &str,
         cache: &Cache,
-        project_root: &Path,
     ) -> Result<()> {
-        let exec = match self.exec.as_deref_mut() {
-            Some(e) => e,
-            None => return Ok(()),
-        };
-
-        if previous_hash.is_empty() {
+        if previous_hash.is_empty() || self.loaded_hash.as_deref() == Some(previous_hash) {
             return Ok(());
         }
-
-        let current_loaded = self
-            .loaded_snapshot_per_lang
-            .get(lang)
-            .cloned()
-            .unwrap_or_default();
-
-        if current_loaded != previous_hash {
-            let ext = exec.snapshot_extension();
-            let snapshot_path = cache.get_snapshot_path(previous_hash, ext);
-
-            if snapshot_path.exists() {
-                log::debug!(
-                    "Restoring state for {} from {}",
-                    lang,
-                    if previous_hash.is_empty() {
-                        "N/A"
-                    } else {
-                        short_hash(previous_hash)
-                    }
-                );
-
-                exec.load_session(&snapshot_path).context(format!(
-                    "Failed to restore {} session snapshot for hash {}",
-                    lang,
-                    short_hash(previous_hash)
-                ))?;
-
-                // Also restore constant objects for this language.
-                let cache_dir = project_root.join(Defaults::CACHE_DIR_NAME);
-                for info in cache.metadata.freeze_objects.values() {
-                    if info.language == lang {
-                        exec.load_constant(&info.name, &info.hash, &cache_dir)
-                            .context(format!(
-                                "Failed to load constant '{}' into {} environment",
-                                info.name, lang
-                            ))?;
-                    }
-                }
-
-                self.loaded_snapshot_per_lang
-                    .insert(lang.to_string(), previous_hash.to_string());
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Update the snapshot state after execution or cache hit.
-    ///
-    /// If the executor is `None`, returns `Ok(())` immediately — for
-    /// cache-hit-only chains the snapshot already exists on disk and no
-    /// executor operations are needed.
-    pub fn update_after_node(
-        &mut self,
-        lang: &str,
-        node_hash: &str,
-        previous_hash: &str,
-        cache: &Cache,
-        project_root: &Path,
-    ) -> Result<()> {
-        let exec = match self.exec.as_deref_mut() {
-            Some(e) => e,
-            None => return Ok(()),
+        let Some(exec) = self.exec.as_deref_mut() else {
+            return Ok(());
         };
-
-        let ext = exec.snapshot_extension();
-        let snapshot_path = cache.get_snapshot_path(node_hash, ext);
-        let snapshot_exists = cache.has_snapshot(node_hash, ext);
-        let cache_dir = project_root.join(Defaults::CACHE_DIR_NAME);
-
-        if !snapshot_exists {
-            // CASE 1: Cache Miss (Executed)
-            // The executor has just run the code. It is in state `node_hash`.
-
-            // Temporarily remove constant objects to keep the snapshot lightweight.
-            for info in cache.metadata.freeze_objects.values() {
-                if info.language == lang {
-                    exec.remove_from_env(&info.name).context(format!(
-                        "Failed to remove constant object '{}' from environment",
-                        info.name
-                    ))?;
-                }
-            }
-
-            exec.save_session(&snapshot_path).context(format!(
-                "Failed to save {} session snapshot for hash {}",
-                lang,
-                short_hash(node_hash)
-            ))?;
-
-            // Restore constant objects to environment.
-            for info in cache.metadata.freeze_objects.values() {
-                if info.language == lang {
-                    exec.load_constant(&info.name, &info.hash, &cache_dir)
-                        .context(format!(
-                            "Failed to restore constant object '{}' to environment",
-                            info.name
-                        ))?;
-                }
-            }
-
-            log::debug!(
-                "💾 Saved lightweight snapshot for node {} (lang: {})",
-                if node_hash.is_empty() {
-                    "N/A"
-                } else {
-                    short_hash(node_hash)
-                },
-                lang
-            );
-
-            self.loaded_snapshot_per_lang
-                .insert(lang.to_string(), node_hash.to_string());
-        } else {
-            // CASE 2: Cache Hit (Skipped)
-            // The executor did NOT run the code. It is still in state `previous_hash`.
-            // We do NOTHING here. loaded_snapshot_per_lang remains `previous_hash`.
-            log::debug!(
-                "⚡ Chunk {} cached. Executor stays at state {}.",
-                if node_hash.is_empty() {
-                    "N/A"
-                } else {
-                    short_hash(node_hash)
-                },
-                if previous_hash.is_empty() {
-                    "N/A"
-                } else {
-                    short_hash(previous_hash)
-                }
+        if !cache.snapshot_is_valid(previous_hash) {
+            bail!(
+                "Cannot restore {lang} state: snapshot {previous_hash} is missing or changed; rebuild the document"
             );
         }
-
+        let snapshot_path = cache.get_snapshot_path(previous_hash, exec.snapshot_extension());
+        exec.load_session(&snapshot_path).with_context(|| {
+            format!(
+                "Failed to restore {lang} snapshot {}",
+                snapshot_path.display()
+            )
+        })?;
+        cache.restore_constants(previous_hash, exec)?;
+        self.loaded_hash = Some(previous_hash.to_string());
         Ok(())
     }
 
-    /// Mark a language state as potentially dirty or reset it.
-    pub fn reset_loaded_state(&mut self, lang: &str) {
-        self.loaded_snapshot_per_lang.remove(lang);
+    /// Always replace the snapshot after actual execution, including cache:false
+    /// and cache repairs. File existence alone does not identify interpreter state.
+    pub fn record_execution(&mut self, lang: &str, hash: &str, cache: &mut Cache) -> Result<()> {
+        let Some(exec) = self.exec.as_deref_mut() else {
+            return Ok(());
+        };
+        let frozen: HashMap<_, _> = cache
+            .metadata
+            .freeze_objects
+            .iter()
+            .filter(|(_, info)| info.language == lang)
+            .map(|(key, info)| (key.clone(), info.clone()))
+            .collect();
+        for info in frozen.values() {
+            exec.remove_from_env(&info.name)?;
+        }
+        let snapshot = cache.get_snapshot_path(hash, exec.snapshot_extension());
+        let saved = exec.save_session(&snapshot);
+        // Restore constants even if saving failed, before propagating the error.
+        for info in frozen.values() {
+            exec.load_constant(&info.name, &info.hash, &cache.cache_dir)?;
+        }
+        saved.with_context(|| format!("Failed to save {lang} snapshot {}", snapshot.display()))?;
+
+        let reusable = !snapshot.with_extension("replay").exists();
+        let mut paths = vec![snapshot];
+        if exec.snapshot_extension() == "RData" {
+            paths.push(
+                cache
+                    .cache_dir
+                    .join(format!("snapshot_{hash}_packages.rds")),
+            );
+        }
+        for info in frozen.values() {
+            paths.push(cache.cache_dir.join("objects").join(format!(
+                "{}.{}",
+                info.hash,
+                exec.object_extension()
+            )));
+        }
+        let files = paths
+            .into_iter()
+            .map(|path| {
+                let relative = path
+                    .strip_prefix(&cache.cache_dir)?
+                    .to_string_lossy()
+                    .into_owned();
+                Ok((relative, hash_file(&path)?))
+            })
+            .collect::<Result<_>>()?;
+        cache.metadata.snapshots.insert(
+            hash.to_string(),
+            SnapshotEntry {
+                reusable,
+                files,
+                freeze_objects: frozen,
+            },
+        );
+        self.loaded_hash = Some(hash.to_string());
+        Ok(())
     }
 }

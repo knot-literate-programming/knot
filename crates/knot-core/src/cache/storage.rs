@@ -6,7 +6,7 @@
 // - Saving chunk execution results to cache files
 // - Loading cached results from files
 
-use super::metadata::CacheMetadata;
+use super::metadata::{CACHE_FORMAT_VERSION, CacheMetadata};
 use crate::executors::{ExecutionAttempt, ExecutionOutput, ExecutionResult};
 use anyhow::{Result, anyhow};
 use log::warn;
@@ -30,8 +30,12 @@ pub fn load_metadata(cache_dir: &Path) -> CacheMetadata {
             }
         };
 
-        match serde_json::from_str(&content) {
-            Ok(metadata) => metadata,
+        match serde_json::from_str::<CacheMetadata>(&content) {
+            Ok(metadata) if metadata.format_version == CACHE_FORMAT_VERSION => metadata,
+            Ok(_) => {
+                warn!("Ignoring incompatible cache metadata");
+                CacheMetadata::default()
+            }
             Err(e) => {
                 warn!(
                     "Failed to parse cache metadata ({:?}). Ignoring cache. Error: {}",
@@ -94,8 +98,12 @@ pub fn get_cached_result(
     // Verify all files exist
     for file in &entry.files {
         let path = cache_dir.join(file);
-        if !path.exists() {
-            return Err(anyhow!("Cache file missing: {:?}", path));
+        let expected = entry
+            .file_hashes
+            .get(file)
+            .ok_or_else(|| anyhow!("Missing cache checksum: {}", file))?;
+        if super::hashing::hash_file(&path)? != *expected {
+            return Err(anyhow!("Cache file changed: {:?}", path));
         }
     }
 

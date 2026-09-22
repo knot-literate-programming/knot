@@ -57,6 +57,7 @@ impl LanguageExecutor for PythonExecutor {
         for (_name, content) in crate::PYTHON_HELPERS {
             self.query(content)?;
         }
+        self.query("_knot_initial_bindings = globals().copy()")?;
         log::info!("✓ Loaded knot Python helper scripts");
 
         Ok(())

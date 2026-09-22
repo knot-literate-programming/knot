@@ -11,65 +11,96 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::PathBuf;
 
-/// Computes SHA256 hash for a chunk
-///
-/// Hash includes:
-/// - Code content
-/// - Serialized options (eval, show, cache, graphics, etc.)
-/// - Previous chunk hash (for sequential invalidation)
-/// - Dependencies hash (for file-based invalidation)
-/// - Scripts version (fingerprint of embedded R/Python helpers — ensures
-///   cache entries are invalidated whenever the runtime scripts change)
+/// Hash an execution using unambiguous, length-prefixed fields.
+/// The version namespaces both the identity rules and the snapshot format.
+fn hash_fields(fields: &[&[u8]]) -> String {
+    let mut hasher = Sha256::new();
+    for field in fields {
+        hasher.update((field.len() as u64).to_le_bytes());
+        hasher.update(field);
+    }
+    format!("{:x}", hasher.finalize())
+}
+
+/// Computes a chunk's execution identity. Presentation options are deliberately
+/// excluded: cached raw results are rendered again with the current options.
 pub fn get_chunk_hash(
+    language: &str,
     code: &str,
     options: &ChunkOptions,
     previous_hash: &str,
     dependencies_hash: &str,
 ) -> String {
-    let options_str = serde_json::to_string(options).unwrap_or_default();
-    let chunk_content = format!(
-        "{}|{}|{}|{}|{}",
+    chunk_hash_with_version(
+        language,
         code,
-        options_str,
+        options,
         previous_hash,
         dependencies_hash,
-        *crate::SCRIPTS_VERSION,
-    );
-
-    let mut hasher = Sha256::new();
-    hasher.update(chunk_content.as_bytes());
-    format!("{:x}", hasher.finalize())
+        &crate::SCRIPTS_VERSION,
+    )
 }
 
-/// Computes SHA256 hash for an inline expression
-///
-/// Hash includes:
-/// - Code content
-/// - Options (show, eval, digits)
-/// - Previous inline expression hash (for sequential invalidation)
-/// - Scripts version (same invalidation guarantee as chunk hashes)
+fn chunk_hash_with_version(
+    language: &str,
+    code: &str,
+    options: &ChunkOptions,
+    previous_hash: &str,
+    dependencies_hash: &str,
+    scripts_version: &str,
+) -> String {
+    let resolved = options.resolve();
+    let execution_options = format!(
+        "{}|{}|{}|{}|{:?}",
+        resolved.eval, resolved.fig_width, resolved.fig_height, resolved.dpi, resolved.fig_format
+    );
+    let freeze = hash_fields(
+        &options
+            .freeze
+            .iter()
+            .map(|name| name.as_bytes())
+            .collect::<Vec<_>>(),
+    );
+    hash_fields(&[
+        b"knot-cache-v2",
+        b"chunk",
+        language.as_bytes(),
+        code.as_bytes(),
+        execution_options.as_bytes(),
+        freeze.as_bytes(),
+        previous_hash.as_bytes(),
+        dependencies_hash.as_bytes(),
+        scripts_version.as_bytes(),
+    ])
+}
+
+/// Computes an inline expression identity, including its language and rendering
+/// options because inline cache entries contain the formatted text.
 pub fn get_inline_expr_hash(
+    language: &str,
     code: &str,
     options: &crate::parser::InlineOptions,
     previous_hash: &str,
 ) -> String {
     let resolved = options.resolve();
-    // Include options in hash to invalidate cache when options change
-    let options_str = format!(
-        "show={:?},eval={},digits={:?}",
+    let options = format!(
+        "{:?}|{}|{:?}",
         resolved.show, resolved.eval, resolved.digits
     );
-    let inline_content = format!(
-        "{}|{}|{}|{}",
-        code,
-        options_str,
-        previous_hash,
-        *crate::SCRIPTS_VERSION,
-    );
+    hash_fields(&[
+        b"knot-cache-v2",
+        b"inline",
+        language.as_bytes(),
+        code.as_bytes(),
+        options.as_bytes(),
+        previous_hash.as_bytes(),
+        crate::SCRIPTS_VERSION.as_bytes(),
+    ])
+}
 
-    let mut hasher = Sha256::new();
-    hasher.update(inline_content.as_bytes());
-    format!("{:x}", hasher.finalize())
+/// Fingerprint a file's actual contents, for cache integrity checks.
+pub fn hash_file(path: &std::path::Path) -> Result<String> {
+    Ok(format!("{:x}", Sha256::digest(fs::read(path)?)))
 }
 
 /// Computes combined hash for file dependencies
@@ -103,4 +134,42 @@ pub fn hash_dependencies(depends: &[PathBuf]) -> Result<String> {
     }
 
     Ok(format!("{:x}", outer_hasher.finalize()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::{InlineOptions, Show};
+
+    #[test]
+    fn identity_includes_language_scripts_graphics_freeze_and_dependencies() {
+        let base = ChunkOptions::default();
+        let hash = |lang: &str, options: &ChunkOptions, prev: &str, deps: &str, version: &str| {
+            chunk_hash_with_version(lang, "print(1)", options, prev, deps, version)
+        };
+        let original = hash("r", &base, "", "", "v1");
+        assert_ne!(original, hash("python", &base, "", "", "v1"));
+        assert_ne!(original, hash("r", &base, "", "", "v2"));
+        assert_ne!(original, hash("r", &base, "prefix", "", "v1"));
+        assert_ne!(original, hash("r", &base, "", "data", "v1"));
+        let mut changed = base.clone();
+        changed.fig_width = Some(99.0);
+        assert_ne!(original, hash("r", &changed, "", "", "v1"));
+        changed = base.clone();
+        changed.freeze = vec!["x".into()];
+        assert_ne!(original, hash("r", &changed, "", "", "v1"));
+        changed = base;
+        changed.show = Some(Show::None);
+        changed.cache = Some(false);
+        assert_eq!(original, hash("r", &changed, "", "", "v1"));
+    }
+
+    #[test]
+    fn field_boundaries_and_inline_language_cannot_collide() {
+        assert_ne!(hash_fields(&[b"a", b"bc"]), hash_fields(&[b"ab", b"c"]));
+        assert_ne!(
+            get_inline_expr_hash("r", "1", &InlineOptions::default(), ""),
+            get_inline_expr_hash("python", "1", &InlineOptions::default(), "")
+        );
+    }
 }

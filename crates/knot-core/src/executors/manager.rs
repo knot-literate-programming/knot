@@ -62,6 +62,7 @@ pub struct ExecutorManager {
     executors: HashMap<String, Box<dyn KnotExecutor>>,
     cache_dir: PathBuf,
     timeout: Duration,
+    working_directory: Option<PathBuf>,
 }
 
 impl ExecutorManager {
@@ -79,7 +80,14 @@ impl ExecutorManager {
             executors: HashMap::new(),
             cache_dir,
             timeout,
+            working_directory: None,
         }
+    }
+
+    /// Set the working directory for new interpreter sessions.
+    pub fn with_working_directory(mut self, root: PathBuf) -> Self {
+        self.working_directory = Some(root);
+        self
     }
 
     /// Get or initialize an executor for the given language
@@ -92,7 +100,7 @@ impl ExecutorManager {
                     .parse::<crate::defaults::Language>()
                     .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-                let executor: Box<dyn KnotExecutor> = match language {
+                let mut executor: Box<dyn KnotExecutor> = match language {
                     crate::defaults::Language::R => {
                         let mut exec = RExecutor::new(self.cache_dir.clone(), self.timeout)?;
                         exec.initialize()?;
@@ -105,6 +113,16 @@ impl ExecutorManager {
                     } // Compiler enforces exhaustive matching - adding a new Language
                       // variant will cause a compilation error here
                 };
+                if let Some(root) = &self.working_directory {
+                    let root = super::path_utils::escape_path_for_code(root);
+                    let code = match language {
+                        crate::defaults::Language::R => format!("setwd('{root}')"),
+                        crate::defaults::Language::Python => {
+                            format!("__import__('os').chdir('{root}')")
+                        }
+                    };
+                    executor.execute_inline(&code)?;
+                }
                 entry.insert(executor)
             }
         };

@@ -5,7 +5,7 @@ passes is the prerequisite for almost any change to how Knot executes code.
 
 ---
 
-## Pass 1 — Planning (`pipeline.rs`)
+## Pass 1 — Planning (`mod.rs`; types in `pipeline.rs`)
 
 **Input**: parsed `Vec<Node>` + cache
 **Output**: `Vec<PlannedNode>` — every node annotated with `ExecutionNeed`
@@ -18,7 +18,7 @@ Planning does four things:
 2. **Compute a chained SHA-256 hash** for each chunk in each language chain.
    The hash of chunk N covers:
    - the chunk's source code
-   - its resolved options
+   - its language, execution options, freeze declarations, dependencies and script version
    - the hash of chunk N-1 in the same language
 
    Because hashes chain, editing chunk 3 changes the hash of chunk 4, 5, 6, …
@@ -26,8 +26,8 @@ Planning does four things:
 
 3. **Classify each chunk**:
    - `Skip` — `eval: false` option
-   - `CacheHit(attempt)` — hash matched a cache entry
-   - `MustExecute` — hash not in cache (new or changed)
+   - `CacheHit(attempt)` — matching result and restorable snapshot are intact (cached runtime errors need no snapshot)
+   - `MustExecute` — missing/invalid cache, disabled reuse, or an upstream node that must execute
 
 4. **Apply Phase0Mode** when assembling the partial document (for live preview):
    - `Phase0Mode::Pending` (during `do_compile`): all `MustExecute` chunks get
@@ -66,7 +66,7 @@ The `ExecutorManager` uses a take/put-back pattern so executors can be moved
 into threads without lifetime issues.
 
 `SnapshotManager` saves and restores interpreter state (the R/Python environment
-just before each chunk). This allows re-executing chunk 5 in a 20-chunk document
+after each successfully executed node). This allows re-executing chunk 5 in a 20-chunk document
 without re-running chunks 1-4.
 
 ---
@@ -135,3 +135,6 @@ pub fn compile_project_phase0_unsaved(
     mode: Phase0Mode,
 ) -> Result<ProjectOutput>
 ```
+
+See [Cache and Execution State](./caching.md) for isolation, repair, freeze, and
+non-serializable Python state.

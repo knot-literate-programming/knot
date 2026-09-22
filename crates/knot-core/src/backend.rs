@@ -214,20 +214,20 @@ fn push_output_arg(
         }
         ExecutionResult::Plot(path) => {
             let abs_plot = path.canonicalize().unwrap_or_else(|_| path.clone());
-            format!("[#image(\"{}\")]", abs_plot.to_string_lossy())
+            format!("[#image(\"{}\")]", escape_typst_path(&abs_plot))
         }
         ExecutionResult::DataFrame(csv_path) => {
             let abs_csv = csv_path.canonicalize().unwrap_or_else(|_| csv_path.clone());
             format!(
                 "[#{{ let data = csv(\"{}\"); table(columns: data.first().len(), ..data.flatten()) }}]",
-                abs_csv.to_string_lossy()
+                escape_typst_path(&abs_csv)
             )
         }
         ExecutionResult::TextAndPlot { text, plot } => {
             let abs_plot = plot.canonicalize().unwrap_or_else(|_| plot.clone());
             format!(
                 "[#image(\"{}\")\n```output\n{}```]",
-                abs_plot.to_string_lossy(),
+                escape_typst_path(&abs_plot),
                 text.trim()
             )
         }
@@ -238,8 +238,8 @@ fn push_output_arg(
             let abs_plot = plot.canonicalize().unwrap_or_else(|_| plot.clone());
             format!(
                 "[#{{ let data = csv(\"{}\"); table(columns: data.first().len(), ..data.flatten()) }}\n#image(\"{}\")]",
-                abs_csv.to_string_lossy(),
-                abs_plot.to_string_lossy()
+                escape_typst_path(&abs_csv),
+                escape_typst_path(&abs_plot)
             )
         }
         _ => "none".to_string(),
@@ -307,6 +307,16 @@ fn push_presentation_args(resolved_options: &ResolvedChunkOptions, args: &mut Ve
     if let Some(v) = &resolved_options.align {
         args.push(format!("align: \"{}\"", v));
     }
+}
+
+/// Escape filesystem paths embedded in Typst string literals.
+pub(crate) fn escape_typst_path(path: &std::path::Path) -> String {
+    path.to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
 }
 
 #[cfg(test)]

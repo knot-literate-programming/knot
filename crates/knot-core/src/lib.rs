@@ -100,13 +100,26 @@ use anyhow::{Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Returns the path to the knot cache directory.
-///
-/// # Arguments
-/// * `project_root` - Path to the project root directory
-/// * `sub_dir` - Sub-directory for isolation (e.g., "main" or "01-intro")
-pub fn get_cache_dir(project_root: &Path, sub_dir: &str) -> PathBuf {
-    project_root.join(Defaults::CACHE_DIR_NAME).join(sub_dir)
+/// Return a versioned cache directory keyed by the complete document path.
+/// Existing paths are canonicalized so symlink/relative aliases share a cache,
+/// while equal basenames in different directories never share execution state.
+pub fn get_cache_dir(project_root: &Path, document_path: impl AsRef<Path>) -> PathBuf {
+    use sha2::{Digest, Sha256};
+    let path = document_path.as_ref();
+    let path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        project_root.join(path)
+    };
+    let identity = path.canonicalize().unwrap_or(path);
+    let key = format!(
+        "{:x}",
+        Sha256::digest(identity.as_os_str().as_encoded_bytes())
+    );
+    project_root
+        .join(Defaults::CACHE_DIR_NAME)
+        .join("v2")
+        .join(key)
 }
 
 /// Clean project (remove cache and generated files)

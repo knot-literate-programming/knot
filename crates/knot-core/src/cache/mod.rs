@@ -14,7 +14,9 @@ mod metadata;
 mod storage;
 
 pub use hashing::hash_dependencies;
-pub use metadata::{CacheMetadata, ChunkCacheEntry, FreezeObjectInfo, InlineCacheEntry};
+pub use metadata::{
+    CacheMetadata, ChunkCacheEntry, FreezeObjectInfo, InlineCacheEntry, SnapshotEntry,
+};
 
 use crate::executors::{ExecutionAttempt, ExecutionOutput};
 use anyhow::{Result, anyhow};
@@ -52,11 +54,12 @@ impl Cache {
     /// Computes hash for an inline expression (using sequential chaining)
     pub fn get_inline_expr_hash(
         &self,
+        language: &str,
         code: &str,
         options: &crate::parser::InlineOptions,
         previous_hash: &str,
     ) -> String {
-        hashing::get_inline_expr_hash(code, options, previous_hash)
+        hashing::get_inline_expr_hash(language, code, options, previous_hash)
     }
 
     /// Check if inline result is cached
@@ -112,6 +115,7 @@ impl Cache {
             language,
             hash,
             files: Vec::new(),
+            file_hashes: Default::default(),
             warnings: Vec::new(),
             error: Some(error),
             dependencies: dependencies
@@ -160,6 +164,16 @@ impl Cache {
             dependencies.clone(),
         )?;
 
+        let file_hashes = files_to_cache
+            .iter()
+            .map(|file| {
+                Ok((
+                    file.clone(),
+                    hashing::hash_file(&self.cache_dir.join(file))?,
+                ))
+            })
+            .collect::<Result<_>>()?;
+
         // Cache all chunks, even those without output files
         // The cache entry records that the chunk was executed successfully
         let new_entry = ChunkCacheEntry {
@@ -168,6 +182,7 @@ impl Cache {
             language,
             hash,
             files: files_to_cache,
+            file_hashes,
             warnings: output.warnings.clone(),
             error: None,
             dependencies: dependencies
@@ -202,6 +217,36 @@ impl Cache {
         self.get_snapshot_path(node_hash, extension).exists()
     }
 
+    /// Whether every file required to restore a snapshot is intact.
+    pub fn snapshot_is_valid(&self, hash: &str) -> bool {
+        self.metadata.snapshots.get(hash).is_some_and(|entry| {
+            entry.reusable
+                && !entry.files.is_empty()
+                && entry.files.iter().all(|(path, expected)| {
+                    hashing::hash_file(&self.cache_dir.join(path))
+                        .is_ok_and(|actual| actual == *expected)
+                })
+        })
+    }
+
+    /// Restore frozen objects associated with this snapshot, not with a later
+    /// state of the document. Shared by compilation and editor completion.
+    pub fn restore_constants(
+        &self,
+        hash: &str,
+        executor: &mut dyn crate::executors::KnotExecutor,
+    ) -> Result<()> {
+        let entry = self
+            .metadata
+            .snapshots
+            .get(hash)
+            .ok_or_else(|| anyhow!("Snapshot metadata missing: {}", hash))?;
+        for info in entry.freeze_objects.values() {
+            executor.load_constant(&info.name, &info.hash, &self.cache_dir)?;
+        }
+        Ok(())
+    }
+
     /// Save the cache metadata to disk
     ///
     /// Writes the metadata (including constant objects info) to metadata.json
@@ -225,14 +270,14 @@ mod tests {
         let _cache = Cache::new(cache_dir).unwrap();
         let opts = ChunkOptions::default();
 
-        let hash1 = hashing::get_chunk_hash("x <- 1", &opts, "", "");
-        let hash2 = hashing::get_chunk_hash("y <- x + 1", &opts, &hash1, "");
-        let hash3 = hashing::get_chunk_hash("z <- y * 2", &opts, &hash2, "");
+        let hash1 = hashing::get_chunk_hash("r", "x <- 1", &opts, "", "");
+        let hash2 = hashing::get_chunk_hash("r", "y <- x + 1", &opts, &hash1, "");
+        let hash3 = hashing::get_chunk_hash("r", "z <- y * 2", &opts, &hash2, "");
 
         // Changer chunk 1 invalide tout
-        let hash1_mod = hashing::get_chunk_hash("x <- 2", &opts, "", "");
-        let hash2_after = hashing::get_chunk_hash("y <- x + 1", &opts, &hash1_mod, "");
-        let hash3_after = hashing::get_chunk_hash("z <- y * 2", &opts, &hash2_after, "");
+        let hash1_mod = hashing::get_chunk_hash("r", "x <- 2", &opts, "", "");
+        let hash2_after = hashing::get_chunk_hash("r", "y <- x + 1", &opts, &hash1_mod, "");
+        let hash3_after = hashing::get_chunk_hash("r", "z <- y * 2", &opts, &hash2_after, "");
 
         assert_ne!(hash1, hash1_mod);
         assert_ne!(hash2, hash2_after);
@@ -253,13 +298,13 @@ mod tests {
         };
 
         let deps_hash1 = hash_dependencies(&opts.depends).unwrap();
-        let hash1 = hashing::get_chunk_hash("read.csv('data.csv')", &opts, "", &deps_hash1);
+        let hash1 = hashing::get_chunk_hash("r", "read.csv('data.csv')", &opts, "", &deps_hash1);
 
         // Modify file — content hashing detects the change immediately
         fs::write(&tmp_file, "a,b\n3,4").unwrap();
 
         let deps_hash2 = hash_dependencies(&opts.depends).unwrap();
-        let hash2 = hashing::get_chunk_hash("read.csv('data.csv')", &opts, "", &deps_hash2);
+        let hash2 = hashing::get_chunk_hash("r", "read.csv('data.csv')", &opts, "", &deps_hash2);
 
         assert_ne!(deps_hash1, deps_hash2);
         assert_ne!(hash1, hash2);
@@ -281,8 +326,8 @@ mod tests {
             ..Default::default()
         };
 
-        let hash1 = hashing::get_chunk_hash("x <- 1", &opts1, "", "");
-        let hash2 = hashing::get_chunk_hash("x <- 1", &opts2, "", "");
+        let hash1 = hashing::get_chunk_hash("r", "x <- 1", &opts1, "", "");
+        let hash2 = hashing::get_chunk_hash("r", "x <- 1", &opts2, "", "");
 
         assert_ne!(hash1, hash2);
     }

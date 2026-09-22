@@ -5,6 +5,17 @@ import sys
 import pickle
 import types
 import importlib
+import io
+
+
+class _KnotSnapshotPickler(pickle.Pickler):
+    def persistent_id(self, obj):
+        # Standard pickle cannot recreate user definitions in a fresh process,
+        # including references nested in lists or class instances. Replay instead.
+        if (getattr(obj, "__module__", None) == "__main__"
+                or getattr(type(obj), "__module__", None) == "__main__"):
+            raise pickle.PicklingError("Session contains a user-defined object")
+        return None
 
 
 def save_session(path):
@@ -13,9 +24,11 @@ def save_session(path):
         import __main__
         main_dict = __main__.__dict__
 
-        state = {'__knot_modules__': {}}
+        state = {'__knot_modules__': {}, '__knot_cwd__': os.getcwd()}
+        reusable = True
+        initial = main_dict.get('_knot_initial_bindings', {})
         for k, v in list(main_dict.items()):
-            if k.startswith('__') or k in ['save_session', 'load_session', 'typst', 'current_plot']:
+            if k.startswith('__') or k.startswith('_knot_') or (k in initial and v is initial[k]):
                 continue
 
             if isinstance(v, types.ModuleType):
@@ -23,10 +36,18 @@ def save_session(path):
                 continue
 
             try:
-                pickle.dumps(v)
+                _KnotSnapshotPickler(io.BytesIO()).dump(v)
                 state[k] = v
-            except:
-                pass
+            except Exception:
+                reusable = False
+
+        replay_path = os.path.splitext(path)[0] + '.replay'
+        if reusable:
+            if os.path.exists(replay_path):
+                os.remove(replay_path)
+        else:
+            with open(replay_path, 'w') as marker:
+                marker.write('Session requires replay: not all objects are serializable.')
 
         with open(path, 'wb') as f:
             pickle.dump(state, f)
@@ -48,12 +69,10 @@ def load_session(path):
         with open(path, 'rb') as f:
             state = pickle.load(f)
 
+        os.chdir(state.pop('__knot_cwd__'))
         modules = state.pop('__knot_modules__', {})
         for alias, name in modules.items():
-            try:
-                main_dict[alias] = importlib.import_module(name)
-            except:
-                pass
+            main_dict[alias] = importlib.import_module(name)
 
         main_dict.update(state)
         return True
