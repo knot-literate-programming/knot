@@ -52,6 +52,11 @@ fn build_command_fails_for_invalid_typst_in_include() {
         "Expected a Typst compilation error: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+    let diagnostics = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        diagnostics.contains("error:") && diagnostics.contains("main.typ:"),
+        "{diagnostics}"
+    );
     assert!(!project_root.join("main.pdf").exists());
 }
 

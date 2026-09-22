@@ -22,6 +22,13 @@ knot build
 Compiles the project to a `.typ` file, then calls `typst compile` to produce a
 PDF. Reads `knot.toml` from the current directory or any parent directory.
 
+Typst errors are printed on stderr with their locations and help text, and the
+command exits unsuccessfully. Locations refer to the generated `.typ` file.
+Warnings are also printed on stderr when compilation succeeds. If Typst cannot
+be launched, the error identifies the command and suggests checking `PATH`.
+In VS Code, build failures open the Knot output channel with the diagnostics;
+warnings from successful builds are retained in that channel.
+
 ## knot watch
 
 ```bash

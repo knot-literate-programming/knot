@@ -44,14 +44,28 @@ pub fn build_project(start_path: Option<&Path>) -> Result<()> {
         .arg(&output.main_typ_path)
         .arg(&pdf_output_path)
         .output()
-        .context("Failed to execute typst command.")?;
+        .with_context(|| format!("Failed to execute 'typst compile' for {}. Is Typst installed and available on PATH?", output.main_typ_path.display()))?;
 
     info!("⏱️  Typst execution: {:?}", start_typst.elapsed());
 
     if !typst_result.status.success() {
-        anyhow::bail!("Typst compilation failed.");
+        let diagnostics = String::from_utf8_lossy(&typst_result.stderr);
+        anyhow::bail!(
+            "Typst compilation failed for {} ({}).\n{}",
+            output.main_typ_path.display(),
+            typst_result.status,
+            if diagnostics.trim().is_empty() {
+                "Typst returned no diagnostics."
+            } else {
+                diagnostics.trim_end()
+            }
+        );
     }
 
+    // Typst can emit useful warnings even when it produces a PDF successfully.
+    if !typst_result.stderr.is_empty() {
+        eprint!("{}", String::from_utf8_lossy(&typst_result.stderr));
+    }
     println!(
         "✅ PDF generated: {} (Total time: {:?})",
         pdf_output_path.display(),

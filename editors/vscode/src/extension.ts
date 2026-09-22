@@ -499,7 +499,8 @@ async function buildProject(outputChannel: OutputChannel): Promise<void> {
     } catch (e) {
         showStatus();
         outputChannel.appendLine(`[build] Failed: ${e}`);
-        window.showErrorMessage(`Build failed: ${e}`);
+        outputChannel.show(true);
+        window.showErrorMessage('Build failed. See the Knot output channel for details.');
     }
 }
 
