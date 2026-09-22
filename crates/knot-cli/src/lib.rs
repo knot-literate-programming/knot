@@ -101,19 +101,5 @@ pub fn compile_file(file: &Path, output_path: Option<&PathBuf>) -> Result<PathBu
     Ok(typ_output_path)
 }
 
-/// Format a .knot file
-pub fn format_file(file_path: &Path, check_only: bool) -> Result<bool> {
-    let original_text = fs::read_to_string(file_path)?;
-    let doc = Document::parse(original_text.clone());
-    let formatter = knot_core::CodeFormatter::new(None, None);
-    let formatted_text = doc.format(|_, code, lang| formatter.format_code(code, lang).ok());
-
-    if original_text == formatted_text {
-        Ok(false)
-    } else if check_only {
-        Ok(true)
-    } else {
-        fs::write(file_path, formatted_text)?;
-        Ok(true)
-    }
-}
+mod format;
+pub use format::{format_file, format_sources};

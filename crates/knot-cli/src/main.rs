@@ -42,7 +42,7 @@ enum Commands {
     Clean,
     /// Format .knot files
     Format {
-        /// The .knot file to format (optional, formats all if omitted)
+        /// The .knot file to format (defaults to the project main and declared includes)
         file: Option<PathBuf>,
         /// Only check if files need formatting without writing changes
         #[arg(long)]
@@ -99,14 +99,20 @@ fn main() -> Result<()> {
             println!("\n✅ Project cleaned successfully!");
         }
         Commands::Format { file, check } => {
-            if let Some(f) = file {
-                knot_cli::format_file(f, *check)?;
-            } else {
-                // Format all .knot files in current project
-                // For now, let's keep it simple and just do the main one
-                // Or search for all .knot files
-                println!("Feature: recursive formatting coming soon. Please specify a file.");
+            let changed =
+                knot_cli::format_sources(file.as_deref(), &std::env::current_dir()?, *check)?;
+            for path in &changed {
+                println!(
+                    "{} {}",
+                    if *check { "Would format" } else { "Formatted" },
+                    path.display()
+                );
             }
+            anyhow::ensure!(
+                !*check || changed.is_empty(),
+                "{} file(s) need formatting",
+                changed.len()
+            );
         }
         Commands::JumpToSource {
             file,
