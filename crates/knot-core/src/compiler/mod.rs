@@ -74,14 +74,8 @@ pub struct Compiler {
 impl Compiler {
     /// Create a new compiler, searching for knot.toml starting from the given file path.
     pub fn new(knot_file_path: &Path) -> Result<Self> {
-        let project_root = Config::find_project_root(knot_file_path)?.canonicalize()?;
-
-        let config_path = project_root.join("knot.toml");
-        let config = if config_path.exists() {
-            Config::load_from_path(&config_path)?
-        } else {
-            Config::default()
-        };
+        let (config, project_root) = Config::find_and_load(knot_file_path)?;
+        let project_root = project_root.canonicalize()?;
 
         let cache_dir = get_cache_dir(&project_root, knot_file_path.canonicalize()?);
 
@@ -122,11 +116,8 @@ impl Compiler {
         source_file: &str,
         mode: Phase0Mode,
     ) -> Result<(Vec<PlannedNode>, Arc<Mutex<Cache>>, String)> {
-        let cache = Arc::new(Mutex::new(Cache::new(self.cache_dir.clone())?));
+        let (planned, cache) = self.prepare(doc)?;
         let backend = TypstBackend::new();
-
-        let nodes = build_executable_nodes(doc);
-        let planned = self.plan_pass(nodes, &cache)?;
 
         let phase0_typ = assemble_partial(&planned, &doc.source, source_file, &backend, mode);
         Ok((planned, cache, phase0_typ))
@@ -151,6 +142,7 @@ impl Compiler {
         let executed = self.execute_pass(planned, Arc::clone(&cache), &backend, progress)?;
         let typst_output = assemble_pass(&executed, source, source_file);
         cache.lock().unwrap().save_metadata()?;
+        info!("✓ All nodes processed.");
         Ok(typst_output)
     }
 
@@ -158,25 +150,16 @@ impl Compiler {
     ///
     /// `source_file` is the filename of the `.knot` source (e.g. `"chapter1.knot"`).
     pub fn compile(&mut self, doc: &Document, source_file: &str) -> Result<String> {
-        let cache = Arc::new(Mutex::new(Cache::new(self.cache_dir.clone())?));
-        let backend = TypstBackend::new();
+        let (planned, cache) = self.prepare(doc)?;
+        self.execute_and_assemble_streaming(planned, cache, &doc.source, source_file, None)
+    }
 
+    fn prepare(&mut self, doc: &Document) -> Result<(Vec<PlannedNode>, Arc<Mutex<Cache>>)> {
+        let cache = Arc::new(Mutex::new(Cache::new(self.cache_dir.clone())?));
         let nodes = build_executable_nodes(doc);
         info!("🔧 Processing {} executable nodes...", nodes.len());
-
-        // Pass 1: resolve options, compute hashes, check cache — no code executed.
         let planned = self.plan_pass(nodes, &cache)?;
-
-        // Pass 2: execute pending nodes in parallel per language, format output.
-        let executed = self.execute_pass(planned, Arc::clone(&cache), &backend, None)?;
-
-        // Pass 3: interleave node outputs with source text.
-        let typst_output = assemble_pass(&executed, &doc.source, source_file);
-
-        info!("✓ All nodes processed.");
-        cache.lock().unwrap().save_metadata()?;
-
-        Ok(typst_output)
+        Ok((planned, cache))
     }
 
     // -----------------------------------------------------------------------

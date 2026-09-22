@@ -12,7 +12,7 @@ use anyhow::{Result, anyhow};
 use log::warn;
 use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use tempfile::NamedTempFile;
 
 /// Loads cache metadata from disk
@@ -164,15 +164,8 @@ pub fn get_cached_result(
 
 /// Saves chunk execution result to cache
 ///
-/// Creates necessary files in cache directory and updates metadata
-pub fn save_result(
-    cache_dir: &Path,
-    _chunk_index: usize,
-    _chunk_name: Option<String>,
-    hash: String,
-    output: &ExecutionOutput,
-    _dependencies: Vec<PathBuf>,
-) -> Result<Vec<String>> {
+/// Writes text output and returns artifact filenames; metadata is handled by Cache.
+pub fn save_result(cache_dir: &Path, hash: &str, output: &ExecutionOutput) -> Result<Vec<String>> {
     let files_to_cache = match &output.result {
         ExecutionResult::Text(text) if !text.trim().is_empty() => {
             let filename = format!("chunk_{}.txt", hash);

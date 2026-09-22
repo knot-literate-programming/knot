@@ -450,3 +450,43 @@ fn restored_snapshot_keeps_the_working_directory() {
         assert!(output.contains("directory restored"), "{output}");
     }
 }
+
+#[test]
+#[ignore = "requires Python"]
+fn batch_and_streaming_compilation_produce_the_same_output_and_cache() {
+    for final_code in ["print(x + 1)", "raise ValueError('expected failure')"] {
+        let source = format!(
+            "```{{python}}\nx = 41\n```\n`{{python}} x`\n```{{python}}\n#| eval: false\nx = 0\n```\n```{{python}}\n{final_code}\n```\n```{{python}}\nprint(x + 2)\n```"
+        );
+        let (_batch_root, _, mut batch) = fixture();
+        let batch_output = compile(&mut batch, &source);
+        let (_stream_root, path, mut streaming) = fixture();
+        let doc = Document::parse(source.clone());
+        let (planned, cache, _) = streaming
+            .plan_and_partial(&doc, "main.knot", Phase0Mode::Pending)
+            .unwrap();
+        let count = planned.len();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let output = streaming
+            .execute_and_assemble_streaming(planned, cache, &doc.source, "main.knot", Some(tx))
+            .unwrap();
+        assert_eq!(output, batch_output);
+        let events: Vec<_> = rx.into_iter().collect();
+        assert_eq!(events.len(), count);
+        assert_eq!(
+            events.iter().map(|event| event.doc_idx).collect::<Vec<_>>(),
+            (0..count).collect::<Vec<_>>()
+        );
+        let executed: Vec<_> = events.into_iter().map(|event| event.executed).collect();
+        assert_eq!(
+            knot_core::assemble_pass(&executed, &source, "main.knot"),
+            output
+        );
+        let mut reloaded = Compiler::new(&path).unwrap();
+        assert_eq!(
+            hits(&plan(&mut reloaded, &source)),
+            hits(&plan(&mut batch, &source))
+        );
+        assert_eq!(compile(&mut reloaded, &source), batch_output);
+    }
+}

@@ -126,18 +126,7 @@ impl KnotLanguageServer {
         // ── 1. Resolve main.typ path from project config ───────────────────────
         let (config, project_root) = knot_core::config::Config::find_and_load(&knot_path)
             .context("Could not find knot.toml")?;
-        let main_file_name = config
-            .document
-            .main
-            .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("No 'main' file in knot.toml"))?
-            .to_string();
-        let main_stem = Path::new(&main_file_name)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .ok_or_else(|| anyhow::anyhow!("Invalid main filename: {main_file_name}"))?
-            .to_string();
-        let main_typ_path = project_root.join(format!("{main_stem}.typ"));
+        let main_typ_path = knot_core::ProjectPaths::resolve(&config, &project_root)?.main_typ_path;
         let main_typ_uri = Url::from_file_path(&main_typ_path)
             .map_err(|_| anyhow::anyhow!("Cannot build URI for {}", main_typ_path.display()))?;
         let main_typ_str = main_typ_path.to_string_lossy().to_string();
@@ -349,12 +338,7 @@ impl KnotLanguageServer {
         let (config, project_root) = knot_core::config::Config::find_and_load(&knot_path)
             .context("Could not find knot.toml")?;
 
-        let main_file = config.document.main.as_deref().unwrap_or("main.knot");
-        let main_stem = std::path::Path::new(main_file)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("main");
-        let main_typ_path = project_root.join(format!("{main_stem}.typ"));
+        let main_typ_path = knot_core::ProjectPaths::resolve(&config, &project_root)?.main_typ_path;
         let filepath = main_typ_path.to_string_lossy().to_string();
 
         let typ_content = std::fs::read_to_string(&main_typ_path)
@@ -1023,14 +1007,14 @@ impl KnotLanguageServer {
         }
 
         if let Ok(cache) = Cache::new(cache_dir) {
-            self.try_load_snapshot(uri, &cache, "r", "RData").await;
-            self.try_load_snapshot(uri, &cache, "python", "pkl").await;
+            self.try_load_snapshot(uri, &cache, "r").await;
+            self.try_load_snapshot(uri, &cache, "python").await;
         }
     }
 
     /// Reload the most recent executor session snapshot for one language if it
     /// differs from the one already loaded (avoids redundant I/O on every save).
-    async fn try_load_snapshot(&self, uri: &Url, cache: &Cache, language: &str, extension: &str) {
+    async fn try_load_snapshot(&self, uri: &Url, cache: &Cache, language: &str) {
         let reload_key = format!("{}::{}", uri, language);
         let last_chunk = match cache
             .metadata
@@ -1075,7 +1059,6 @@ impl KnotLanguageServer {
             return; // Already up to date
         }
 
-        let snapshot_path = cache.get_snapshot_path(&last_chunk.hash, extension);
         let chunk_index = last_chunk.index;
 
         let mut managers = self.state.executors.write().await;
@@ -1085,10 +1068,9 @@ impl KnotLanguageServer {
         // Loading into a reused session would retain variables deleted since
         // the previous snapshot.
         drop(manager.take(language));
-        let restored = manager.get_executor(language).is_ok_and(|executor| {
-            executor.load_session(&snapshot_path).is_ok()
-                && cache.restore_constants(&last_chunk.hash, executor).is_ok()
-        });
+        let restored = manager
+            .get_executor(language)
+            .is_ok_and(|executor| cache.restore_snapshot(&last_chunk.hash, executor).is_ok());
         drop(managers);
         if restored {
             self.state

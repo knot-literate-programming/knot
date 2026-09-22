@@ -19,7 +19,7 @@ pub use metadata::{
 };
 
 use crate::executors::{ExecutionAttempt, ExecutionOutput};
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use chrono::Utc;
 use std::fs;
 use std::path::PathBuf;
@@ -109,35 +109,10 @@ impl Cache {
         error: crate::executors::side_channel::RuntimeError,
         dependencies: Vec<PathBuf>,
     ) -> Result<()> {
-        let new_entry = ChunkCacheEntry {
-            index: chunk_index,
-            name: chunk_name,
-            language,
-            hash,
-            files: Vec::new(),
-            file_hashes: Default::default(),
-            warnings: Vec::new(),
+        self.save_chunk_entry(ChunkCacheEntry {
             error: Some(error),
-            dependencies: dependencies
-                .iter()
-                .map(|p| p.to_string_lossy().to_string())
-                .collect(),
-            updated_at: Utc::now().to_rfc3339(),
-        };
-
-        // Remove old entry if it exists
-        self.metadata
-            .chunks
-            .retain(|entry| entry.index != chunk_index);
-        self.metadata.chunks.push(new_entry);
-
-        storage::save_metadata(&self.cache_dir, &self.metadata)?;
-        Ok(())
-    }
-
-    /// Check if chunk result is cached
-    pub fn has_cached_result(&self, hash: &str) -> bool {
-        self.metadata.chunks.iter().any(|entry| entry.hash == hash)
+            ..Self::chunk_entry(chunk_index, chunk_name, language, hash, dependencies)
+        })
     }
 
     /// Get cached chunk result
@@ -155,14 +130,7 @@ impl Cache {
         output: &ExecutionOutput,
         dependencies: Vec<PathBuf>,
     ) -> Result<()> {
-        let files_to_cache = storage::save_result(
-            &self.cache_dir,
-            chunk_index,
-            chunk_name.clone(),
-            hash.clone(),
-            output,
-            dependencies.clone(),
-        )?;
+        let files_to_cache = storage::save_result(&self.cache_dir, &hash, output)?;
 
         let file_hashes = files_to_cache
             .iter()
@@ -174,32 +142,43 @@ impl Cache {
             })
             .collect::<Result<_>>()?;
 
-        // Cache all chunks, even those without output files
-        // The cache entry records that the chunk was executed successfully
-        let new_entry = ChunkCacheEntry {
-            index: chunk_index,
-            name: chunk_name,
-            language,
-            hash,
+        // Record successful execution even when there are no output files.
+        self.save_chunk_entry(ChunkCacheEntry {
             files: files_to_cache,
             file_hashes,
             warnings: output.warnings.clone(),
+            ..Self::chunk_entry(chunk_index, chunk_name, language, hash, dependencies)
+        })
+    }
+
+    fn chunk_entry(
+        index: usize,
+        name: Option<String>,
+        language: String,
+        hash: String,
+        dependencies: Vec<PathBuf>,
+    ) -> ChunkCacheEntry {
+        ChunkCacheEntry {
+            index,
+            name,
+            language,
+            hash,
+            files: Vec::new(),
+            file_hashes: Default::default(),
+            warnings: Vec::new(),
             error: None,
             dependencies: dependencies
                 .iter()
-                .map(|p| p.to_string_lossy().to_string())
+                .map(|p| p.to_string_lossy().into_owned())
                 .collect(),
             updated_at: Utc::now().to_rfc3339(),
-        };
+        }
+    }
 
-        // Remove old entry if it exists
-        self.metadata
-            .chunks
-            .retain(|entry| entry.index != chunk_index);
-        self.metadata.chunks.push(new_entry);
-
-        storage::save_metadata(&self.cache_dir, &self.metadata)?;
-        Ok(())
+    fn save_chunk_entry(&mut self, entry: ChunkCacheEntry) -> Result<()> {
+        self.metadata.chunks.retain(|old| old.index != entry.index);
+        self.metadata.chunks.push(entry);
+        self.save_metadata()
     }
 
     /// Get the path where a snapshot file should be stored for a given hash and extension
@@ -210,11 +189,6 @@ impl Cache {
     pub fn get_snapshot_path(&self, node_hash: &str, extension: &str) -> PathBuf {
         self.cache_dir
             .join(format!("snapshot_{}.{}", node_hash, extension))
-    }
-
-    /// Check if a snapshot exists for a given hash and extension
-    pub fn has_snapshot(&self, node_hash: &str, extension: &str) -> bool {
-        self.get_snapshot_path(node_hash, extension).exists()
     }
 
     /// Whether every file required to restore a snapshot is intact.
@@ -229,9 +203,28 @@ impl Cache {
         })
     }
 
+    /// Validate and restore the session and frozen bindings of one snapshot.
+    /// Callers choose the snapshot and manage the interpreter lifetime.
+    pub fn restore_snapshot(
+        &self,
+        hash: &str,
+        executor: &mut dyn crate::executors::KnotExecutor,
+    ) -> Result<()> {
+        if !self.snapshot_is_valid(hash) {
+            bail!(
+                "Cannot restore snapshot {hash}: missing, changed or non-reusable; rebuild the document"
+            );
+        }
+        let path = self.get_snapshot_path(hash, executor.snapshot_extension());
+        executor
+            .load_session(&path)
+            .with_context(|| format!("Failed to restore snapshot {}", path.display()))?;
+        self.restore_constants(hash, executor)
+    }
+
     /// Restore frozen objects associated with this snapshot, not with a later
     /// state of the document. Shared by compilation and editor completion.
-    pub fn restore_constants(
+    fn restore_constants(
         &self,
         hash: &str,
         executor: &mut dyn crate::executors::KnotExecutor,
@@ -350,15 +343,6 @@ mod tests {
 
         // Check parent directory
         assert_eq!(snapshot_path.parent().unwrap(), cache_dir);
-
-        // Initially, snapshot should not exist
-        assert!(!cache.has_snapshot(hash, "RData"));
-
-        // Create the snapshot file
-        std::fs::write(&snapshot_path, "dummy snapshot data").unwrap();
-
-        // Now it should exist
-        assert!(cache.has_snapshot(hash, "RData"));
     }
 
     #[test]
@@ -376,11 +360,66 @@ mod tests {
 
         // Different hashes should give different paths
         assert_ne!(path1, path2);
-
-        // Create only first snapshot
-        std::fs::write(&path1, "snapshot 1").unwrap();
-
-        assert!(cache.has_snapshot(hash1, "RData"));
-        assert!(!cache.has_snapshot(hash2, "RData"));
+    }
+    #[test]
+    fn chunk_entry_replacement_persists_success_and_error_transitions() {
+        use crate::executors::{ExecutionResult, RuntimeError};
+        let root = tempdir().unwrap();
+        let mut cache = Cache::new(root.path().to_path_buf()).unwrap();
+        let output = ExecutionOutput {
+            result: ExecutionResult::Text("answer".into()),
+            warnings: vec![],
+        };
+        cache
+            .save_result(
+                0,
+                Some("first".into()),
+                "python".into(),
+                "success".into(),
+                &output,
+                vec![],
+            )
+            .unwrap();
+        let error = RuntimeError {
+            message: Some("failed".into()),
+            call: None,
+            line: None,
+            traceback: vec![],
+        };
+        cache
+            .save_error(
+                0,
+                Some("second".into()),
+                "python".into(),
+                "error".into(),
+                error,
+                vec![],
+            )
+            .unwrap();
+        let persisted = Cache::new(root.path().to_path_buf()).unwrap();
+        assert_eq!(persisted.metadata.chunks.len(), 1);
+        assert_eq!(persisted.metadata.chunks[0].name.as_deref(), Some("second"));
+        assert!(persisted.get_cached_result("success").is_err());
+        assert!(matches!(
+            persisted.get_cached_result("error").unwrap(),
+            ExecutionAttempt::RuntimeError(_)
+        ));
+        cache
+            .save_result(
+                0,
+                None,
+                "python".into(),
+                "recovered".into(),
+                &output,
+                vec![],
+            )
+            .unwrap();
+        let persisted = Cache::new(root.path().to_path_buf()).unwrap();
+        assert_eq!(persisted.metadata.chunks.len(), 1);
+        assert!(persisted.get_cached_result("error").is_err());
+        assert!(matches!(
+            persisted.get_cached_result("recovered").unwrap(),
+            ExecutionAttempt::Success(_)
+        ));
     }
 }

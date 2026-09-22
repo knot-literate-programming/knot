@@ -186,3 +186,54 @@ includes = [
         error_msg
     );
 }
+
+#[test]
+fn nested_main_uses_the_same_root_output_for_all_compilation_modes() {
+    use knot_core::{Config, Phase0Mode, project::ProjectPaths};
+    let (_temp, root) = setup_test_project();
+    fs::rename(root.join("main.knot"), root.join("chapters/report.knot")).unwrap();
+    fs::write(
+        root.join("knot.toml"),
+        "[document]\nmain = 'chapters/report.knot'\nincludes = ['chapters/01-intro.knot']\n",
+    )
+    .unwrap();
+    let (config, project_root) = Config::find_and_load(&root).unwrap();
+    let paths = ProjectPaths::resolve(&config, &project_root).unwrap();
+    assert_eq!(paths.main_file, project_root.join("chapters/report.knot"));
+    assert_eq!(paths.main_file_name, "chapters/report.knot");
+    let expected_path = project_root.join("report.typ");
+    assert_eq!(paths.main_typ_path, expected_path);
+    let phase0 = knot_core::compile_project_phase0(&root, Phase0Mode::Pending).unwrap();
+    let batch = knot_core::compile_project_full(&root, None).unwrap();
+    let streaming = knot_core::compile_project_full(&root, Some(Box::new(|_| {}))).unwrap();
+    for output in [phase0, streaming] {
+        assert_eq!(output.main_typ_path, expected_path);
+        assert_eq!(output.typ_content, batch.typ_content);
+    }
+    assert_eq!(batch.main_typ_path, expected_path);
+    assert_eq!(
+        fs::read_to_string(expected_path).unwrap(),
+        batch.typ_content
+    );
+}
+
+#[test]
+fn project_paths_reject_missing_main_configuration_or_file() {
+    use knot_core::{Config, project::ProjectPaths};
+    let temp = TempDir::new().unwrap();
+    let mut config = Config::default();
+    config.document.main = None;
+    assert!(
+        ProjectPaths::resolve(&config, temp.path())
+            .unwrap_err()
+            .to_string()
+            .contains("No 'main'")
+    );
+    config.document.main = Some("missing.knot".into());
+    assert!(
+        ProjectPaths::resolve(&config, temp.path())
+            .unwrap_err()
+            .to_string()
+            .contains("Main file not found")
+    );
+}

@@ -67,6 +67,48 @@ pub struct ProjectOutput {
     pub project_root: PathBuf,
 }
 
+/// Resolved main-source and output paths shared by project consumers.
+/// The generated Typst file lives at the project root, including when the main
+/// source is in a subdirectory.
+#[derive(Debug)]
+pub struct ProjectPaths {
+    /// Path to the main Knot source.
+    pub main_file: PathBuf,
+    /// Configured main source name, retained for source-map markers.
+    pub main_file_name: String,
+    /// Path to the generated Typst document at the project root.
+    pub main_typ_path: PathBuf,
+}
+
+impl ProjectPaths {
+    /// Resolve paths using the same validation for compilation, watch and preview.
+    pub fn resolve(config: &Config, project_root: &Path) -> Result<Self> {
+        let main_file_name = config
+            .document
+            .main
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("No 'main' file specified in knot.toml"))?
+            .to_string();
+
+        let main_file = project_root.join(&main_file_name);
+        if !main_file.exists() {
+            anyhow::bail!("Main file not found: {}", main_file.display());
+        }
+
+        let main_stem = main_file
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .ok_or_else(|| anyhow::anyhow!("Invalid main filename: {main_file_name}"))?
+            .to_string();
+
+        Ok(Self {
+            main_file,
+            main_file_name,
+            main_typ_path: project_root.join(format!("{main_stem}.typ")),
+        })
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Public entry points
 // ---------------------------------------------------------------------------
@@ -118,8 +160,11 @@ pub fn compile_project_full(
     on_progress: Option<Box<dyn Fn(String) + Send>>,
 ) -> Result<ProjectOutput> {
     let (config, project_root) = Config::find_and_load(start_path)?;
-    let (main_file, main_file_name, main_stem) = resolve_main_file(&config, &project_root)?;
-    let main_typ_path = project_root.join(format!("{main_stem}.typ"));
+    let ProjectPaths {
+        main_file,
+        main_file_name,
+        main_typ_path,
+    } = ProjectPaths::resolve(&config, &project_root)?;
 
     // Compile all includes fully first (sequential, usually all cache hits).
     let includes_content =
@@ -229,8 +274,11 @@ fn compile_phase0_inner(
     mode: Phase0Mode,
 ) -> Result<ProjectOutput> {
     let (config, project_root) = Config::find_and_load(start_path)?;
-    let (main_file, main_file_name, main_stem) = resolve_main_file(&config, &project_root)?;
-    let main_typ_path = project_root.join(format!("{main_stem}.typ"));
+    let ProjectPaths {
+        main_file,
+        main_file_name,
+        main_typ_path,
+    } = ProjectPaths::resolve(&config, &project_root)?;
 
     let includes_content = compile_includes(&config, &project_root, true, unsaved, mode)?;
 
@@ -274,30 +322,6 @@ fn read_or_override(path: &Path, unsaved: Option<(&Path, &str)>) -> Result<Strin
         }
     }
     fs::read_to_string(path).with_context(|| format!("Cannot read file: {}", path.display()))
-}
-
-/// Resolve main file info from config.
-/// Returns `(file_path, file_name, file_stem)`.
-fn resolve_main_file(config: &Config, project_root: &Path) -> Result<(PathBuf, String, String)> {
-    let main_file_name = config
-        .document
-        .main
-        .as_deref()
-        .ok_or_else(|| anyhow::anyhow!("No 'main' file specified in knot.toml"))?
-        .to_string();
-
-    let main_file = project_root.join(&main_file_name);
-    if !main_file.exists() {
-        anyhow::bail!("Main file not found: {}", main_file.display());
-    }
-
-    let main_stem = main_file
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .ok_or_else(|| anyhow::anyhow!("Invalid main filename: {main_file_name}"))?
-        .to_string();
-
-    Ok((main_file, main_file_name, main_stem))
 }
 
 /// Compile all included files and return the concatenated Typst content
