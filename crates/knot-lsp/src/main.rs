@@ -255,7 +255,7 @@ impl LanguageServer for KnotLanguageServer {
     }
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
-        handle_formatting(&self.state, &self.client, params).await
+        handle_formatting(&self.state, params).await
     }
 
     async fn document_symbol(

@@ -1,6 +1,6 @@
 //! CLI formatting: prepare every source before writing any changes.
 use anyhow::{Context, Result};
-use knot_core::{CodeFormatter, Config, Document, ProjectPaths};
+use knot_core::{CodeFormatter, Config, ProjectPaths};
 use std::{
     collections::HashSet,
     fs,
@@ -58,39 +58,9 @@ fn format_paths(files: &[PathBuf], check: bool) -> Result<Vec<PathBuf>> {
     for file in files {
         let original =
             fs::read_to_string(file).with_context(|| format!("Cannot read {}", file.display()))?;
-        let doc = Document::parse(original);
-        if let Some(error) = doc.errors.first() {
-            anyhow::bail!("Cannot format {}: {error}", file.display());
-        }
-        for chunk in &doc.chunks {
-            if let Some(error) = chunk.errors.first() {
-                anyhow::bail!(
-                    "Cannot format {}:{}: {}",
-                    file.display(),
-                    chunk.range.start.line + 1,
-                    error.message
-                );
-            }
-        }
-        // Format fallibly before reconstruction: the editor's optional callback
-        // may retain unformatted code, but the CLI must report these failures.
-        let mut chunks = Vec::with_capacity(doc.chunks.len());
-        for chunk in &doc.chunks {
-            chunks.push(
-                formatter
-                    .format_code(&chunk.code, &chunk.language)
-                    .with_context(|| {
-                        format!(
-                            "Cannot format {}:{} ({} block)",
-                            file.display(),
-                            chunk.range.start.line + 1,
-                            chunk.language
-                        )
-                    })?,
-            );
-        }
-        let formatted = doc.format(|index, _, _| Some(std::mem::take(&mut chunks[index])));
-        if formatted != doc.source {
+        let formatted = knot_core::formatting::format_document(&original, &formatter)
+            .with_context(|| format!("Cannot format {}", file.display()))?;
+        if formatted != original {
             changes.push((file.clone(), formatted));
         }
     }

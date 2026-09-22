@@ -22,6 +22,7 @@ pub mod compiler;
 pub mod config;
 pub mod defaults;
 pub mod executors;
+pub mod formatting;
 pub mod graphics;
 pub mod parser;
 pub mod project;

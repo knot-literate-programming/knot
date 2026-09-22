@@ -415,10 +415,8 @@ impl KnotLanguageServer {
                     version,
                     mapper,
                     opened_in_tinymist: false,
-                    virtual_version: 0,
                     knot_diagnostics,
                     tinymist_diagnostics: Vec::new(),
-                    formatting_error_notified: false,
                 },
             );
         }

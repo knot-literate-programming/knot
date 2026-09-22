@@ -98,11 +98,18 @@ Save with formatting enabled (`editor.formatOnSave: true`) to format:
 
 - **R code** with [Air](https://posit-dev.github.io/air)
 - **Python code** with [Ruff](https://docs.astral.sh/ruff)
-- **Typst source** with Tinymist's built-in formatter
+- **Typst source** with embedded Typstyle 0.15.1
 
-Each formatter is invoked only if the corresponding binary is available in PATH.
-Knot reconstructs the `.knot` file from the formatted parts without touching the
-other sections.
+Full-document formatting uses the same engine and fixed style as `knot format`:
+two spaces, width 80, no prose wrapping or import reordering. It works without
+Tinymist. Editor tab settings and Tinymist formatting preferences do not override
+this style. Air/Ruff use the configured editor paths (or `PATH`); their versions
+must match the terminal's tools to obtain identical code-block formatting.
+
+A missing/failing code formatter, invalid Typst, or reconstruction failure returns
+an error and no document edits. Edits are also rejected if the document changes
+while formatting is running. Inline expressions and their options are preserved.
+The separate Format Chunk command only affects the selected executable block.
 
 ## Diagnostics
 

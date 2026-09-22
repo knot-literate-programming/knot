@@ -25,5 +25,6 @@ uuid = { version = "1.10", features = ["v4"] }
 tokio-util = { version = "0.7.18", features = ["codec"] }
 
 [dev-dependencies]
+knot-cli = { path = "../knot-cli" }
 tempfile = { workspace = true }
 tower = { version = "0.4", default-features = false }
