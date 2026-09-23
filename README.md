@@ -55,7 +55,7 @@ The installers download the prebuilt `knot` and `knot-lsp` binaries for your pla
 ```bash
 git clone https://github.com/knot-literate-programming/knot.git
 cd knot
-bash scripts/install-vscode-dev.sh
+bash scripts/install-dev.sh
 ```
 
 This rebuilds and installs both Rust binaries and the VS Code extension.

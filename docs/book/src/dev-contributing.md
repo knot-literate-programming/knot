@@ -36,7 +36,7 @@ npm run compile
 From the repository root, install a complete development build:
 
 ```bash
-bash scripts/install-vscode-dev.sh
+bash scripts/install-dev.sh
 ```
 
 This rebuilds and replaces `knot` and `knot-lsp` with `cargo install --locked

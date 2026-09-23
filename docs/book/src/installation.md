@@ -75,7 +75,7 @@ git clone https://github.com/knot-literate-programming/knot.git
 cd knot
 
 # Install the CLI, LSP and VS Code extension together
-bash scripts/install-vscode-dev.sh
+bash scripts/install-dev.sh
 ```
 
 The script rebuilds and replaces both Rust binaries from this checkout (even
