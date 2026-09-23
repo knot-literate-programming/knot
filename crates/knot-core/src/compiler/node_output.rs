@@ -43,6 +43,7 @@ pub(super) fn inert_output(pn: &PlannedNode, backend: &TypstBackend, config: &Co
                 super::options::resolve_options(chunk, config, &ChunkExecutionState::Inert);
             let empty = ExecutionOutput {
                 result: ExecutionResult::Text(String::new()),
+                exports: Vec::new(),
                 warnings: vec![],
             };
             format_output(
@@ -73,6 +74,7 @@ pub(super) fn skip_output(
         PlannedNodeKind::Chunk { node: chunk, data } => {
             let empty = ExecutionOutput {
                 result: ExecutionResult::Text(String::new()),
+                exports: Vec::new(),
                 warnings: vec![],
             };
             format_output(

@@ -22,6 +22,7 @@
 - [Text Output](./output-text.md)
 - [Plots and Figures](./output-plots.md)
 - [DataFrames and Tables](./output-tables.md)
+- [Data for Typst](./data-exports.md)
 
 # Configuration
 

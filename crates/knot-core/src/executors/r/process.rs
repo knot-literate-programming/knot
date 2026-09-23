@@ -59,7 +59,7 @@ impl RProcess {
         for (_name, content) in crate::R_HELPERS {
             writeln!(temp_file, "{}", content)?;
         }
-        let temp_path = temp_file.path().to_string_lossy().replace('\\', "\\\\");
+        let temp_path = crate::path_utils::escape_path_for_code(temp_file.path());
 
         // Source the combined temp file
         writeln!(stdin, "source(\"{}\")", temp_path)?;

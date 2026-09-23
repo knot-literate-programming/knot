@@ -200,3 +200,38 @@ fn global_no_snapshots_overrides_main_and_include_without_editing_sources() {
         assert!(cache.metadata.snapshots.is_empty());
     }
 }
+
+#[test]
+fn published_artifact_paths_use_typst_separators_on_every_platform() {
+    let root = tempfile::tempdir().unwrap();
+    let cache = root.path().join(".knot_cache");
+    fs::create_dir(&cache).unwrap();
+    for filename in ["data.json", "plot.svg"] {
+        let file = cache.join(filename);
+        fs::write(&file, "content").unwrap();
+        let source = format!(
+            "#read({})",
+            serde_json::to_string(&file.to_string_lossy()).unwrap()
+        );
+        let output =
+            knot_core::project::fix_paths_in_typst(&source, &root.path().join("main.typ")).unwrap();
+        assert!(
+            !output.contains('\\'),
+            "Typst paths must use forward slashes: {output}"
+        );
+        let relative: String = serde_json::from_str(
+            output
+                .strip_prefix("#read(")
+                .unwrap()
+                .strip_suffix(')')
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(relative.starts_with("_knot_files/"));
+        assert!(relative.ends_with(&format!("/{filename}")));
+        assert_eq!(
+            fs::read_to_string(root.path().join(relative)).unwrap(),
+            "content"
+        );
+    }
+}

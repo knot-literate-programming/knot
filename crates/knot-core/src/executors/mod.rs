@@ -109,9 +109,20 @@ pub enum ExecutionResult {
     },
 }
 
+/// A named JSON dataset produced by a chunk.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct DataExport {
+    /// Document-wide key in the Typst `knot-data` dictionary.
+    pub name: String,
+    /// JSON file in the execution cache (relative in persisted metadata).
+    pub path: PathBuf,
+}
+
 /// Aggregated output of a successful code execution (no runtime error).
 #[derive(Debug, Clone)]
 pub struct ExecutionOutput {
+    /// Named JSON datasets made available to Typst, independently of visible output.
+    pub exports: Vec<DataExport>,
     /// The primary execution result (text, plot, DataFrame, or combination).
     pub result: ExecutionResult,
     /// Non-fatal warnings emitted during execution.
@@ -199,11 +210,15 @@ pub fn metadata_to_execution_result(
     let mut text_content = String::new();
     let mut plot_path: Option<PathBuf> = None;
     let mut dataframe_path: Option<PathBuf> = None;
+    let mut exports = Vec::new();
     let mut plot_count = 0usize;
     let mut dataframe_count = 0usize;
 
     for item in metadata.results {
         match item {
+            OutputMetadata::DataExport { name, path } => {
+                exports.push(DataExport { name, path });
+            }
             OutputMetadata::Text { content } => {
                 if !text_content.is_empty() {
                     text_content.push('\n');
@@ -257,6 +272,7 @@ pub fn metadata_to_execution_result(
 
     Ok(ExecutionOutput {
         result,
+        exports,
         warnings: metadata.warnings,
     })
 }

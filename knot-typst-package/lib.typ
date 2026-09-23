@@ -1,3 +1,6 @@
+// Named JSON exports are populated by successful chunks in document order.
+#let knot-data = (:)
+
 // ============================================
 // Knot Typst Package
 // ============================================

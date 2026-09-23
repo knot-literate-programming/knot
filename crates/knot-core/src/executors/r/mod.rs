@@ -59,7 +59,7 @@ impl LanguageExecutor for RExecutor {
     }
 }
 
-use super::path_utils::escape_path_for_code;
+use crate::path_utils::escape_path_for_code;
 
 impl KnotExecutor for RExecutor {
     fn save_session(&mut self, path: &Path) -> Result<()> {

@@ -3,6 +3,7 @@
 use crate::compiler::ChunkExecutionState;
 use crate::executors::{ExecutionOutput, ExecutionResult};
 use crate::parser::{Chunk, Layout, ResolvedChunkOptions, Show};
+use crate::path_utils::{escape_typst_path, escape_typst_string};
 use std::collections::HashMap;
 
 /// Helper function to format a HashMap of options into a Typst function call.
@@ -73,8 +74,16 @@ impl Backend for TypstBackend {
         output: &ExecutionOutput,
         state: &ChunkExecutionState,
     ) -> String {
+        let mut exports = String::new();
+        for export in &output.exports {
+            let name = format!("\"{}\"", escape_typst_string(&export.name));
+            let path = escape_typst_path(&export.path);
+            exports.push_str(&format!(
+                "#assert(not ({name} in knot-data), message: \"Duplicate Knot data export: \" + {name})\n#let knot-data = knot-data + (({name}): json(\"{path}\"),)\n"
+            ));
+        }
         if matches!(resolved_options.show, Show::None) {
-            return String::new();
+            return exports;
         }
 
         let mut args = vec![];
@@ -89,7 +98,7 @@ impl Backend for TypstBackend {
         } else {
             "code-chunk"
         };
-        format!("#{}({})", fn_name, args.join(", "))
+        format!("{exports}#{}({})", fn_name, args.join(", "))
     }
 }
 
@@ -309,16 +318,6 @@ fn push_presentation_args(resolved_options: &ResolvedChunkOptions, args: &mut Ve
     }
 }
 
-/// Escape filesystem paths embedded in Typst string literals.
-pub(crate) fn escape_typst_path(path: &std::path::Path) -> String {
-    path.to_string_lossy()
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
-        .replace('\t', "\\t")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -413,6 +412,7 @@ mod tests {
         ));
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("[1] 2".to_string()),
+            exports: Vec::new(),
             warnings: vec![],
         };
         let resolved = chunk.options.resolve();
@@ -431,6 +431,7 @@ mod tests {
         let chunk = create_test_chunk("r", "x <- 1:10\nmean(x)", None, Show::Both, None);
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("[1] 5.5".to_string()),
+            exports: Vec::new(),
             warnings: vec![],
         };
         let resolved = chunk.options.resolve();
@@ -449,6 +450,7 @@ mod tests {
         let chunk = create_test_chunk("r", "x <- 1:10\nmean(x)", None, Show::Output, None);
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("[1] 5.5".to_string()),
+            exports: Vec::new(),
             warnings: vec![],
         };
         let resolved = chunk.options.resolve();
@@ -467,6 +469,7 @@ mod tests {
         let chunk = create_test_chunk("r", "x <- 1", None, Show::Both, None);
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("".to_string()),
+            exports: Vec::new(),
             warnings: vec![],
         };
         let resolved = chunk.options.resolve();
@@ -491,6 +494,7 @@ mod tests {
         );
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("[1] 1  2  3  4  5  6  7  8  9 10".to_string()),
+            exports: Vec::new(),
             warnings: vec![],
         };
         let resolved = chunk.options.resolve();
@@ -515,6 +519,7 @@ mod tests {
         );
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("".to_string()),
+            exports: Vec::new(),
             warnings: vec![],
         };
         let resolved = chunk.options.resolve();
@@ -533,6 +538,7 @@ mod tests {
         let chunk = create_test_chunk("r", "plot(1:10)", None, Show::Output, None);
         let output_data = ExecutionOutput {
             result: ExecutionResult::Plot(PathBuf::from("/tmp/plot.svg")),
+            exports: Vec::new(),
             warnings: vec![],
         };
         let resolved = chunk.options.resolve();
@@ -551,6 +557,7 @@ mod tests {
         let chunk = create_test_chunk("r", "mtcars", None, Show::Output, None);
         let output_data = ExecutionOutput {
             result: ExecutionResult::DataFrame(PathBuf::from("/tmp/data.csv")),
+            exports: Vec::new(),
             warnings: vec![],
         };
         let resolved = chunk.options.resolve();
@@ -572,6 +579,7 @@ mod tests {
                 text: "Min: 1\nMax: 10".to_string(),
                 plot: PathBuf::from("/tmp/plot.svg"),
             },
+            exports: Vec::new(),
             warnings: vec![],
         };
         let resolved = chunk.options.resolve();
@@ -593,6 +601,7 @@ mod tests {
                 dataframe: PathBuf::from("/tmp/data.csv"),
                 plot: PathBuf::from("/tmp/plot.svg"),
             },
+            exports: Vec::new(),
             warnings: vec![],
         };
         let resolved = chunk.options.resolve();
@@ -611,6 +620,7 @@ mod tests {
         let chunk = create_test_chunk("r", "1 + 1", Some("".to_string()), Show::Both, None);
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("[1] 2".to_string()),
+            exports: Vec::new(),
             warnings: vec![],
         };
         let resolved = chunk.options.resolve();
@@ -629,6 +639,7 @@ mod tests {
         let chunk = create_test_chunk("r", "invisible(1)", None, Show::Output, None);
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("".to_string()),
+            exports: Vec::new(),
             warnings: vec![],
         };
         let resolved = chunk.options.resolve();
@@ -653,6 +664,7 @@ mod tests {
             .insert("lang-radius".to_string(), "10pt".to_string());
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("[1] 1  2  3  4  5  6  7  8  9 10".to_string()),
+            exports: Vec::new(),
             warnings: vec![],
         };
         let resolved = chunk.options.resolve();
@@ -671,6 +683,7 @@ mod tests {
         let chunk = create_test_chunk("r", "x <- 1:10", None, Show::Both, None);
         let output_data = ExecutionOutput {
             result: ExecutionResult::Text("[1] 1  2  3  4  5  6  7  8  9 10".to_string()),
+            exports: Vec::new(),
             warnings: vec![],
         };
         let resolved = chunk.options.resolve();
@@ -689,6 +702,7 @@ mod tests {
         let chunk = create_test_chunk("r", "ggplot(df) + geom_line()", None, Show::Replace, None);
         let output_data = ExecutionOutput {
             result: ExecutionResult::Plot(PathBuf::from("/tmp/plot.svg")),
+            exports: Vec::new(),
             warnings: vec![],
         };
         let resolved = chunk.options.resolve();

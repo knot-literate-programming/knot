@@ -29,6 +29,8 @@ pub struct ChunkCacheEntry {
     pub language: String,
     pub hash: String,
     pub files: Vec<String>,
+    #[serde(default)]
+    pub exports: Vec<crate::executors::DataExport>,
     pub file_hashes: HashMap<String, String>,
     #[serde(default)]
     pub warnings: Vec<crate::executors::side_channel::RuntimeWarning>,
@@ -52,7 +54,7 @@ pub struct SnapshotEntry {
     pub files: HashMap<String, String>,
 }
 
-pub const CACHE_FORMAT_VERSION: u32 = 4;
+pub const CACHE_FORMAT_VERSION: u32 = 5;
 
 impl Default for CacheMetadata {
     fn default() -> Self {

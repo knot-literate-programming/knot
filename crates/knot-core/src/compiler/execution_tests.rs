@@ -42,6 +42,7 @@ impl LanguageExecutor for FakeExecutor {
         }
         Ok(ExecutionAttempt::Success(ExecutionOutput {
             result: ExecutionResult::Text(String::new()),
+            exports: Vec::new(),
             warnings: vec![],
         }))
     }

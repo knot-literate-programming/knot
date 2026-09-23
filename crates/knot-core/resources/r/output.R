@@ -10,7 +10,7 @@ base_plot <- function(expr, width = NULL, height = NULL, dpi = NULL, format = NU
   # Create file path
   hash <- digest::digest(paste(Sys.time(), runif(1)), algo = "xxhash64")
   filename <- sprintf("plot_%s.%s", hash, format)
-  filepath <- file.path(.get_base_dir(), filename)
+  filepath <- .knot_cache_path(filename)
 
   # Open device
   if (format == "svg") {
@@ -74,7 +74,7 @@ typst.default <- function(obj, ...) {
   # cache) to re-read the file rather than reusing a cached version.
   hash <- digest::digest(list(plot_obj, width, height, dpi, format), algo = "xxhash64")
   filename <- sprintf("plot_%s.%s", hash, format)
-  filepath <- file.path(.get_base_dir(), filename)
+  filepath <- .knot_cache_path(filename)
 
   device <- if (format == "svg") svglite::svglite else format
   ggplot2::ggsave(filepath, plot = plot_obj, width = width, height = height, dpi = dpi, device = device)
@@ -102,7 +102,7 @@ typst.default <- function(obj, ...) {
   # Create hash based on timestamp (can't easily hash the plot)
   hash <- digest::digest(paste(Sys.time(), runif(1)), algo = "xxhash64")
   filename <- sprintf("plot_%s.%s", hash, format)
-  filepath <- file.path(.get_base_dir(), filename)
+  filepath <- .knot_cache_path(filename)
 
   # Copy current device to file
   if (format == "svg") {
@@ -134,7 +134,7 @@ typst.default <- function(obj, ...) {
   # Hash content
   hash <- digest::digest(df, algo = "xxhash64")
   filename <- sprintf("dataframe_%s.csv", hash)
-  filepath <- file.path(.get_base_dir(), filename)
+  filepath <- .knot_cache_path(filename)
 
   write.csv(df, filepath, row.names = FALSE)
 
@@ -148,4 +148,33 @@ typst.default <- function(obj, ...) {
   }
 
   invisible(df)
+}
+
+# Export JSON data for Typst without rendering a table or other visible output.
+# Data frames become arrays of records; NA values become JSON null.
+export_data <- function(data, name) {
+  if (!is.character(name) || length(name) != 1L || is.na(name) || !nzchar(name)) {
+    stop("export_data name must be a non-empty string")
+  }
+  if (!nzchar(Sys.getenv("KNOT_METADATA_FILE"))) {
+    stop("export_data must run inside a Knot chunk")
+  }
+  payload <- enc2utf8(as.character(jsonlite::toJSON(
+    data, dataframe = "rows", auto_unbox = TRUE, null = "null", na = "null", digits = NA
+  )))
+  hash <- digest::digest(payload, algo = "sha256", serialize = FALSE)
+  filepath <- .knot_cache_path(paste0("data_r_", hash, ".json"))
+  bytes <- charToRaw(payload)
+  # Do not rewrite valid files that an in-progress preview may already read.
+  if (!file.exists(filepath) ||
+      !identical(readBin(filepath, "raw", n = file.info(filepath)$size), bytes)) {
+    tryCatch(writeBin(bytes, filepath), error = function(e) {
+      stop(sprintf("Cannot export data to %s: %s", filepath, conditionMessage(e)))
+    })
+  }
+  .write_metadata(list(
+    type = "dataexport", name = name,
+    path = normalizePath(filepath, mustWork = TRUE)
+  ))
+  invisible(NULL)
 }

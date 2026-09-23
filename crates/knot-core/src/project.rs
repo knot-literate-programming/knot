@@ -289,7 +289,7 @@ pub fn fix_paths_in_typst(source: &str, typ_file: &Path) -> Result<String> {
             )
         );
         let relative = Path::new(Defaults::LANGUAGE_FILES_DIR)
-            .join(namespace)
+            .join(&namespace)
             .join(filename);
         if processed.insert(path.to_path_buf()) {
             let destination = typ_dir.join(&relative);
@@ -303,7 +303,7 @@ pub fn fix_paths_in_typst(source: &str, typ_file: &Path) -> Result<String> {
             })?;
         }
         result.push('"');
-        result.push_str(&crate::backend::escape_typst_path(&relative));
+        result.push_str(&crate::path_utils::published_typst_path(&relative)?);
         result.push('"');
     }
     result.push_str(&source[end..]);

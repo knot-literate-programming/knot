@@ -114,3 +114,24 @@ def _typst_dataframe(df, index=False, **kwargs):
     if not _write_metadata(metadata):
         print(df)
     return df
+
+
+def export_data(data, name):
+    """Export a JSON-compatible value to Typst's knot-data dictionary.
+
+    For a pandas DataFrame, pass df.to_dict(orient="records"). Exports are
+    tracked by Knot's cache and do not produce a visible chunk output.
+    """
+    import json
+
+    if not isinstance(name, str) or not name:
+        raise ValueError("export_data name must be a non-empty string")
+    if not os.environ.get('KNOT_METADATA_FILE'):
+        raise RuntimeError("export_data must run inside a Knot chunk")
+    payload = json.dumps(data, ensure_ascii=False, allow_nan=False).encode('utf-8')
+    filename = 'data_python_' + hashlib.sha256(payload).hexdigest() + '.json'
+    filepath = _get_base_dir() / filename
+    # Keep a valid content-addressed file immutable during streaming previews.
+    if not filepath.exists() or filepath.read_bytes() != payload:
+        filepath.write_bytes(payload)
+    _write_metadata({'type': 'dataexport', 'name': name, 'path': str(filepath.absolute())})
