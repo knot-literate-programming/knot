@@ -328,8 +328,6 @@ define_options! {
     #[serde(rename = "fig-format")]
     [val] fig_format: FigFormat, FigFormat::Svg,
 
-    /// Names of objects declared as freeze (immutable across chunks, stored outside snapshots)
-    [col] freeze: Vec<String>, Vec::new(),
 
     // === Presentation Options ===
 
@@ -530,6 +528,8 @@ pub struct InlineExpr {
 }
 
 pub struct Document {
+    pub snapshots: HashMap<String, bool>,
+    pub header_end: usize,
     pub source: String,
     pub chunks: Vec<Chunk>,
     pub inline_exprs: Vec<InlineExpr>,

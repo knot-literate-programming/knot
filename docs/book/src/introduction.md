@@ -135,77 +135,42 @@ are served from cache.
 
 ---
 
-## The Freeze Contract
+## Choosing whether to save snapshots
 
-### The snapshot trade-off
+Snapshots accelerate recompilation by restoring the environment before a changed
+chunk. By default, Knot saves complete R/Python environments. Large datasets or
+models may therefore be repeated in many snapshots, consuming substantial disk
+space and serialization time.
 
-Snapshots make incremental recompilation fast, but they have a cost: each snapshot
-captures the **entire interpreter environment** at that point — every variable,
-every object. If your document loads a multi-gigabyte dataset or trains a model,
-that object is included in every subsequent snapshot. With twenty chunks after the
-training step, you end up with twenty copies of the model on disk, and restoring
-any one of those snapshots means reading the full file back into memory.
+Disable snapshots for a language in the YAML header at the very beginning of a
+`.knot` file:
 
-This is the core trade-off:
-
-| | Default (no freeze) | With `freeze` |
-|---|---|---|
-| **Snapshots** | Heavy — large objects included in each one | Light — large objects excluded |
-| **Disk usage** | Grows with number of downstream chunks | Object stored once |
-| **Snapshot restore** | One large file to read | Small snapshot + separate object load |
-| **Constraint** | None | Object must not be mutated downstream |
-
-### How freeze works
-
-~~~typst
-```{r}
-#| freeze: [model, training_data]
-model <- train(training_data)
+```yaml
+---
+snapshots:
+  r: true
+  python: false
+---
 ```
-~~~
 
-When you declare `freeze: [model, training_data]`, Knot:
+Omitted languages default to `true`. With `false`, every compilation executes the
+entire language chain in a fresh interpreter, including inline expressions and
+unchanged chunks. No snapshots are created or restored for that chain. Correcting
+an error also restarts it from the beginning. `eval: false` still skips a node.
+Other languages and files keep their own settings and cache.
 
-1. **Serialises** each named object into content-addressed storage
-   (`.knot_cache/objects/{hash}.ext`) immediately after the chunk executes.
-2. **Excludes** their named bindings from subsequent snapshots, while leaving
-   the objects in the live interpreter. Saving a snapshot does not remove or
-   reload them.
-3. **Reloads** the objects separately when restoring a cached snapshot, including
-   when resuming execution after correcting an error.
+Snapshots are an optimization, not a guarantee that arbitrary process state can
+be reconstructed. R's serialization supports ordinary data and functions, but
+external resources such as database connections may not survive restoration.
+Python's standard pickle has further limitations, including functions and classes
+defined in a chunk. Knot rejects known unusable or damaged snapshots; it cannot
+detect every incompatibility. **Set snapshots to `false` when unsure.** This does
+not by itself make external inputs or nondeterministic code reproducible.
 
-This avoids repeating the named objects in each snapshot and reloading them after
-successful chunks. Contract checks still fingerprint their contents and can
-require serialization.
-
-Exclusion is by name, not a traversal of every reference: an alias or a container
-that references a frozen object can still serialize its contents. Shared identity
-between a frozen object and other snapshot objects is not guaranteed after a
-restore. Use independent serializable values for frozen data.
-
-### The immutability contract
-
-In exchange, Knot computes a fingerprint of each frozen object immediately after
-declaration (xxHash64 in R; xxHash64 in Python when available, otherwise SHA-256). After every subsequent chunk in the
-same language chain that must re-execute, Knot recomputes the fingerprints and
-compares them against the stored values. If they differ — meaning some downstream
-code accidentally modified them — Knot marks the violation and suspends execution
-of the rest of the chain, surfacing the error in the preview and in VS Code
-diagnostics.
-
-This gives you a **runtime stability contract**: the serialized state of these
-objects must remain unchanged at execution boundaries. It detects a changed final
-state, not a temporary mutation that a chunk undoes before the check.
-
-### When to use freeze
-
-Use `freeze` when an object is **large and immutable** after its creation chunk —
-a trained model, a loaded dataset, a precomputed matrix. Do not use it for objects
-that downstream chunks are expected to modify.
-
-Split independent analyses into separate `.knot` files to keep their workspaces
-small: each file has its own interpreter sessions and freeze declarations.
-Exchange data explicitly through files and declared dependencies where needed.
+Split independent analyses into separate `.knot` files to limit memory usage and
+the cost of re-execution. Exchange data through files with declared dependencies.
+There is no object-level `freeze` option or mutation contract: the policy applies
+to the complete language workspace in each file.
 
 ---
 

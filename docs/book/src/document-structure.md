@@ -98,3 +98,19 @@ compiled include files will be inserted:
 
 If the placeholder is missing, Knot will automatically append the includes at the
 very end of the `main.knot` file.
+
+## YAML execution settings
+
+An optional YAML header must appear at the very beginning of each `.knot` file:
+
+```yaml
+---
+snapshots:
+  r: true
+  python: false
+---
+```
+
+The header is preserved by formatting and omitted from generated Typst. Settings
+apply only to this file. See [snapshot policy](./caching.md#document-snapshot-policy)
+for the execution, disk-space and restoration trade-offs.

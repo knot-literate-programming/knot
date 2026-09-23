@@ -23,7 +23,6 @@ Options can also be set globally in `knot.toml` under `[chunk-defaults]`,
 |---|---|---|---|
 | `eval` | bool | `true` | If `false`, the chunk is not executed and produces no output. |
 | `cache` | bool | `true` | If `false`, the chunk and following nodes in its language re-execute on each compilation. |
-| `freeze` | list | `[]` | Object names whose xxHash64 fingerprint must not change after this chunk. See [The Freeze Contract](./introduction.md#the-freeze-contract). |
 
 ## Display control
 

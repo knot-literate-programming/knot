@@ -18,19 +18,16 @@ class _KnotSnapshotPickler(pickle.Pickler):
         return None
 
 
-def save_session(path, excluded=()):
-    """Save selected global bindings without changing the live session."""
+def save_session(path):
+    """Saves the global session (from __main__) including modules."""
     try:
         import __main__
         main_dict = __main__.__dict__
 
         state = {'__knot_modules__': {}, '__knot_cwd__': os.getcwd()}
         reusable = True
-        excluded = set(excluded)
         initial = main_dict.get('_knot_initial_bindings', {})
         for k, v in list(main_dict.items()):
-            if k in excluded:
-                continue
             if k.startswith('__') or k.startswith('_knot_') or (k in initial and v is initial[k]):
                 continue
 

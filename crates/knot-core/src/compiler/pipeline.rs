@@ -106,6 +106,8 @@ pub struct PlannedNode {
     pub source_end: usize,
     /// What the execution phase must do with this node.
     pub need: ExecutionNeed,
+    /// Whether this document allows snapshots for the node’s language.
+    pub snapshots: bool,
 }
 
 /// A node after the execution phase: Typst output is fully determined.

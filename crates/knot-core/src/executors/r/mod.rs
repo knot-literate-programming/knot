@@ -12,9 +12,7 @@ mod execution;
 mod formatters;
 mod process;
 
-use super::{
-    ConstantObjectHandler, ExecutionAttempt, GraphicsOptions, KnotExecutor, LanguageExecutor,
-};
+use super::{ExecutionAttempt, GraphicsOptions, KnotExecutor, LanguageExecutor};
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -64,15 +62,10 @@ impl LanguageExecutor for RExecutor {
 use super::path_utils::escape_path_for_code;
 
 impl KnotExecutor for RExecutor {
-    fn save_session_excluding(&mut self, path: &Path, excluded: &[String]) -> Result<()> {
+    fn save_session(&mut self, path: &Path) -> Result<()> {
         // Delegate to R helper function
         let path_str = escape_path_for_code(path);
-        let names = excluded
-            .iter()
-            .map(serde_json::to_string)
-            .collect::<std::result::Result<Vec<_>, _>>()?
-            .join(",");
-        let code = format!("save_session('{}', c({names}))", path_str);
+        let code = format!("save_session('{}')", path_str);
         let out = self.query(&code)?;
         if out.contains("TRUE") {
             Ok(())
@@ -95,89 +88,6 @@ impl KnotExecutor for RExecutor {
 
     fn snapshot_extension(&self) -> &'static str {
         "RData"
-    }
-}
-
-impl ConstantObjectHandler for RExecutor {
-    fn hash_object(&mut self, object_name: &str) -> Result<String> {
-        // Use R helper function
-        let code = format!("print(hash_object('{}'))", object_name);
-        let out = self.query(&code)?;
-        if out.contains("NONE") {
-            anyhow::bail!("Object '{}' not found", object_name);
-        }
-        Ok(out
-            .trim()
-            .trim_start_matches("[1]")
-            .trim()
-            .trim_matches('"')
-            .to_string())
-    }
-
-    fn hash_objects(
-        &mut self,
-        object_names: &[String],
-    ) -> Result<std::collections::HashMap<String, String>> {
-        if object_names.is_empty() {
-            return Ok(std::collections::HashMap::new());
-        }
-        // Build R character vector literal and call batch helper
-        let names_vec = object_names
-            .iter()
-            .map(|n| format!("'{}'", n.replace('\'', "\\'")))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let code = format!("print(hash_objects_batch(c({})))", names_vec);
-        let out = self.query(&code)?;
-
-        let json_str = out
-            .trim()
-            .trim_start_matches("[1]")
-            .trim()
-            .trim_matches('"')
-            .replace("\\\"", "\"");
-        let map: std::collections::HashMap<String, String> = serde_json::from_str(&json_str)
-            .map_err(|e| {
-                anyhow::anyhow!("hash_objects_batch parse error: {} (out was: {})", e, out)
-            })?;
-        Ok(map)
-    }
-
-    fn save_constant(&mut self, object_name: &str, hash: &str, cache_dir: &Path) -> Result<()> {
-        let objects_dir = cache_dir.join("objects");
-        std::fs::create_dir_all(&objects_dir)?;
-
-        let object_path = objects_dir.join(format!("{}.rds", hash));
-        let path_str = escape_path_for_code(&object_path);
-
-        let code = format!("print(save_constant('{}', '{}'))", object_name, path_str);
-        self.query(&code)?;
-
-        log::debug!(
-            "💾 Saved constant object '{}' to: {}",
-            object_name,
-            object_path.display()
-        );
-        Ok(())
-    }
-
-    fn load_constant(&mut self, object_name: &str, hash: &str, cache_dir: &Path) -> Result<()> {
-        let object_path = cache_dir.join("objects").join(format!("{}.rds", hash));
-
-        let path_str = escape_path_for_code(&object_path);
-        let code = format!("print(load_constant('{}', '{}'))", object_name, path_str);
-        self.query(&code)?;
-
-        log::debug!(
-            "📥 Loaded constant object '{}' from: {}",
-            object_name,
-            object_path.display()
-        );
-        Ok(())
-    }
-
-    fn object_extension(&self) -> &'static str {
-        "rds"
     }
 }
 

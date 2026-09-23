@@ -20,6 +20,7 @@
 #![allow(missing_docs)]
 
 pub mod ast;
+pub(crate) mod frontmatter;
 pub mod indent;
 mod options;
 mod winnow_parser;

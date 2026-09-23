@@ -31,7 +31,14 @@ pub fn transform_to_typst(knot_content: &str) -> String {
     let doc = Document::parse(knot_content.to_string());
 
     let mut output = String::with_capacity(knot_content.len());
-    let mut last_pos = 0;
+    for character in knot_content[..doc.header_end].chars() {
+        if matches!(character, '\n' | '\r') {
+            output.push(character);
+        } else {
+            output.extend(std::iter::repeat_n(' ', character.len_utf16()));
+        }
+    }
+    let mut last_pos = doc.header_end;
 
     let mut executable_nodes: Vec<(usize, usize, bool, usize)> = Vec::new();
     for (i, chunk) in doc.chunks.iter().enumerate() {
@@ -103,6 +110,16 @@ pub fn transform_to_typst(knot_content: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn yaml_header_is_masked_without_changing_positions() {
+        let input = "---\r\nsnapshots: {python: false} # é 🦀\r\n---\r\nText `{python} 1`";
+        let output = transform_to_typst(input);
+        assert!(!output.contains("snapshots"));
+        assert_eq!(input.lines().count(), output.lines().count());
+        assert_eq!(input.encode_utf16().count(), output.encode_utf16().count());
+        assert!(output.ends_with("Text `{python}  `"));
+    }
 
     #[test]
     fn test_transform_simple_inline() {

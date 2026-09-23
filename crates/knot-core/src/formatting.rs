@@ -57,6 +57,13 @@ struct Protected {
 
 fn format_typst(clean: &str) -> Result<String> {
     let doc = Document::parse(clean.to_owned());
+    if doc.header_end > 0 {
+        return Ok(format!(
+            "{}{}",
+            &clean[..doc.header_end],
+            format_typst(&clean[doc.header_end..])?
+        ));
+    }
     let mut protected: Vec<_> = doc
         .chunks
         .iter()
@@ -156,6 +163,8 @@ mod tests {
     #[test]
     fn typst_and_protected_elements_are_idempotent() {
         for source in [
+            "---\nsnapshots: {r: false, python: true}\n---\n#let x=  2\n```{r}\nx <- 1\n```\n",
+            "---\r\nsnapshots:\r\n  python: false\r\n---\r\nText `{python} 1`\r\n",
             "#let x=  2\nValue `{r, output=false} x <- 15` and `{python} 1 + 2`.\n",
             "#block[\n    ```{python sample}\n    #| eval: false\n\n    x = 1\n    ```\n]\n",
             "- Item\n\n  ```{r}\n  x <- 1\n  ```\n\n  Text `{r} x`.\n",
@@ -169,6 +178,11 @@ mod tests {
             assert_eq!(format_typst(&formatted).unwrap(), formatted, "{source}");
             let before = Document::parse(source.to_owned());
             let after = Document::parse(formatted);
+            assert_eq!(
+                &before.source[..before.header_end],
+                &after.source[..after.header_end]
+            );
+            assert_eq!(before.snapshots, after.snapshots);
             assert_eq!(before.chunks.len(), after.chunks.len());
             for (a, b) in before.chunks.iter().zip(&after.chunks) {
                 assert_eq!(a.code, b.code);

@@ -56,7 +56,6 @@ pub const R_HELPERS: &[(&str, &str)] = &[
     ("helpers.R", include_str!("../resources/r/helpers.R")),
     ("executor.R", include_str!("../resources/r/executor.R")),
     ("session.R", include_str!("../resources/r/session.R")),
-    ("constants.R", include_str!("../resources/r/constants.R")),
     ("output.R", include_str!("../resources/r/output.R")),
     ("lsp.R", include_str!("../resources/r/lsp.R")),
 ];
@@ -71,10 +70,6 @@ pub const PYTHON_HELPERS: &[(&str, &str)] = &[
         include_str!("../resources/python/executor.py"),
     ),
     ("session.py", include_str!("../resources/python/session.py")),
-    (
-        "constants.py",
-        include_str!("../resources/python/constants.py"),
-    ),
     ("output.py", include_str!("../resources/python/output.py")),
     ("lsp.py", include_str!("../resources/python/lsp.py")),
 ];

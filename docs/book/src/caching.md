@@ -5,7 +5,7 @@ full path. Two chapters named `main.knot` in different directories do not share
 results or interpreter snapshots. Moving a document starts a new cache.
 
 Each language has an independent execution chain. A chunk's identity includes
-its language, code, execution options, `freeze` declarations, declared file
+its language, code, execution options, declared file
 dependencies, preceding executed node, and the embedded interpreter scripts.
 Changing one of these invalidates that chunk and the following nodes in the same
 language. Inline expressions participate in that chain too.
@@ -34,13 +34,13 @@ filesystem, network, environment-variable or database dependencies.
 
 ## Reuse, repair and snapshots
 
-Knot verifies the contents of cached result files, snapshots and frozen objects
+Knot verifies the contents of cached result files and snapshots
 before reusing them. Missing or damaged files cause re-execution from the affected
 node onward. Malformed or incompatible metadata is discarded.
 
 Each compilation starts with fresh interpreters and restores the required cached
 prefix. Removed variables cannot leak from a previous compilation. Snapshots are
-saved only after successful execution and freeze checks; skipped and cached nodes
+saved only when enabled for the language, after successful execution; skipped and cached nodes
 do not create replacement snapshots. The working directory is restored along
 with saved variables.
 
@@ -53,22 +53,37 @@ user-defined functions, classes and open file handles. When such objects are
 present, Knot marks the snapshot as non-reusable and replays the affected prefix
 on subsequent compilations. This favors correct execution over a cache hit.
 
-`freeze: [x, y]` applies only to the named objects. Their bindings are saved with
-each snapshot, so declarations later in the document do not affect an earlier
-restored prefix. A mutation produces an error and makes following nodes in the
-same language inert. Other language chains continue independently.
+## Document snapshot policy
 
-Snapshot saving selects the non-frozen bindings without removing or reloading
-frozen objects in the running interpreter, even if the save fails. Frozen objects
-are loaded separately only when restoring a cached snapshot. Their contract is
-checked before a successful result or snapshot is saved. After an execution error,
-correcting the chunk resumes from the preceding valid state with its frozen data.
+A YAML header at the beginning of a `.knot` file controls snapshots by language:
 
-Exclusion is by binding name. Other bindings can still serialize the same data;
-shared references between frozen data and other snapshot objects are not preserved
-in general on restoration. Prefer independent serializable values. Each `.knot`
-source has its own workspace, so splitting independent analyses into files also
-limits the lifetime of frozen variables.
+```yaml
+---
+snapshots:
+  r: true
+  python: false
+---
+```
+
+Each omitted language defaults to `true`. `false` disables both saving and loading
+snapshots for the **entire language chain in this file**. Every compilation
+executes its chunks and inline expressions from the beginning in a fresh
+interpreter, even for unchanged code or after correcting an error. Cached outputs
+remain available for rendering but cannot skip execution. `eval: false` still
+skips execution. The editor does not restore runtime snapshots for that language.
+
+Other languages and other files retain their own caching behavior. Re-enabling
+snapshots rebuilds missing snapshots before incremental reuse becomes possible.
+Existing unused snapshot files can be removed with `knot clean`.
+
+The user is responsible for deciding whether their workspace can be restored.
+Successful serialization is not proof that external connections or native resources
+will still work in a new process. Disable snapshots if uncertain, or when storing
+large environments costs too much disk space. Split independent work into files
+to limit replay costs.
+
+The former `freeze` chunk option has been removed. Replace it with this document
+setting; no objects are stored separately or checked for mutation.
 
 ## Rebuilding after environment changes
 

@@ -15,10 +15,10 @@ use winnow::token::{take_until, take_while};
 
 pub fn parse_document(source: &str) -> Document {
     let mut chunks = Vec::new();
-    let mut errors = Vec::new();
+    let (header_end, snapshots, mut errors) = super::frontmatter::parse(source);
     let original_source = source;
 
-    let mut current_offset = 0;
+    let mut current_offset = header_end;
     let mut chunk_index = 0; // Ordinal chunk counter
 
     // 1. Extract Chunks line by line
@@ -156,9 +156,11 @@ pub fn parse_document(source: &str) -> Document {
         current_offset += line_full_len;
     }
 
-    let inline_exprs = extract_inline_exprs_manual(source, &chunks);
+    let inline_exprs = extract_inline_exprs_manual(source, &chunks, header_end);
 
     Document {
+        snapshots,
+        header_end,
         source: source.to_string(),
         chunks,
         inline_exprs,
@@ -236,9 +238,9 @@ fn offset_to_position(source: &str, offset: usize) -> Position {
     Position { line, column }
 }
 
-fn extract_inline_exprs_manual(source: &str, chunks: &[Chunk]) -> Vec<InlineExpr> {
+fn extract_inline_exprs_manual(source: &str, chunks: &[Chunk], start: usize) -> Vec<InlineExpr> {
     let mut exprs = Vec::new();
-    let mut current_offset = 0;
+    let mut current_offset = start;
 
     while let Some(pos) = source[current_offset..].find('`') {
         let abs_pos = current_offset + pos;

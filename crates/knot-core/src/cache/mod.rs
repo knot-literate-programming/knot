@@ -14,9 +14,7 @@ mod metadata;
 mod storage;
 
 pub use hashing::hash_dependencies;
-pub use metadata::{
-    CacheMetadata, ChunkCacheEntry, FreezeObjectInfo, InlineCacheEntry, SnapshotEntry,
-};
+pub use metadata::{CacheMetadata, ChunkCacheEntry, InlineCacheEntry, SnapshotEntry};
 
 use crate::executors::{ExecutionAttempt, ExecutionOutput};
 use anyhow::{Context, Result, anyhow, bail};
@@ -27,7 +25,7 @@ use std::path::PathBuf;
 /// On-disk cache for a single `.knot` document.
 ///
 /// Stores chunk results, inline expression results, session snapshots and
-/// freeze-object hashes.  All content-addressed entries live under
+/// snapshot hashes.  All content-addressed entries live under
 /// `cache_dir`; the index is persisted as `metadata.json` in the same directory.
 pub struct Cache {
     /// Path to the cache directory (e.g. `.knot_cache/main/`).
@@ -203,7 +201,7 @@ impl Cache {
         })
     }
 
-    /// Validate and restore the session and frozen bindings of one snapshot.
+    /// Validate and restore a complete session; incomplete or damaged snapshots are rejected.
     /// Callers choose the snapshot and manage the interpreter lifetime.
     pub fn restore_snapshot(
         &self,
@@ -218,31 +216,12 @@ impl Cache {
         let path = self.get_snapshot_path(hash, executor.snapshot_extension());
         executor
             .load_session(&path)
-            .with_context(|| format!("Failed to restore snapshot {}", path.display()))?;
-        self.restore_constants(hash, executor)
-    }
-
-    /// Restore frozen objects associated with this snapshot, not with a later
-    /// state of the document. Shared by compilation and editor completion.
-    fn restore_constants(
-        &self,
-        hash: &str,
-        executor: &mut dyn crate::executors::KnotExecutor,
-    ) -> Result<()> {
-        let entry = self
-            .metadata
-            .snapshots
-            .get(hash)
-            .ok_or_else(|| anyhow!("Snapshot metadata missing: {}", hash))?;
-        for info in entry.freeze_objects.values() {
-            executor.load_constant(&info.name, &info.hash, &self.cache_dir)?;
-        }
-        Ok(())
+            .with_context(|| format!("Failed to restore snapshot {}", path.display()))
     }
 
     /// Save the cache metadata to disk
     ///
-    /// Writes the metadata (including constant objects info) to metadata.json
+    /// Writes the result and snapshot metadata to metadata.json
     pub fn save_metadata(&self) -> Result<()> {
         storage::save_metadata(&self.cache_dir, &self.metadata)
     }

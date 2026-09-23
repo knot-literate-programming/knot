@@ -756,12 +756,27 @@ impl KnotLanguageServer {
     /// differs from the one already loaded (avoids redundant I/O on every save).
     async fn try_load_snapshot(&self, uri: &Url, cache: &Cache, language: &str) {
         let reload_key = format!("{}::{}", uri, language);
+        let allowed = {
+            let documents = self.state.documents.read().await;
+            documents.get(uri).is_none_or(|state| {
+                let document = knot_core::Document::parse(state.text.clone());
+                document.errors.is_empty()
+                    && document.snapshots.get(language).copied().unwrap_or(true)
+            })
+        };
         let last_chunk = match cache
             .metadata
             .chunks
             .iter()
             .filter(|c| {
-                c.language == language && c.error.is_none() && cache.snapshot_is_valid(&c.hash)
+                allowed
+                    && !cache
+                        .metadata
+                        .disabled_snapshot_languages
+                        .contains(language)
+                    && c.language == language
+                    && c.error.is_none()
+                    && cache.snapshot_is_valid(&c.hash)
             })
             .max_by_key(|c| c.index)
         {

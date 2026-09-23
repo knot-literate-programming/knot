@@ -204,24 +204,6 @@ fn changed_language_chain_leaves_other_chain_cached() {
 
 #[test]
 #[ignore = "requires Python"]
-fn freeze_is_scoped_to_prefix_and_mutation_cascades() {
-    let (_root, path, mut compiler) = fixture();
-    let source = "```{python initial}\nx = [1]\n```\n```{python declaration}\n#| freeze: [x]\nx = [2]\n```\n```{python consumer}\nprint(x)\n```";
-    let original = compile(&mut compiler, source);
-    assert!(!original.contains("Freeze contract violated"));
-    let changed = source.replace("x = [2]", "x = [3]");
-    let warm = compile(&mut Compiler::new(&path).unwrap(), &changed);
-    assert!(!warm.contains("Freeze contract violated"));
-    let (_fresh_root, _, mut fresh) = fixture();
-    assert_eq!(warm, compile(&mut fresh, &changed));
-    let mutation = changed.replace("print(x)", "#| freeze: [x]\nx.append(4)");
-    let violated = compile(&mut compiler, &mutation);
-    assert!(violated.contains("Freeze contract violated"), "{violated}");
-    assert_eq!(compile(&mut compiler, &mutation), violated);
-}
-
-#[test]
-#[ignore = "requires Python"]
 fn reused_compiler_does_not_keep_deleted_variables() {
     let (_root, _, mut compiler) = fixture();
     compile(
@@ -261,70 +243,6 @@ fn incomplete_python_snapshot_replays_prefix_instead_of_losing_definitions() {
         assert!(!cold.contains("error:"), "{cold}");
         assert_eq!(hits(&plan(&mut compiler, &source)), [false, false]);
         assert_eq!(compile(&mut Compiler::new(&path).unwrap(), &source), cold);
-    }
-}
-
-#[test]
-#[ignore = "requires R"]
-fn frozen_r_objects_restore_and_corruption_forces_reexecution() {
-    let (root, path, mut compiler) = fixture();
-    let source = "```{r declaration}\n#| freeze: [x]\nx <- c(1, 2)\ny <- 3\n```\n```{r consumer}\ny <- 4\nprint(x + y)\n```";
-    let cold = compile(&mut compiler, source);
-    assert_eq!(hits(&plan(&mut compiler, source)), [true, true]);
-    let changed = source.replace("y <- 4", "y <- 5");
-    let warm = compile(&mut Compiler::new(&path).unwrap(), &changed);
-    let (_fresh_root, _, mut fresh) = fixture();
-    assert_eq!(warm, compile(&mut fresh, &changed));
-    let stored = cache(root.path(), &path);
-    let frozen = &stored.metadata.freeze_objects["r::x"];
-    fs::write(
-        stored
-            .cache_dir
-            .join("objects")
-            .join(format!("{}.rds", frozen.hash)),
-        "corrupt",
-    )
-    .unwrap();
-    assert_eq!(hits(&plan(&mut compiler, source)), [false, false]);
-    assert_eq!(compile(&mut compiler, source), cold);
-}
-
-#[test]
-#[ignore = "requires R and Python"]
-fn freeze_violation_makes_downstream_inert_but_other_language_runs() {
-    let (root, path, mut compiler) = fixture();
-    let source = "```{python}\n#| freeze: [x]\nx = [1]\ny = []\n```\n```{python}\ny.append(1)\nprint(x)\n```\n```{python}\nx.append(2)\n```\n```{python}\nfrom pathlib import Path\nPath('must-not-exist').write_text('bad')\n```\n```{r}\ncat('independent chain')\n```";
-    let result = compile(&mut compiler, source);
-    assert!(result.contains("Freeze contract violated"));
-    assert!(!root.path().join("must-not-exist").exists());
-    let stored = cache(root.path(), &path);
-    assert!(
-        stored
-            .metadata
-            .chunks
-            .iter()
-            .any(|entry| entry.language == "r" && entry.error.is_none())
-    );
-    let disabled = source.replace("#| freeze: [x]\n", "");
-    let result = compile(&mut compiler, &disabled);
-    assert!(!result.contains("Freeze contract violated"));
-    assert!(root.path().join("must-not-exist").exists());
-}
-
-#[test]
-#[ignore = "requires Python"]
-fn inline_freeze_mutation_is_never_cached_as_success() {
-    let (root, path, mut compiler) = fixture();
-    let source = "```{python}\n#| freeze: [x]\nx = [1]\n```\n`{python} x.append(2)`";
-    for _ in 0..2 {
-        let result = compile(&mut compiler, source);
-        assert!(result.contains("Freeze contract violated"));
-        assert!(
-            cache(root.path(), &path)
-                .metadata
-                .inline_expressions
-                .is_empty()
-        );
     }
 }
 
@@ -399,7 +317,6 @@ fn planning_classifies_hits_misses_skips_and_cascade_without_interpreters() {
             SnapshotEntry {
                 reusable: true,
                 files: [(filename, hash_file(&file).unwrap())].into(),
-                freeze_objects: Default::default(),
             },
         );
     }
@@ -493,12 +410,11 @@ fn batch_and_streaming_compilation_produce_the_same_output_and_cache() {
 
 #[test]
 #[ignore = "requires R and Python"]
-fn frozen_state_recovers_after_contract_and_runtime_errors() {
-    for (lang, create, mutate, fail, repaired, consume) in [
+fn snapshots_disabled_replays_after_runtime_errors() {
+    for (lang, create, fail, repaired, consume) in [
         (
             "python",
             "x = [1, 2]",
-            "x.append(3)",
             "x.append(3)\nraise ValueError('intentional')",
             "y = 5",
             "print(sum(x) + y)",
@@ -506,44 +422,138 @@ fn frozen_state_recovers_after_contract_and_runtime_errors() {
         (
             "r",
             "x <- c(1, 2)",
-            "x <- c(x, 3)",
             "x <- c(x, 3)\nstop('intentional')",
             "y <- 5",
             "print(sum(x) + y)",
         ),
     ] {
-        for bad in [mutate, fail] {
-            let (_root, path, mut compiler) = fixture();
-            let source = format!(
-                "```{{{lang} setup}}\n#| freeze: [x]\n{create}\n```\n```{{{lang} work}}\n{bad}\n```\n```{{{lang} result}}\n{consume}\n```"
-            );
-            let output = compile(&mut compiler, &source);
-            assert!(
-                output.contains(if bad == mutate {
-                    "Freeze contract violated"
-                } else {
-                    "intentional"
-                }),
-                "{output}"
-            );
-            assert!(output.contains("is-inert: true"), "{output}");
-            let fixed = source.replace(bad, repaired);
-            let mut resumed = Compiler::new(&path).unwrap();
-            assert_eq!(hits(&plan(&mut resumed, &fixed)), [true, false, false]);
-            let recovered = compile(&mut resumed, &fixed);
-            let (_fresh, _, mut cold) = fixture();
-            assert_eq!(recovered, compile(&mut cold, &fixed));
-            assert!(!recovered.contains("is-inert: true"));
-            assert_eq!(hits(&plan(&mut resumed, &fixed)), [true, true, true]);
-        }
+        let bad = fail;
+        let (_root, path, mut compiler) = fixture();
+        let source = format!(
+            "---\nsnapshots:\n  {lang}: false\n---\n```{{{lang} setup}}\n{create}\n```\n```{{{lang} work}}\n{bad}\n```\n```{{{lang} result}}\n{consume}\n```"
+        );
+        let output = compile(&mut compiler, &source);
+        assert!(output.contains("intentional"), "{output}");
+        assert!(output.contains("is-inert: true"), "{output}");
+        let fixed = source.replace(bad, repaired);
+        let mut resumed = Compiler::new(&path).unwrap();
+        assert_eq!(hits(&plan(&mut resumed, &fixed)), [false, false, false]);
+        let recovered = compile(&mut resumed, &fixed);
+        let (_fresh, _, mut cold) = fixture();
+        assert_eq!(recovered, compile(&mut cold, &fixed));
+        assert!(!recovered.contains("is-inert: true"));
+        assert_eq!(hits(&plan(&mut resumed, &fixed)), [false, false, false]);
     }
 }
 
 #[test]
 #[ignore = "requires Python"]
-fn frozen_python_alias_stays_live_and_its_mutation_is_detected() {
+fn disabling_snapshots_replays_shared_graphs_without_snapshots() {
+    let (root, path, mut compiler) = fixture();
+    let prefix = "```{python}\nx = {'col': []}\nx['self'] = x\nalias = x\nchild = x['col']\ncontainer = {'root': x}\n```\n";
+    compile(&mut compiler, prefix);
+    assert_eq!(hits(&plan(&mut compiler, prefix)), [true]);
+    let source = format!(
+        "---\nsnapshots:\n  python: false\n---\n{prefix}```{{python}}\nassert alias is x\n```\n```{{python}}\nassert container['root'] is x\nassert child is x['col']\nassert x['self'] is x\nprint('graph intact')\n```\n`{{python}} alias is x`"
+    );
+    for text in [
+        &source,
+        &source,
+        &source.replace("graph intact", "still intact"),
+    ] {
+        assert_eq!(hits(&plan(&mut compiler, text)), [false; 4]);
+        let output = compile(&mut compiler, text);
+        assert!(!output.contains("error:"), "{output}");
+        let stored = cache(root.path(), &path);
+        for node in plan(&mut compiler, text) {
+            assert!(!stored.metadata.snapshots.contains_key(&node.hash));
+        }
+    }
+    let mutated = source.replace("print('graph intact')", "child.append(1)");
+    assert!(!compile(&mut compiler, &mutated).contains("error:"));
+    let mut restarted = Compiler::new(&path).unwrap();
+    let (_fresh_root, _, mut fresh) = fixture();
+    assert_eq!(
+        compile(&mut restarted, &source),
+        compile(&mut fresh, &source)
+    );
+}
+
+#[test]
+#[ignore = "requires R and Python"]
+fn snapshot_policy_is_scoped_to_language_and_preserves_skipped_nodes() {
     let (_root, _, mut compiler) = fixture();
-    let source = "```{python}\n#| freeze: [x]\nx = [1, 2]\nalias = x\n```\n```{python}\nassert alias is x\nalias.append(3)\n```";
-    let result = compile(&mut compiler, source);
-    assert!(result.contains("Freeze contract violated"), "{result}");
+    let source = "---\nsnapshots:\n  python: false\n---\n```{python}\nx = [1]\n```\n```{r}\nx <- 1\n```\n```{r}\n#| eval: false\nstop('skipped')\n```";
+    compile(&mut compiler, source);
+    let nodes = plan(&mut compiler, source);
+    assert_eq!(hits(&nodes), [false, true, false]);
+    assert!(matches!(nodes[2].need, ExecutionNeed::Skip));
+}
+
+#[test]
+fn yaml_header_is_not_rendered_and_invalid_settings_prevent_execution() {
+    let (_root, _, mut compiler) = fixture();
+    let source = "---\nsnapshots:\n  python: false\n---\nHello";
+    assert_eq!(compile(&mut compiler, source), "Hello");
+    let (_, _, preview) = compiler
+        .plan_and_partial(
+            &Document::parse(source.into()),
+            "main.knot",
+            Phase0Mode::Pending,
+        )
+        .unwrap();
+    assert_eq!(preview, "Hello");
+    for bad in ["snapshots: {python: nope}", "snapshots: {pyhton: false}"] {
+        assert!(
+            compiler
+                .compile(
+                    &Document::parse(format!(
+                        "---\n{bad}\n---\n```{{python}}\nraise Exception('must not run')\n```"
+                    )),
+                    "main.knot"
+                )
+                .is_err()
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires R and Python"]
+fn snapshot_policy_can_be_disabled_and_reenabled_for_each_language() {
+    for (lang, code) in [("python", "x = 1\nprint(x)"), ("r", "x <- 1\nprint(x)")] {
+        let (root, path, mut compiler) = fixture();
+        let body = format!("```{{{lang}}}\n{code}\n```\n`{{{lang}}} x + 1`");
+        compile(&mut compiler, &body);
+        assert_eq!(hits(&plan(&mut compiler, &body)), [true, true]);
+        let disabled = format!("---\nsnapshots:\n  {lang}: false\n---\n{body}");
+        for _ in 0..2 {
+            assert_eq!(hits(&plan(&mut compiler, &disabled)), [false, false]);
+            compile(&mut compiler, &disabled);
+            let stored = cache(root.path(), &path);
+            assert!(stored.metadata.disabled_snapshot_languages.contains(lang));
+            assert!(stored.metadata.snapshots.is_empty());
+        }
+        let enabled = disabled.replace(": false", ": true");
+        assert_eq!(hits(&plan(&mut compiler, &enabled)), [false, false]);
+        compile(&mut compiler, &enabled);
+        assert_eq!(hits(&plan(&mut compiler, &enabled)), [true, true]);
+        assert!(
+            cache(root.path(), &path)
+                .metadata
+                .disabled_snapshot_languages
+                .is_empty()
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires Python"]
+fn inline_only_documents_respect_snapshot_policy() {
+    let (root, path, mut compiler) = fixture();
+    let source = "---\nsnapshots: {python: false}\n---\n`{python} 1 + 1`";
+    for _ in 0..2 {
+        assert_eq!(hits(&plan(&mut compiler, source)), [false]);
+        assert_eq!(compile(&mut compiler, source), "2");
+        assert!(cache(root.path(), &path).metadata.snapshots.is_empty());
+    }
 }

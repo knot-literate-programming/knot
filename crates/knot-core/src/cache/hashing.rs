@@ -54,20 +54,12 @@ fn chunk_hash_with_version(
         "{}|{}|{}|{}|{:?}",
         resolved.eval, resolved.fig_width, resolved.fig_height, resolved.dpi, resolved.fig_format
     );
-    let freeze = hash_fields(
-        &options
-            .freeze
-            .iter()
-            .map(|name| name.as_bytes())
-            .collect::<Vec<_>>(),
-    );
     hash_fields(&[
         b"knot-cache-v2",
         b"chunk",
         language.as_bytes(),
         code.as_bytes(),
         execution_options.as_bytes(),
-        freeze.as_bytes(),
         previous_hash.as_bytes(),
         dependencies_hash.as_bytes(),
         scripts_version.as_bytes(),
@@ -142,7 +134,7 @@ mod tests {
     use crate::parser::{InlineOptions, Show};
 
     #[test]
-    fn identity_includes_language_scripts_graphics_freeze_and_dependencies() {
+    fn identity_includes_language_scripts_graphics_and_dependencies() {
         let base = ChunkOptions::default();
         let hash = |lang: &str, options: &ChunkOptions, prev: &str, deps: &str, version: &str| {
             chunk_hash_with_version(lang, "print(1)", options, prev, deps, version)
@@ -154,9 +146,6 @@ mod tests {
         assert_ne!(original, hash("r", &base, "", "data", "v1"));
         let mut changed = base.clone();
         changed.fig_width = Some(99.0);
-        assert_ne!(original, hash("r", &changed, "", "", "v1"));
-        changed = base.clone();
-        changed.freeze = vec!["x".into()];
         assert_ne!(original, hash("r", &changed, "", "", "v1"));
         changed = base;
         changed.show = Some(Show::None);

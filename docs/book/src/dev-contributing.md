@@ -97,7 +97,7 @@ crates/
         pipeline.rs    # Pass 1: planning + hashing
         execution.rs   # Pass 2: parallel execution
         mod.rs         # Pass 3: assembly + two-phase API
-        freeze.rs      # Freeze contract checking
+        execution_tests.rs # Execution and cancellation tests
         snapshot_manager.rs
         node_output.rs
         options.rs
