@@ -15,7 +15,8 @@ use winnow::token::{take_until, take_while};
 
 pub fn parse_document(source: &str) -> Document {
     let mut chunks = Vec::new();
-    let (header_end, snapshots, mut errors) = super::frontmatter::parse(source);
+    let (header_end, snapshots, snapshot_warning_threshold, mut errors) =
+        super::frontmatter::parse(source);
     let original_source = source;
 
     let mut current_offset = header_end;
@@ -159,6 +160,7 @@ pub fn parse_document(source: &str) -> Document {
     let inline_exprs = extract_inline_exprs_manual(source, &chunks, header_end);
 
     Document {
+        snapshot_warning_threshold,
         snapshots,
         header_end,
         source: source.to_string(),

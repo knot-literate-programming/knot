@@ -108,6 +108,10 @@ pub struct PlannedNode {
     pub need: ExecutionNeed,
     /// Whether this document allows snapshots for the node’s language.
     pub snapshots: bool,
+    /// Cumulative on-disk snapshot warning threshold, in bytes; None disables it.
+    pub snapshot_warning_threshold: Option<u64>,
+    /// Budget warning computed from reusable snapshots for the immediate preview.
+    pub cached_snapshot_warning: Option<String>,
 }
 
 /// A node after the execution phase: Typst output is fully determined.
@@ -131,4 +135,6 @@ pub struct ExecutedNode {
     pub source_line: u32,
     /// `true` if this node caused an execution error (triggers Inert cascade).
     pub errored: bool,
+    /// Snapshot warning from an inline expression, rendered after the document body.
+    pub snapshot_warning: Option<String>,
 }

@@ -85,7 +85,7 @@ pub use manager::ExecutorManager;
 pub use side_channel::{KnotMetadata, OutputMetadata, RuntimeError, RuntimeWarning, SideChannel};
 
 /// The output produced by a successful code execution.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ExecutionResult {
     /// Plain text output (stdout).
     Text(String),
@@ -110,7 +110,7 @@ pub enum ExecutionResult {
 }
 
 /// Aggregated output of a successful code execution (no runtime error).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ExecutionOutput {
     /// The primary execution result (text, plot, DataFrame, or combination).
     pub result: ExecutionResult,

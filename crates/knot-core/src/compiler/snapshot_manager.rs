@@ -9,6 +9,8 @@ pub struct SnapshotManager {
     loaded_hash: Option<String>,
     allow_snapshots: bool,
     exec: Option<Box<dyn KnotExecutor>>,
+    budget: super::snapshot_budget::SnapshotBudget,
+    pub inline_warning: Option<String>,
 }
 
 impl SnapshotManager {
@@ -17,7 +19,21 @@ impl SnapshotManager {
             loaded_hash: None,
             allow_snapshots,
             exec,
+            budget: Default::default(),
+            inline_warning: None,
         }
+    }
+
+    pub fn warning(&mut self, node: &super::PlannedNode, cache: &Cache) -> Result<Option<String>> {
+        if !self.allow_snapshots {
+            return Ok(None);
+        }
+        self.budget.observe(
+            cache,
+            &node.hash,
+            &node.lang,
+            node.snapshot_warning_threshold,
+        )
     }
 
     pub fn into_executor(self) -> Option<Box<dyn KnotExecutor>> {

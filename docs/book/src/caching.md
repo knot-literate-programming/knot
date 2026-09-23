@@ -85,6 +85,56 @@ to limit replay costs.
 The former `freeze` chunk option has been removed. Replace it with this document
 setting; no objects are stored separately or checked for mutation.
 
+## Snapshot size warning
+
+By default, Knot warns in the rendered document when snapshots exceed **1 GB
+(1,000,000,000 bytes)** cumulatively for one language in one source file. It counts
+actual file sizes on disk (including compression and R package context files),
+not the size of live objects in memory. Snapshots reused from cache count too;
+obsolete snapshots outside the current execution chain do not.
+
+```yaml
+---
+snapshots:
+  r: true
+  python: true
+snapshot-warning-threshold: 2GB
+---
+```
+
+The threshold accepts a positive integer byte count or an integer followed by
+`B`, `KB`, `MB`, `GB`, `KiB`, `MiB` or `GiB`. Decimal units use powers of 1000;
+binary units use powers of 1024. Use `snapshot-warning-threshold: false` to disable
+the warning. Each included file has its own threshold; omission means 1 GB.
+
+The first chunk exceeding the threshold displays a Knot warning alongside its
+runtime warnings, respecting the usual chunk warning visibility. A crossing in
+an inline expression produces a warning at the end of the source document,
+leaving the expression itself intact. There is at most one size warning per
+language and source file per compilation. It is recalculated on cache reuse and
+when the threshold changes, without rerunning otherwise cached computations.
+
+The warning suggests disabling snapshots or splitting independent analyses into
+files. It does not delete data or interrupt execution. `knot clean` removes old
+unused cache files that are not included in this measurement.
+
+## Full render without snapshots
+
+```sh
+knot build --no-snapshots
+```
+
+This overrides every file's YAML settings, for every language and included file.
+All executable nodes run again in fresh interpreters without saving or restoring
+snapshots; skipped nodes remain skipped. The source files are not modified.
+Ordinary R/Python warnings remain visible. Snapshot-size warnings disappear
+because this run does not produce or reuse snapshots.
+
+Use ordinary `knot build` again to return to the document settings. Missing
+snapshots must be rebuilt before incremental reuse. Full re-execution repeats
+external effects such as file writes; it does not control changing inputs or
+randomness on its own.
+
 ## Rebuilding after environment changes
 
 Interpreter and installed-package versions are not yet part of cache identity.

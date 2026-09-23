@@ -1,5 +1,5 @@
 #![allow(missing_docs)]
-//! CLI subprocess tests requiring Typst on PATH (no R or Python required).
+//! CLI subprocess tests requiring Typst; the snapshot-policy test also needs Python.
 
 use std::fs;
 use std::process::Command;
@@ -12,7 +12,7 @@ use common::setup_test_project;
 fn build_command_generates_pdf_with_includes() {
     let (_temp, project_root) = setup_test_project();
     let output = Command::new(env!("CARGO_BIN_EXE_knot"))
-        .arg("build")
+        .args(["build", "--no-snapshots"])
         .current_dir(&project_root)
         .output()
         .expect("Failed to launch knot");
@@ -214,4 +214,44 @@ fn formatting_preserves_rendered_content_of_a_mixed_document() {
         String::from_utf8_lossy(&formatted.stderr)
     );
     assert!(render() == before, "Formatting changed the rendered PDF");
+}
+
+#[test]
+#[ignore = "requires Typst and Python on PATH"]
+fn snapshot_warning_renders_to_pdf_and_global_flag_reexecutes() {
+    let (_temp, project_root) = setup_test_project();
+    let source = "---\nsnapshots: {python: true}\nsnapshot-warning-threshold: 1\n---\n$1 + `{python} 1 + 1`$\n```{python}\nwith open('runs', 'a') as f:\n    f.write('run\\n')\nimport warnings\nwarnings.warn('visible-runtime-warning')\nprint(42)\n```\n";
+    fs::write(project_root.join("main.knot"), source).unwrap();
+    for no_snapshots in [false, true, true] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_knot"));
+        command.arg("build").current_dir(&project_root);
+        if no_snapshots {
+            command.arg("--no-snapshots");
+        }
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let typ = fs::read_to_string(project_root.join("main.typ")).unwrap();
+        assert_eq!(typ.contains("Knot: python snapshots"), !no_snapshots);
+        assert!(typ.contains("visible-runtime-warning"));
+        assert!(
+            fs::read(project_root.join("main.pdf"))
+                .unwrap()
+                .starts_with(b"%PDF-")
+        );
+    }
+    assert_eq!(
+        fs::read_to_string(project_root.join("runs"))
+            .unwrap()
+            .lines()
+            .count(),
+        3
+    );
+    assert_eq!(
+        fs::read_to_string(project_root.join("main.knot")).unwrap(),
+        source
+    );
 }

@@ -161,3 +161,42 @@ fn staged_r_snapshot_disabled_chain_replays_for_a_changed_suffix() {
         .collect::<String>();
     assert!(rendered.contains("5 6"), "{rendered}");
 }
+
+#[test]
+#[ignore = "requires R and Python"]
+fn global_no_snapshots_overrides_main_and_include_without_editing_sources() {
+    let root = fixture();
+    let main = "---\nsnapshots: {python: true}\nsnapshot-warning-threshold: 1\n---\n```{python}\nfrom pathlib import Path\nwith open('main-runs', 'a') as f:\n    f.write('run\\n')\nimport warnings\nwarnings.warn('keep-runtime-warning')\nprint(1)\n```\n/* KNOT-INJECT-CHAPTERS */\n";
+    let include = "---\nsnapshots: {r: true}\nsnapshot-warning-threshold: 1\n---\n```{r}\ncat('run\\n', file='include-runs', append=TRUE)\nx <- 1\nprint(x)\n```\n";
+    fs::write(root.path().join("main.knot"), main).unwrap();
+    fs::write(root.path().join("include.knot"), include).unwrap();
+    let build = prepare(root.path());
+    let output = build.compile(None).unwrap();
+    assert!(output.typ_content.contains("Knot: python snapshots"));
+    assert!(output.typ_content.contains("Knot: r snapshots"));
+    build.publish(&output, true).unwrap();
+    for _ in 0..2 {
+        let build = prepare(root.path()).with_snapshots_disabled(true);
+        let output = build.compile(None).unwrap();
+        assert!(!output.typ_content.contains("Knot: python snapshots"));
+        assert!(!output.typ_content.contains("Knot: r snapshots"));
+        assert!(output.typ_content.contains("keep-runtime-warning"));
+        build.publish(&output, true).unwrap();
+    }
+    for name in ["main-runs", "include-runs"] {
+        assert_eq!(
+            fs::read_to_string(root.path().join(name))
+                .unwrap()
+                .lines()
+                .count(),
+            3
+        );
+    }
+    for (file, source) in [("main.knot", main), ("include.knot", include)] {
+        assert_eq!(fs::read_to_string(root.path().join(file)).unwrap(), source);
+        let cache =
+            knot_core::cache::Cache::new(get_cache_dir(root.path(), root.path().join(file)))
+                .unwrap();
+        assert!(cache.metadata.snapshots.is_empty());
+    }
+}

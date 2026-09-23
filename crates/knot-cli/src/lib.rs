@@ -14,6 +14,11 @@ use std::time::Instant;
 /// Delegates project assembly (includes, codly, BEGIN-FILE markers) to
 /// [`knot_core::compile_project_full`] and then runs `typst compile`.
 pub fn build_project(start_path: Option<&Path>) -> Result<()> {
+    build_project_with_options(start_path, false)
+}
+
+/// Build the complete project, optionally disabling all snapshots.
+pub fn build_project_with_options(start_path: Option<&Path>, no_snapshots: bool) -> Result<()> {
     let start_total = Instant::now();
     info!("🔨 Building project...");
 
@@ -26,7 +31,14 @@ pub fn build_project(start_path: Option<&Path>) -> Result<()> {
     let start_compile = Instant::now();
 
     // Compile all .knot files and assemble main.typ.
-    let output = knot_core::compile_project_full(&search_path, None)?;
+    let build = knot_core::project::ProjectBuild::prepare(
+        &search_path,
+        &Default::default(),
+        Default::default(),
+    )?
+    .with_snapshots_disabled(no_snapshots);
+    let output = build.compile(None)?;
+    build.publish(&output, true)?;
 
     info!(
         "⏱️  Knot compilation & assembly: {:?}",
