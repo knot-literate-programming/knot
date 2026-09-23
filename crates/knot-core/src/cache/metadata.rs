@@ -15,11 +15,11 @@ pub struct CacheMetadata {
     pub format_version: u32,
     #[serde(default)]
     pub snapshots: HashMap<String, SnapshotEntry>,
+    #[serde(default)]
+    pub disabled_snapshot_languages: std::collections::HashSet<String>,
     pub document_hash: String,
     pub chunks: Vec<ChunkCacheEntry>,
     pub inline_expressions: Vec<InlineCacheEntry>,
-    #[serde(default)]
-    pub freeze_objects: HashMap<String, FreezeObjectInfo>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -45,25 +45,14 @@ pub struct InlineCacheEntry {
     pub updated_at: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct FreezeObjectInfo {
-    pub name: String,             // Variable name in the language environment
-    pub hash: String,             // xxHash64 of the object content
-    pub size_bytes: u64,          // Size in bytes
-    pub language: String,         // "r", "python", "julia"
-    pub created_in_chunk: String, // Chunk name or index
-    pub created_at: String,       // Timestamp (RFC3339)
-}
-
-/// Files and frozen-object bindings belonging to one exact interpreter state.
+/// Files belonging to one exact interpreter state.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SnapshotEntry {
     pub reusable: bool,
     pub files: HashMap<String, String>,
-    pub freeze_objects: HashMap<String, FreezeObjectInfo>,
 }
 
-pub const CACHE_FORMAT_VERSION: u32 = 3;
+pub const CACHE_FORMAT_VERSION: u32 = 4;
 
 impl Default for CacheMetadata {
     fn default() -> Self {
@@ -72,8 +61,8 @@ impl Default for CacheMetadata {
             document_hash: String::new(),
             chunks: Vec::new(),
             inline_expressions: Vec::new(),
-            freeze_objects: HashMap::new(),
             snapshots: HashMap::new(),
+            disabled_snapshot_languages: Default::default(),
         }
     }
 }

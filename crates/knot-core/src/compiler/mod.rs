@@ -19,7 +19,8 @@ pub mod snapshot_manager;
 pub mod sync;
 
 mod execution;
-mod freeze;
+#[cfg(test)]
+mod execution_tests;
 mod node_output;
 mod options;
 
@@ -176,7 +177,8 @@ impl Compiler {
         let cache = Arc::new(Mutex::new(Cache::new(self.cache_dir.clone())?));
         let nodes = build_executable_nodes(doc);
         info!("🔧 Processing {} executable nodes...", nodes.len());
-        let planned = self.plan_pass(nodes, &cache)?;
+        anyhow::ensure!(doc.errors.is_empty(), "{}", doc.errors.join("\n"));
+        let planned = self.plan_pass(nodes, &cache, &doc.snapshots)?;
         Ok((planned, cache))
     }
 
@@ -190,6 +192,7 @@ impl Compiler {
         &mut self,
         nodes: Vec<ExecutableNode>,
         cache: &Arc<Mutex<Cache>>,
+        snapshots: &HashMap<String, bool>,
     ) -> Result<Vec<PlannedNode>> {
         // Lock once for the entire planning pass (synchronous, no contention).
         let cache = cache.lock().unwrap();
@@ -272,7 +275,14 @@ impl Compiler {
             if !matches!(need, ExecutionNeed::Skip) {
                 last_hash_per_lang.insert(lang.clone(), hash.clone());
             }
+            let enabled = snapshots.get(&lang).copied().unwrap_or(true);
+            let need = if !enabled && !matches!(need, ExecutionNeed::Skip) {
+                ExecutionNeed::MustExecute
+            } else {
+                need
+            };
             planned.push(PlannedNode {
+                snapshots: enabled,
                 kind,
                 lang,
                 hash,
@@ -283,18 +293,6 @@ impl Compiler {
             });
         }
 
-        // A partial snapshot cannot preserve the graph shared with frozen objects.
-        // Replay the entire affected language, including nodes before the declaration.
-        let frozen_languages: HashSet<_> = planned
-            .iter()
-            .filter(|node| node.declares_freeze())
-            .map(|node| node.lang.clone())
-            .collect();
-        for node in &mut planned {
-            if frozen_languages.contains(&node.lang) && !matches!(node.need, ExecutionNeed::Skip) {
-                node.need = ExecutionNeed::MustExecute;
-            }
-        }
         Ok(planned)
     }
 
@@ -320,7 +318,11 @@ impl Compiler {
         self.executor_manager.shutdown_all();
         {
             let mut cache = cache.lock().unwrap();
-            cache.metadata.freeze_objects.clear();
+            cache.metadata.disabled_snapshot_languages = planned
+                .iter()
+                .filter(|node| !node.snapshots)
+                .map(|node| node.lang.clone())
+                .collect();
             cache.metadata.chunks.retain_mut(|entry| {
                 let Some(node) = planned.iter().find(|node| {
                     node.hash == entry.hash && matches!(node.need, ExecutionNeed::CacheHit(_))
@@ -449,7 +451,7 @@ impl Compiler {
 /// Interleave formatted node outputs with the verbatim source text between nodes.
 pub fn assemble_pass(executed: &[ExecutedNode], source: &str, source_file: &str) -> String {
     let mut output = String::new();
-    let mut last_pos = 0;
+    let mut last_pos = crate::parser::frontmatter::header_end(source);
 
     for node in executed {
         if node.source_start > last_pos {

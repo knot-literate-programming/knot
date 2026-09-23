@@ -11,10 +11,7 @@ mod execution;
 mod formatters;
 mod process;
 
-use super::{
-    ConstantObjectHandler, ExecutionAttempt, ExecutionResult, GraphicsOptions, KnotExecutor,
-    LanguageExecutor,
-};
+use super::{ExecutionAttempt, ExecutionResult, GraphicsOptions, KnotExecutor, LanguageExecutor};
 use crate::parser::ChunkOptions;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
@@ -130,84 +127,6 @@ impl KnotExecutor for PythonExecutor {
     }
 }
 
-impl ConstantObjectHandler for PythonExecutor {
-    fn hash_object(&mut self, object_name: &str) -> Result<String> {
-        // Delegate to Python helper function
-        let code = format!("print(hash_object('{}'))", object_name.replace('\'', "\\'"));
-        let out = self.query(&code)?;
-        if out.trim() == "NONE" {
-            anyhow::bail!("Object '{}' not found", object_name);
-        }
-        Ok(out.trim().to_string())
-    }
-
-    fn hash_objects(
-        &mut self,
-        object_names: &[String],
-    ) -> Result<std::collections::HashMap<String, String>> {
-        if object_names.is_empty() {
-            return Ok(std::collections::HashMap::new());
-        }
-        // Build Python list literal and call batch helper
-        let names_list = object_names
-            .iter()
-            .map(|n| format!("'{}'", n.replace('\'', "\\'")))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let code = format!("print(hash_objects_batch([{}]))", names_list);
-        let out = self.query(&code)?;
-        let map: std::collections::HashMap<String, String> = serde_json::from_str(out.trim())
-            .map_err(|e| anyhow::anyhow!("hash_objects_batch parse error: {}", e))?;
-        Ok(map)
-    }
-
-    fn save_constant(&mut self, object_name: &str, hash: &str, cache_dir: &Path) -> Result<()> {
-        let objects_dir = cache_dir.join("objects");
-        std::fs::create_dir_all(&objects_dir)?;
-
-        let object_path = objects_dir.join(format!("{}.pkl", hash));
-        let path_str = escape_path_for_code(&object_path);
-
-        // Delegate to Python helper function
-        let code = format!(
-            "print(save_constant('{}', '{}'))",
-            object_name.replace('\'', "\\'"),
-            path_str
-        );
-        self.query(&code)?;
-        log::debug!(
-            "💾 Saved constant object '{}' to: {}",
-            object_name,
-            object_path.display()
-        );
-        Ok(())
-    }
-
-    fn load_constant(&mut self, object_name: &str, hash: &str, cache_dir: &Path) -> Result<()> {
-        let object_path = cache_dir.join("objects").join(format!("{}.pkl", hash));
-
-        let path_str = escape_path_for_code(&object_path);
-
-        // Delegate to Python helper function
-        let code = format!(
-            "print(load_constant('{}', '{}'))",
-            object_name.replace('\'', "\\'"),
-            path_str
-        );
-        self.query(&code)?;
-        log::debug!(
-            "📥 Loaded constant object '{}' from: {}",
-            object_name,
-            object_path.display()
-        );
-        Ok(())
-    }
-
-    fn object_extension(&self) -> &'static str {
-        "pkl"
-    }
-}
-
 impl Drop for PythonExecutor {
     fn drop(&mut self) {
         self.process.terminate();
@@ -273,43 +192,6 @@ mod tests {
 
         let result = executor.execute_inline("x").unwrap();
         assert_eq!(result, "100");
-    }
-
-    #[test]
-    #[ignore] // Requires Python installation
-    fn test_python_hash_object() {
-        let (_tmp, mut executor) = setup_executor();
-        executor
-            .execute(
-                "y = [1, 2, 3]",
-                &GraphicsOptions {
-                    width: 0.0,
-                    height: 0.0,
-                    dpi: 0,
-                    format: String::new(),
-                },
-            )
-            .unwrap();
-
-        let result = executor.hash_object("y");
-        assert!(result.is_ok());
-        let hash1 = result.unwrap();
-        assert!(!hash1.is_empty());
-
-        executor
-            .execute(
-                "y.append(4)",
-                &GraphicsOptions {
-                    width: 0.0,
-                    height: 0.0,
-                    dpi: 0,
-                    format: String::new(),
-                },
-            )
-            .unwrap();
-
-        let hash2 = executor.hash_object("y").unwrap();
-        assert_ne!(hash1, hash2);
     }
 
     #[test]

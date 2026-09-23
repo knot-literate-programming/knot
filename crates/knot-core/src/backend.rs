@@ -368,7 +368,6 @@ mod tests {
                 fig_height: None,
                 dpi: None,
                 fig_format: None,
-                freeze: vec![],
                 // Presentation options (use defaults for tests)
                 layout: None,
                 warnings_visibility: None,

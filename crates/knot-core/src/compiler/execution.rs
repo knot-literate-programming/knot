@@ -35,7 +35,6 @@ pub struct ProgressEvent {
     pub executed: ExecutedNode,
 }
 
-use super::freeze::{check_freeze_contract, register_freeze_objects};
 use super::node_output::{
     format_error_block_for_node, format_executed_node, format_output, inert_output, skip_output,
 };
@@ -92,7 +91,7 @@ pub(super) fn run_language_chain(
         backend,
         cancellation,
     };
-    let allow_snapshots = !nodes.iter().any(|(_, node)| node.declares_freeze());
+    let allow_snapshots = nodes.iter().all(|(_, node)| node.snapshots);
     let mut sm = SnapshotManager::new(exec, allow_snapshots);
     let mut indexed = Vec::with_capacity(nodes.len());
     let mut broken = false;
@@ -175,11 +174,6 @@ fn process_node(
                         output,
                         state,
                     );
-                    SnapshotManager::activate_cached(
-                        ctx.lang,
-                        &pn.hash,
-                        &mut ctx.cache.lock().unwrap(),
-                    )?;
                     Ok((content, false))
                 }
             }
@@ -188,7 +182,6 @@ fn process_node(
         ExecutionNeed::CacheHitInline(result) => {
             info!("  ✓ [cached inline]");
             let result_clone = result.clone();
-            SnapshotManager::activate_cached(ctx.lang, &pn.hash, &mut ctx.cache.lock().unwrap())?;
             Ok((result_clone, false))
         }
 
@@ -203,7 +196,7 @@ fn process_node(
 
 /// Execute a node that has no valid cache entry.
 ///
-/// Handles snapshot restoration, execution, freeze contract checks, and result
+/// Handles snapshot restoration, execution, and result
 /// caching. Returns `(typst_content, errored)`.
 fn handle_must_execute(
     pn: &PlannedNode,
@@ -250,7 +243,7 @@ fn handle_must_execute(
 
         ctx.cancellation.check()?;
         // Runtime error → cache it, then cascade Inert.
-        let output = match attempt {
+        match attempt {
             ExecutionAttempt::RuntimeError(error) => {
                 cache_chunk_error(pn, &error, ctx.cache)?;
                 return Ok((
@@ -259,32 +252,10 @@ fn handle_must_execute(
                 ));
             }
             ExecutionAttempt::Success(output) => output,
-        };
-
-        // Check freeze contract.
-        // IMPORTANT: save_result is only called when the contract passes.
-        // A violating chunk must NOT be cached as success — if it were,
-        // the check would be bypassed (CacheHit path) on every subsequent run.
-        if let Some(violation) = check_freeze_contract(pn, exec, ctx.cache)? {
-            // Contract violated: cache as error so LSP shows full details, then cascade.
-            cache_chunk_error(pn, &violation, ctx.cache)?;
-            return Ok((
-                format_error_block_for_node(&pn.kind, ctx.lang, &violation.to_string()),
-                true,
-            ));
         }
-
-        // Successful execution: register freeze objects if declared.
-        if let PlannedNodeKind::Chunk { node: chunk, data } = &pn.kind
-            && !data.chunk_options.freeze.is_empty()
-        {
-            register_freeze_objects(chunk, &data.chunk_options.freeze, exec, ctx.cache)?;
-        }
-
-        output
     }; // exec (and its borrow of sm.exec) is released here.
 
-    // Contract OK: persist result to cache, advance snapshot pointer.
+    // Successful execution: persist result to cache, advance snapshot pointer.
     sm.record_execution(ctx.lang, &pn.hash, &mut ctx.cache.lock().unwrap())?;
     cache_chunk_result(pn, &output, ctx.cache)?;
     if matches!(pn.kind, PlannedNodeKind::Inline { .. })
@@ -348,10 +319,8 @@ fn cache_chunk_result(
 /// Snapshot restoration is the caller's responsibility and must happen before
 /// this call.  Only called for `ExecutionNeed::MustExecute` nodes.
 ///
-/// **Does not persist to cache.** Caching is done by the caller so that chunk
-/// results are only saved after all post-execution checks (e.g. freeze contract)
-/// have passed.  Saving before those checks would mark a violating chunk as a
-/// cache hit, silently bypassing the check on every subsequent run.
+/// **Does not persist to cache.** The caller records results and snapshots only
+/// after execution completes and cancellation has been checked.
 fn execute_for_node(
     pn: &PlannedNode,
     exec: &mut Box<dyn KnotExecutor>,

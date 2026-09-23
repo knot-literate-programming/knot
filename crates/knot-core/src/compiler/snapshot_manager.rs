@@ -4,7 +4,6 @@
 use crate::cache::{Cache, SnapshotEntry, hashing::hash_file};
 use crate::executors::KnotExecutor;
 use anyhow::{Context, Result};
-use std::collections::HashMap;
 
 pub struct SnapshotManager {
     loaded_hash: Option<String>,
@@ -29,24 +28,6 @@ impl SnapshotManager {
         self.exec.as_mut()
     }
 
-    /// Activate the freeze declarations from this prefix, without starting an
-    /// interpreter or pretending that cached code has just executed.
-    pub fn activate_cached(lang: &str, hash: &str, cache: &mut Cache) -> Result<()> {
-        let frozen = cache
-            .metadata
-            .snapshots
-            .get(hash)
-            .context("Missing snapshot metadata for cached execution")?
-            .freeze_objects
-            .clone();
-        cache
-            .metadata
-            .freeze_objects
-            .retain(|_, info| info.language != lang);
-        cache.metadata.freeze_objects.extend(frozen);
-        Ok(())
-    }
-
     pub fn restore_if_needed(
         &mut self,
         lang: &str,
@@ -58,7 +39,7 @@ impl SnapshotManager {
         }
         anyhow::ensure!(
             self.allow_snapshots,
-            "Cannot restore a snapshot in a language chain with freeze declarations"
+            "Cannot restore a snapshot when snapshots are disabled"
         );
         let Some(exec) = self.exec.as_deref_mut() else {
             return Ok(());
@@ -70,7 +51,7 @@ impl SnapshotManager {
         Ok(())
     }
 
-    /// Always replace the snapshot after actual execution, including cache:false
+    /// When enabled, replace the snapshot after actual execution, including cache:false
     /// and cache repairs. File existence alone does not identify interpreter state.
     pub fn record_execution(&mut self, lang: &str, hash: &str, cache: &mut Cache) -> Result<()> {
         let Some(exec) = self.exec.as_deref_mut() else {
@@ -104,14 +85,10 @@ impl SnapshotManager {
                 Ok((relative, hash_file(&path)?))
             })
             .collect::<Result<_>>()?;
-        cache.metadata.snapshots.insert(
-            hash.to_string(),
-            SnapshotEntry {
-                reusable,
-                files,
-                freeze_objects: HashMap::new(),
-            },
-        );
+        cache
+            .metadata
+            .snapshots
+            .insert(hash.to_string(), SnapshotEntry { reusable, files });
         self.loaded_hash = Some(hash.to_string());
         Ok(())
     }

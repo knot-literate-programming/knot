@@ -18,7 +18,7 @@ Planning does four things:
 2. **Compute a chained SHA-256 hash** for each chunk in each language chain.
    The hash of chunk N covers:
    - the chunk's source code
-   - its language, execution options, freeze declarations, dependencies and script version
+   - its language, execution options, dependencies and script version
    - the hash of chunk N-1 in the same language
 
    Because hashes chain, editing chunk 3 changes the hash of chunk 4, 5, 6, …
@@ -54,22 +54,19 @@ group_by_language(planned_nodes)
 
 Within each `run_language_chain`:
 
-1. If any active chunk declares `freeze`, the planner marks every non-skipped
-   node of that language `MustExecute`, including the prefix before the declaration.
-2. Such a chain runs in a fresh interpreter without saving or restoring snapshots.
-   Other chains reuse cached results and restore preceding valid snapshots as needed.
-3. Runtime errors stop subsequent nodes of that language (`Inert`). A successful
-   execution is checked against active freeze contracts before any success is
-   cached; a violation also cascades `Inert`.
-4. Register new freeze declarations and cache successful results. Save a complete
-   session snapshot only when the chain contains no active freeze declaration.
+1. The planner reads document YAML `snapshots` settings. Disabled languages have
+   every non-skipped node marked `MustExecute`.
+2. Each disabled chain runs in a fresh interpreter without saving or restoring
+   snapshots. Other chains reuse cached results and restore valid snapshots.
+3. Runtime errors stop subsequent nodes of that language (`Inert`).
+4. Cache successful results and save a complete session snapshot only when enabled.
 
 The `ExecutorManager` uses a take/put-back pattern so executors can be moved
 into threads without lifetime issues.
 
 `SnapshotManager` saves and restores interpreter state (the R/Python environment
 after each successfully executed node). This allows re-executing chunk 5 in a 20-chunk document
-without re-running chunks 1-4, provided that the chain has no active `freeze` declaration.
+without re-running chunks 1-4, provided that snapshots are enabled for the language.
 
 ---
 
@@ -138,5 +135,5 @@ pub fn compile_project_phase0_unsaved(
 ) -> Result<ProjectOutput>
 ```
 
-See [Cache and Execution State](./caching.md) for isolation, repair, freeze, and
+See [Cache and Execution State](./caching.md) for isolation, repair, snapshot policy, and
 non-serializable Python state.

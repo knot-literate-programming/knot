@@ -273,8 +273,8 @@ pub trait LanguageExecutor: Send + Sync {
     fn query(&mut self, code: &str) -> Result<String>;
 }
 
-/// Combined trait for language executors that support caching and constant objects
-pub trait KnotExecutor: LanguageExecutor + ConstantObjectHandler + Send + Sync {
+/// Combined trait for language executors that support session snapshots
+pub trait KnotExecutor: LanguageExecutor + Send + Sync {
     /// Save the current environment session to a file.
     fn save_session(&mut self, path: &Path) -> Result<()>;
 
@@ -283,47 +283,4 @@ pub trait KnotExecutor: LanguageExecutor + ConstantObjectHandler + Send + Sync {
 
     /// File extension for environment snapshots (.RData, .pkl, .jls)
     fn snapshot_extension(&self) -> &'static str;
-}
-
-/// Trait for managing constant objects (cache optimization)
-///
-/// Allows language executors to save/load large immutable objects separately
-/// from environment snapshots to reduce cache size.
-pub trait ConstantObjectHandler: Send + Sync {
-    /// Compute the hash of an object in the language environment
-    ///
-    /// Uses xxHash64 for speed. Returns hex string representation.
-    /// - R: Requires `digest` package
-    /// - Python: Requires `xxhash` package (pip install xxhash)
-    fn hash_object(&mut self, object_name: &str) -> Result<String>;
-
-    /// Compute hashes for multiple objects in a single round-trip.
-    ///
-    /// Returns a map of object_name → hash (or "NONE" if not found).
-    /// Default implementation calls hash_object() N times; executors
-    /// should override with a batch query for better performance.
-    fn hash_objects(
-        &mut self,
-        object_names: &[String],
-    ) -> Result<std::collections::HashMap<String, String>> {
-        let mut result = std::collections::HashMap::new();
-        for name in object_names {
-            let hash = self.hash_object(name)?;
-            result.insert(name.clone(), hash);
-        }
-        Ok(result)
-    }
-
-    /// Save a constant object to content-addressed storage
-    ///
-    /// Stores the object at: cache_dir/objects/{hash}.{ext}
-    fn save_constant(&mut self, object_name: &str, hash: &str, cache_dir: &Path) -> Result<()>;
-
-    /// Load a constant object from content-addressed storage
-    ///
-    /// Restores the object into the language environment
-    fn load_constant(&mut self, object_name: &str, hash: &str, cache_dir: &Path) -> Result<()>;
-
-    /// File extension for serialized objects (.rds, .pkl, .jls)
-    fn object_extension(&self) -> &'static str;
 }

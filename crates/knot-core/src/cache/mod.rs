@@ -14,9 +14,7 @@ mod metadata;
 mod storage;
 
 pub use hashing::hash_dependencies;
-pub use metadata::{
-    CacheMetadata, ChunkCacheEntry, FreezeObjectInfo, InlineCacheEntry, SnapshotEntry,
-};
+pub use metadata::{CacheMetadata, ChunkCacheEntry, InlineCacheEntry, SnapshotEntry};
 
 use crate::executors::{ExecutionAttempt, ExecutionOutput};
 use anyhow::{Context, Result, anyhow, bail};
@@ -27,7 +25,7 @@ use std::path::PathBuf;
 /// On-disk cache for a single `.knot` document.
 ///
 /// Stores chunk results, inline expression results, session snapshots and
-/// freeze-object hashes.  All content-addressed entries live under
+/// snapshot hashes.  All content-addressed entries live under
 /// `cache_dir`; the index is persisted as `metadata.json` in the same directory.
 pub struct Cache {
     /// Path to the cache directory (e.g. `.knot_cache/main/`).
@@ -195,7 +193,6 @@ impl Cache {
     pub fn snapshot_is_valid(&self, hash: &str) -> bool {
         self.metadata.snapshots.get(hash).is_some_and(|entry| {
             entry.reusable
-                && entry.freeze_objects.is_empty()
                 && !entry.files.is_empty()
                 && entry.files.iter().all(|(path, expected)| {
                     hashing::hash_file(&self.cache_dir.join(path))
@@ -204,7 +201,7 @@ impl Cache {
         })
     }
 
-    /// Validate and restore a complete session; snapshots with frozen bindings are rejected.
+    /// Validate and restore a complete session; incomplete or damaged snapshots are rejected.
     /// Callers choose the snapshot and manage the interpreter lifetime.
     pub fn restore_snapshot(
         &self,
@@ -224,7 +221,7 @@ impl Cache {
 
     /// Save the cache metadata to disk
     ///
-    /// Writes the metadata (including constant objects info) to metadata.json
+    /// Writes the result and snapshot metadata to metadata.json
     pub fn save_metadata(&self) -> Result<()> {
         storage::save_metadata(&self.cache_dir, &self.metadata)
     }

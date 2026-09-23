@@ -121,10 +121,10 @@ fn staged_artifacts_and_snapshots_survive_publication_and_workspace_removal() {
 
 #[test]
 #[ignore = "requires R and jsonlite"]
-fn staged_r_freeze_chain_replays_for_a_changed_suffix() {
+fn staged_r_snapshot_disabled_chain_replays_for_a_changed_suffix() {
     let root = fixture();
     let path = root.path().join("main.knot");
-    let source = "```{r}\n#| freeze: [x]\nx <- c(1, 2)\ny <- 3\nwriteLines('once', 'executions')\n```\n```{r}\nprint(x + y)\n```";
+    let source = "---\nsnapshots:\n  r: false\n---\n```{r}\nx <- c(1, 2)\ny <- 3\nwriteLines('once', 'executions')\n```\n```{r}\nprint(x + y)\n```";
     fs::write(&path, source).unwrap();
     {
         let build = prepare(root.path());
@@ -148,7 +148,6 @@ fn staged_r_freeze_chain_replays_for_a_changed_suffix() {
             .iter()
             .all(|chunk| chunk.error.is_none())
     );
-    assert!(cache.metadata.freeze_objects.contains_key("r::x"));
     assert!(cache.metadata.snapshots.is_empty());
     let rendered = cache
         .metadata

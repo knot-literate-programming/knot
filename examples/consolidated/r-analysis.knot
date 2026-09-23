@@ -1,3 +1,7 @@
+---
+snapshots:
+  r: false
+---
 = Data Analysis with R
 
 In this chapter, we explore temperature data using R and ggplot2.
@@ -6,7 +10,6 @@ In this chapter, we explore temperature data using R and ggplot2.
 
 
 ```{python}
-#| freeze: [x]
 x = 2
 ```
 

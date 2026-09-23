@@ -37,8 +37,8 @@ inline expressions, mixed-language documents and session snapshots.
 
 `cache_correctness.rs` exercises document isolation, dependency roots, planning,
 artifact copying, corrupted files, cold/warm/clean builds, Python snapshot replay,
-and R/Python freeze replay and Python shared-reference preservation. The default suite also uses a fake executor to
-check freeze contracts and inert cascades without installing interpreters.
+and R/Python snapshot policy and Python shared-reference preservation. The default suite also uses a fake executor to
+check replay, cancellation and inert cascades without installing interpreters.
 
 ```bash
 cargo test -p knot-core --locked --test cache_correctness
