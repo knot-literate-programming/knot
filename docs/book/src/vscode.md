@@ -110,6 +110,13 @@ A missing/failing code formatter, invalid Typst, or reconstruction failure retur
 an error and no document edits. Edits are also rejected if the document changes
 while formatting is running. Inline expressions and their options are preserved.
 The separate Format Chunk command only affects the selected executable block.
+If Air or Ruff fails, the command reports the error without rewriting the block.
+If you edit the document while formatting is running, the stale edit is rejected;
+run the command again on the current document.
+
+Use VS Code's `editor.formatOnSave` setting for automatic document formatting.
+The obsolete `knot.formatter.formatOnSave` and `knot.formatter.formatOnType`
+settings have been removed; they had no effect. Formatting on type is not supported.
 
 ## Diagnostics
 

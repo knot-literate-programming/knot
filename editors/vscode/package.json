@@ -241,16 +241,6 @@
           "type": "string",
           "default": "ruff",
           "description": "Path to Ruff formatter executable (used for Python chunks)"
-        },
-        "knot.formatter.formatOnType": {
-          "type": "boolean",
-          "default": false,
-          "description": "Format R chunks automatically on new line"
-        },
-        "knot.formatter.formatOnSave": {
-          "type": "boolean",
-          "default": true,
-          "description": "Format R chunks automatically on save"
         }
       }
     }
