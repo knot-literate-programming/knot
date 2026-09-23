@@ -1,0 +1,64 @@
+#pagebreak()
+= R and ggplot2
+
+== Question and data
+
+Do the four series have similar least-squares summaries despite different
+geometries? Read the same 44 observations from the versioned CSV.
+
+```{r}
+#| show: both
+#| depends: [data/anscombe.csv]
+points <- read.csv("data/anscombe.csv")
+```
+
+== Calculation
+
+Estimate a line separately for each series, using sample variances with divisor
+$n-1$. Export the unrounded summary for Typst and cross-language checks.
+
+```{r}
+#| show: none
+summaries <- do.call(rbind, lapply(split(points, points$series), function(d) {
+  model <- lm(y ~ x, data = d)
+  data.frame(series = d$series[1], n = nrow(d),
+    mean_x = mean(d$x), mean_y = mean(d$y),
+    var_x = var(d$x), var_y = var(d$y),
+    slope = unname(coef(model)[2]), intercept = unname(coef(model)[1]),
+    r_squared = summary(model)$r.squared)
+}))
+lines <- do.call(rbind, lapply(seq_len(nrow(summaries)), function(i) {
+  s <- summaries[i, ]
+  data.frame(series = s$series, x = c(3, 20),
+    y = s$intercept + s$slope * c(3, 20))
+}))
+export_data(summaries, "r-summary")
+```
+
+== Numerical summary
+
+#if "r-summary" in knot-data {
+  results-table(knot-data.at("r-summary"))
+} else { [Results pending or unavailable.] }
+
+There are `{r} nrow(points)` observations. The means and fitted coefficients
+are almost the same across the four series. Inspecting only this table would
+hide the main differences.
+
+== Graphical check
+
+The panels share their scales; the grey lines are the precomputed least-squares
+fits, not new calculations performed by the graphics package.
+
+```{r}
+library(ggplot2)
+plot <- ggplot(points, aes(x, y)) +
+  geom_line(data = lines, colour = "#64748b", linewidth = 0.6) +
+  geom_point(colour = "#176b87", size = 2) +
+  facet_wrap(~series, ncol = 2) +
+  coord_cartesian(xlim = c(3, 20), ylim = c(2, 14)) +
+  labs(x = "x", y = "y") + theme_minimal(base_size = 11)
+typst(plot)
+```
+
+#interpretation

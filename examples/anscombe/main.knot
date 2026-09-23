@@ -1,0 +1,81 @@
+#import "lib/report.typ": *
+#show: report
+
+#text(size: 27pt, weight: "bold")[One quartet, three workflows]
+#v(4pt)
+#text(size: 13pt, fill: rgb("#176b87"))[Anscombe's data with Knot, R, Python and Typst]
+#v(14pt)
+
+= A reproducible question
+
+Can similar numerical summaries conceal different relationships?
+Anscombe's quartet gives four small datasets with almost identical means,
+variances, correlations and least-squares lines, but very different patterns
+@anscombe1973. This document reproduces that analysis with three workflows.
+
+#table(
+  columns: (1fr, 1fr, 1fr), inset: 8pt, stroke: 0.4pt + luma(210),
+  [*Variant*], [*Calculation*], [*Drawing*],
+  [R], [All four series in R], [ggplot2],
+  [Python], [All four series in Python], [plotnine],
+  [Mixed], [I–II in R; III–IV in Python], [Gribouille],
+)
+
+== Data and method
+
+The local file `data/anscombe.csv` contains 44 observations: eleven pairs
+for each series. It is a long-form transcription of R's `datasets::anscombe`.
+The values are rounded in the source; "identical" summaries should therefore
+be understood as approximately equal, not bit-for-bit equal.
+
+For each series we fit $y_i = alpha + beta x_i + epsilon_i$ by ordinary
+least squares. We report the sample means, slope, intercept and $R^2$.
+Every figure uses the same axis limits. All regression coefficients and line
+coordinates are calculated in R or Python before drawing.
+
+== How to read the example
+
+Each variant repeats the question, calculation, numerical summary and graphical
+interpretation. The `.knot` source contains the executable analysis. Selected
+loading code is shown here; most computation is hidden for a readable report.
+The fourth file, `anscombe-errors.knot`, is an opt-in diagnostic companion.
+
+/* KNOT-INJECT-CHAPTERS */
+
+#pagebreak()
+= Cross-language validation
+
+#if ("r-summary", "python-summary", "mixed-r-summary", "mixed-python-summary").all(key => key in knot-data) {
+  let reference = knot-data.at("r-summary")
+  let variants = (knot-data.at("python-summary"),
+    knot-data.at("mixed-r-summary") + knot-data.at("mixed-python-summary"))
+  for rows in variants {
+    assert.eq(rows.len(), 4)
+    for (a, b) in reference.zip(rows) {
+      assert.eq(a.series, b.series)
+      assert.eq(a.n, b.n)
+      for key in ("mean_x", "mean_y", "var_x", "var_y", "slope", "intercept", "r_squared") {
+        assert(calc.abs(a.at(key) - b.at(key)) < 0.00000001,
+          message: "Cross-language mismatch: " + a.series + "/" + key)
+      }
+    }
+  }
+  [*Verified:* R, Python and the mixed workflow agree within an absolute
+  tolerance of $10^(-8)$ for every reported statistic, including the sample
+  variances. This check executes during PDF compilation.]
+} else {
+  [Comparison pending: one or more computations are unavailable.]
+}
+
+== Re-execution and scope
+
+Use `knot build` while editing, then `knot build --no-snapshots` for a full
+re-execution. The input CSV is declared as a dependency in every reading chunk.
+JSON exports and figures are managed by Knot's cache. Changing prose should
+reuse calculations; changing the CSV should invalidate them.
+
+The two languages in the mixed file have independent work and may run in
+parallel. They never read files produced by the other language. Each included
+`.knot` file has its own interpreter state.
+
+#bibliography("references.bib", style: "apa")

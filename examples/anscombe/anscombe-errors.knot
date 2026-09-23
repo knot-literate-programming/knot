@@ -1,0 +1,94 @@
+= Question and data
+
+Use the same quartet to observe warnings, a failed R calculation, independent
+Python results and a later Python error. This is a diagnostic variant of the
+analysis, not a valid scientific result.
+
+```{r}
+#| depends: [data/anscombe.csv]
+points <- read.csv("data/anscombe.csv")
+warning("Demonstration: a warning does not stop the R chain")
+cat("R loaded", nrow(points), "observations\n")
+```
+
+== An R error and its consequences
+
+```{r}
+stop("DELIBERATE_R_ERROR: remove this line to repair the R analysis")
+```
+
+The following R summary must remain unavailable until the error is corrected.
+
+```{r}
+#| show: none
+summaries <- do.call(rbind, lapply(split(points, points$series), function(d) {
+  model <- lm(y ~ x, data = d)
+  data.frame(series = d$series[1], n = nrow(d),
+    mean_x = mean(d$x), mean_y = mean(d$y),
+    var_x = var(d$x), var_y = var(d$y),
+    slope = unname(coef(model)[2]), intercept = unname(coef(model)[1]),
+    r_squared = summary(model)$r.squared)
+}))
+lines <- do.call(rbind, lapply(seq_len(nrow(summaries)), function(i) {
+  s <- summaries[i, ]
+  data.frame(series = s$series, x = c(3, 20),
+    y = s$intercept + s$slope * c(3, 20))
+}))
+export_data(summaries, "errors-r-summary")
+```
+
+#if "errors-r-summary" in knot-data {
+  results-table(knot-data.at("errors-r-summary"))
+} else { [*R summary unavailable:* its upstream calculation failed.] }
+
+#pagebreak()
+== Python still computes the same analysis
+
+```{python}
+#| depends: [data/anscombe.csv]
+import pandas as pd
+points = pd.read_csv("data/anscombe.csv")
+```
+
+```{python}
+#| show: none
+summaries = []
+lines = []
+for series, d in points.groupby("series", sort=True):
+    x, y = d["x"], d["y"]
+    slope = float(((x - x.mean()) * (y - y.mean())).sum() / ((x - x.mean()) ** 2).sum())
+    intercept = float(y.mean() - slope * x.mean())
+    summaries.append(dict(series=series, n=len(d), mean_x=float(x.mean()),
+        mean_y=float(y.mean()), var_x=float(x.var(ddof=1)), var_y=float(y.var(ddof=1)),
+        slope=slope, intercept=intercept, r_squared=float(x.corr(y) ** 2)))
+    lines.extend(dict(series=series, x=t, y=intercept + slope * t) for t in (3, 20))
+export_data(summaries, "errors-python-summary")
+```
+
+#if "errors-python-summary" in knot-data {
+  results-table(knot-data.at("errors-python-summary"))
+} else { [Python results pending or unavailable.] }
+
+The independent Python summary is available despite the R failure.
+
+== A later Python error
+
+```{python}
+raise ValueError("DELIBERATE_PYTHON_ERROR: remove this line to resume Python")
+```
+
+```{python}
+#| show: none
+export_data(lines, "errors-python-lines")
+```
+
+#if "errors-python-lines" in knot-data {
+  [Python line coordinates are available after repair.]
+} else { [*Python line coordinates unavailable:* their exporting chunk was not executed.] }
+
+== Repair and replay
+
+Remove each marked failing line, then rebuild. R should produce its summary
+and Python should export its line coordinates. Compare the repaired results
+with a full `--no-snapshots` build. An unavailable result must never be silently
+replaced by the output of an earlier successful run.
