@@ -74,12 +74,22 @@ latest development version:
 git clone https://github.com/knot-literate-programming/knot.git
 cd knot
 
-# Install the CLI and LSP
-cargo install --path crates/knot-cli
-cargo install --path crates/knot-lsp
-
-# Install the VS Code extension
+# Install the CLI, LSP and VS Code extension together
 bash scripts/install-vscode-dev.sh
+```
+
+The script rebuilds and replaces both Rust binaries from this checkout (even
+when their version number is unchanged), then installs the extension using the
+locked npm dependencies. Cargo uses its configured installation directory,
+usually `~/.cargo/bin`. The `cargo`, `node`, `npm` and `code` commands must be
+available on `PATH`. Run **Developer: Reload Window** in VS Code afterwards to
+restart the LSP. If you customized `knot.lsp.path`, point it to the updated binary.
+
+For CLI/LSP installation without VS Code:
+
+```bash
+cargo install --locked --force --path crates/knot-cli
+cargo install --locked --force --path crates/knot-lsp
 ```
 
 You need [Rust](https://rustup.rs) 1.80+ and [Node.js](https://nodejs.org) 20+.

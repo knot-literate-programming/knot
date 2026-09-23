@@ -33,14 +33,16 @@ npm install
 npm run compile
 ```
 
-Install a development build into VS Code:
+From the repository root, install a complete development build:
 
 ```bash
 bash scripts/install-vscode-dev.sh
 ```
 
-This packages the extension into a `.vsix` file and installs it via
-`code --install-extension`. Restart VS Code to activate.
+This rebuilds and replaces `knot` and `knot-lsp` with `cargo install --locked
+--force`, installs npm dependencies with `npm ci`, then packages and installs the
+extension via `code --install-extension`. Run **Developer: Reload Window** to
+activate all three components from the same checkout.
 
 ---
 

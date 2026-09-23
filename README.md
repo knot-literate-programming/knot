@@ -55,15 +55,13 @@ The installers download the prebuilt `knot` and `knot-lsp` binaries for your pla
 ```bash
 git clone https://github.com/knot-literate-programming/knot.git
 cd knot
-cargo install --path crates/knot-cli
-cargo install --path crates/knot-lsp
+bash scripts/install-vscode-dev.sh
 ```
 
-Then install the VS Code extension:
-```bash
-cd editors/vscode && npm install && npm run package
-code --install-extension knot-*.vsix
-```
+This rebuilds and installs both Rust binaries and the VS Code extension.
+Run **Developer: Reload Window** in VS Code afterwards. Rust, Node.js and the
+`code` command must be available. For CLI-only installation, see the
+[installation guide](docs/book/src/installation.md#build-from-source).
 </details>
 
 ---
