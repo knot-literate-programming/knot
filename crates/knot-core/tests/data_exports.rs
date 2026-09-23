@@ -84,7 +84,7 @@ export_data({"label": "été", "empty": []}, "python-extra")
 "#;
     fs::write(root.join("chapter.knot"), source).unwrap();
     let first = build(&root);
-    assert!(first.contains("json(\"_knot_files"));
+    assert!(first.contains("json(\"_knot_files/"));
     assert!(!first.contains(".build-"));
     let expected = serde_json::json!([{"x":1,"y":3},{"x":2,"y":4}]);
     let cache_dir = get_cache_dir(&root, root.join("chapter.knot"));
