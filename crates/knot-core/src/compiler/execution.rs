@@ -115,6 +115,7 @@ pub(super) fn run_language_chain(
         }
 
         let executed = ExecutedNode {
+            snapshot_warning: sm.inline_warning.take(),
             lang: lang.clone(),
             hash: pn.hash,
             source_start: pn.source_start,
@@ -166,12 +167,14 @@ fn process_node(
                     true,
                 )),
                 ExecutionAttempt::Success(output) => {
+                    let mut output = output.clone();
+                    append_snapshot_warning(pn, &mut output, sm, ctx.cache)?;
                     let content = format_output(
                         ctx.backend,
                         chunk,
                         &data.merged_codly_options,
                         &data.resolved_options,
-                        output,
+                        &output,
                         state,
                     );
                     Ok((content, false))
@@ -181,6 +184,7 @@ fn process_node(
 
         ExecutionNeed::CacheHitInline(result) => {
             info!("  ✓ [cached inline]");
+            sm.inline_warning = sm.warning(pn, &ctx.cache.lock().unwrap())?;
             let result_clone = result.clone();
             Ok((result_clone, false))
         }
@@ -212,7 +216,7 @@ fn handle_must_execute(
 
     // All executor interactions are confined to this block so that the borrow
     // of sm.exec ends before sm.record_execution is called below.
-    let output = {
+    let mut output = {
         // Language not supported: show an error block and cascade Inert.
         // Not cached — an unsupported language is not a deterministic runtime state.
         let exec = match sm.executor_mut() {
@@ -266,10 +270,31 @@ fn handle_must_execute(
             .unwrap()
             .save_inline_result(pn.hash.clone(), text)?;
     }
+    append_snapshot_warning(pn, &mut output, sm, ctx.cache)?;
     Ok((
         format_executed_node(pn, &output, ctx.backend, &ChunkExecutionState::Ready),
         false,
     ))
+}
+
+fn append_snapshot_warning(
+    pn: &PlannedNode,
+    output: &mut ExecutionOutput,
+    sm: &mut SnapshotManager,
+    cache: &Arc<Mutex<Cache>>,
+) -> Result<()> {
+    if let Some(message) = sm.warning(pn, &cache.lock().unwrap())? {
+        if matches!(pn.kind, PlannedNodeKind::Inline { .. }) {
+            sm.inline_warning = Some(message);
+        } else {
+            output.warnings.push(crate::executors::RuntimeWarning {
+                message,
+                call: None,
+                line: None,
+            });
+        }
+    }
+    Ok(())
 }
 
 /// Persist a runtime error to the cache (if caching is enabled for this node).

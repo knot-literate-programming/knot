@@ -169,6 +169,11 @@ not by itself make external inputs or nondeterministic code reproducible.
 
 Split independent analyses into separate `.knot` files to limit memory usage and
 the cost of re-execution. Exchange data through files with declared dependencies.
+Knot warns in the document when snapshots exceed 1 GB per language and file;
+the threshold is configurable. For a complete render without changing your
+working settings, use `knot build --no-snapshots`. See [cache and execution
+state](./caching.md) for details.
+
 There is no object-level `freeze` option or mutation contract: the policy applies
 to the complete language workspace in each file.
 

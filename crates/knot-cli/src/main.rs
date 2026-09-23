@@ -2,7 +2,7 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use include_dir::{Dir, include_dir};
-use knot_cli::{build_project, compile_file};
+use knot_cli::{build_project, build_project_with_options, compile_file};
 use log::info;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -37,7 +37,11 @@ enum Commands {
         preview: bool,
     },
     /// Build the entire project and generate final PDF
-    Build,
+    Build {
+        /// Re-execute all files and languages without saving or restoring snapshots
+        #[arg(long)]
+        no_snapshots: bool,
+    },
     /// Clean project (remove cache and generated files)
     Clean,
     /// Format .knot files
@@ -91,8 +95,8 @@ fn main() -> Result<()> {
         Commands::Watch { preview } => {
             watch(*preview)?;
         }
-        Commands::Build => {
-            build_project(None)?;
+        Commands::Build { no_snapshots } => {
+            build_project_with_options(None, *no_snapshots)?;
         }
         Commands::Clean => {
             knot_core::clean_project(None)?;

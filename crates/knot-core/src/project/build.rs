@@ -28,6 +28,7 @@ pub struct ProjectBuild {
     includes: Vec<Source>,
     workspace: tempfile::TempDir,
     cancellation: Cancellation,
+    no_snapshots: bool,
 }
 
 impl ProjectBuild {
@@ -89,7 +90,14 @@ impl ProjectBuild {
             includes,
             workspace,
             cancellation,
+            no_snapshots: false,
         })
+    }
+
+    /// Disable snapshots for every source and language, overriding YAML settings.
+    pub fn with_snapshots_disabled(mut self, disabled: bool) -> Self {
+        self.no_snapshots = disabled;
+        self
     }
 
     /// Actual project root (also the initial interpreter working directory).
@@ -114,6 +122,7 @@ impl ProjectBuild {
             crate::get_cache_dir(self.workspace.path(), &source.path),
             self.cancellation.clone(),
         )
+        .with_snapshots_disabled(self.no_snapshots)
     }
     fn fix(&self, content: &str) -> Result<String> {
         // Relative artifacts are staged here; publication copies them to the root.

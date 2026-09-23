@@ -557,3 +557,39 @@ fn inline_only_documents_respect_snapshot_policy() {
         assert!(cache(root.path(), &path).metadata.snapshots.is_empty());
     }
 }
+
+#[test]
+#[ignore = "requires Python"]
+fn snapshot_budget_warning_is_recomputed_without_invalidating_execution_cache() {
+    let (_root, _, mut compiler) = fixture();
+    let source = "---\nsnapshot-warning-threshold: 1\n---\n```{python}\nx = [1, 2]\nprint(x)\n```\n```{python}\nprint(sum(x))\n```";
+    let first = compile(&mut compiler, source);
+    assert_eq!(first.matches("Knot: python snapshots").count(), 1);
+    assert_eq!(hits(&plan(&mut compiler, source)), [true, true]);
+    assert_eq!(compile(&mut compiler, source), first);
+    let (_, _, preview) = compiler
+        .plan_and_partial(
+            &Document::parse(source.into()),
+            "main.knot",
+            Phase0Mode::Pending,
+        )
+        .unwrap();
+    assert_eq!(preview, first);
+    for threshold in ["false", "1GB"] {
+        let changed = source.replace("threshold: 1", &format!("threshold: {threshold}"));
+        assert_eq!(hits(&plan(&mut compiler, &changed)), [true, true]);
+        assert!(!compile(&mut compiler, &changed).contains("Knot: python snapshots"));
+    }
+    assert_eq!(compile(&mut compiler, source), first);
+}
+
+#[test]
+#[ignore = "requires Python"]
+fn inline_snapshot_budget_warning_is_rendered_outside_the_expression() {
+    let (_root, _, mut compiler) = fixture();
+    let source = "---\nsnapshot-warning-threshold: 1\n---\n$1 + `{python} 1 + 1`$";
+    let output = compile(&mut compiler, source);
+    assert!(output.starts_with("$1 + 2$\n#code-chunk"), "{output}");
+    assert_eq!(output.matches("Knot: python snapshots").count(), 1);
+    assert_eq!(compile(&mut compiler, source), output);
+}

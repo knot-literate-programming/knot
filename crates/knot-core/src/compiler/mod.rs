@@ -14,6 +14,7 @@ use std::time::Duration;
 
 pub mod formatters;
 pub mod pipeline;
+mod snapshot_budget;
 pub mod snapshot_manager;
 /// Bidirectional source ↔ PDF navigation via `#KNOT-SYNC` markers.
 pub mod sync;
@@ -71,9 +72,16 @@ pub struct Compiler {
     project_root: PathBuf,
     cache_dir: PathBuf,
     cancellation: crate::cancellation::Cancellation,
+    no_snapshots: bool,
 }
 
 impl Compiler {
+    /// Override document settings and disable all session snapshots.
+    pub fn with_snapshots_disabled(mut self, disabled: bool) -> Self {
+        self.no_snapshots = disabled;
+        self
+    }
+
     /// Create a new compiler, searching for knot.toml starting from the given file path.
     pub fn new(knot_file_path: &Path) -> Result<Self> {
         let (config, project_root) = Config::find_and_load(knot_file_path)?;
@@ -108,6 +116,7 @@ impl Compiler {
             project_root,
             cache_dir,
             cancellation,
+            no_snapshots: false,
         }
     }
 
@@ -178,7 +187,12 @@ impl Compiler {
         let nodes = build_executable_nodes(doc);
         info!("🔧 Processing {} executable nodes...", nodes.len());
         anyhow::ensure!(doc.errors.is_empty(), "{}", doc.errors.join("\n"));
-        let planned = self.plan_pass(nodes, &cache, &doc.snapshots)?;
+        let planned = self.plan_pass(
+            nodes,
+            &cache,
+            &doc.snapshots,
+            doc.snapshot_warning_threshold,
+        )?;
         Ok((planned, cache))
     }
 
@@ -193,6 +207,7 @@ impl Compiler {
         nodes: Vec<ExecutableNode>,
         cache: &Arc<Mutex<Cache>>,
         snapshots: &HashMap<String, bool>,
+        warning_threshold: Option<u64>,
     ) -> Result<Vec<PlannedNode>> {
         // Lock once for the entire planning pass (synchronous, no contention).
         let cache = cache.lock().unwrap();
@@ -275,7 +290,7 @@ impl Compiler {
             if !matches!(need, ExecutionNeed::Skip) {
                 last_hash_per_lang.insert(lang.clone(), hash.clone());
             }
-            let enabled = snapshots.get(&lang).copied().unwrap_or(true);
+            let enabled = !self.no_snapshots && snapshots.get(&lang).copied().unwrap_or(true);
             let need = if !enabled && !matches!(need, ExecutionNeed::Skip) {
                 ExecutionNeed::MustExecute
             } else {
@@ -283,6 +298,8 @@ impl Compiler {
             };
             planned.push(PlannedNode {
                 snapshots: enabled,
+                snapshot_warning_threshold: warning_threshold,
+                cached_snapshot_warning: None,
                 kind,
                 lang,
                 hash,
@@ -293,6 +310,24 @@ impl Compiler {
             });
         }
 
+        let mut budgets: HashMap<String, snapshot_budget::SnapshotBudget> = HashMap::new();
+        for node in &mut planned {
+            if node.snapshots
+                && matches!(
+                    node.need,
+                    ExecutionNeed::CacheHit(crate::executors::ExecutionAttempt::Success(_))
+                        | ExecutionNeed::CacheHitInline(_)
+                )
+            {
+                node.cached_snapshot_warning =
+                    budgets.entry(node.lang.clone()).or_default().observe(
+                        &cache,
+                        &node.hash,
+                        &node.lang,
+                        node.snapshot_warning_threshold,
+                    )?;
+            }
+        }
         Ok(planned)
     }
 
@@ -493,6 +528,14 @@ pub fn assemble_pass(executed: &[ExecutedNode], source: &str, source_file: &str)
         output.push_str(&source[last_pos..]);
     }
 
+    for warning in executed
+        .iter()
+        .filter_map(|node| node.snapshot_warning.as_ref())
+    {
+        output.push_str(&format!(
+            "\n#code-chunk(lang: \"knot\", warnings: ([{warning}],))\n"
+        ));
+    }
     output
 }
 
@@ -540,8 +583,16 @@ pub fn planned_to_partial_nodes(
             }
             ExecutionNeed::CacheHit(crate::executors::ExecutionAttempt::Success(output)) => {
                 must_execute_langs.remove(&pn.lang);
+                let mut output = output.clone();
+                if let Some(message) = &pn.cached_snapshot_warning {
+                    output.warnings.push(crate::executors::RuntimeWarning {
+                        message: message.clone(),
+                        call: None,
+                        line: None,
+                    });
+                }
                 (
-                    format_executed_node(pn, output, backend, &ChunkExecutionState::Ready),
+                    format_executed_node(pn, &output, backend, &ChunkExecutionState::Ready),
                     false,
                 )
             }
@@ -591,6 +642,11 @@ pub fn planned_to_partial_nodes(
         };
 
         result.push(ExecutedNode {
+            snapshot_warning: if is_chunk {
+                None
+            } else {
+                pn.cached_snapshot_warning.clone()
+            },
             lang: pn.lang.clone(),
             hash: pn.hash.clone(),
             source_start: pn.source_start,
@@ -705,6 +761,7 @@ mod tests {
         source_line: u32,
     ) -> ExecutedNode {
         ExecutedNode {
+            snapshot_warning: None,
             lang: "r".to_string(),
             hash: "abc123".to_string(),
             source_start,

@@ -528,6 +528,7 @@ pub struct InlineExpr {
 }
 
 pub struct Document {
+    pub snapshot_warning_threshold: Option<u64>,
     pub snapshots: HashMap<String, bool>,
     pub header_end: usize,
     pub source: String,
