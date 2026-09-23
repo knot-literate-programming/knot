@@ -8,6 +8,11 @@ on:
   pull_request:
     branches: [ master ]
 
+# Superseded PR runs are obsolete; keep every master/tag validation independent.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -47,10 +52,17 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      # Restore before setup-r can put Rtools utilities ahead of the runner's
+      # archive tools on Windows.
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+          cache: pip
+          cache-dependency-path: examples/anscombe/requirements.txt
 
       - name: Install Python dependencies
         run: |
@@ -67,16 +79,18 @@ jobs:
         with:
           use-public-rspm: true
 
-      - name: Install R dependencies
-        run: |
-          pkgs <- c('ggplot2', 'svglite', 'jsonlite', 'digest')
-          install.packages(pkgs, repos='https://cloud.r-project.org')
-          missing <- pkgs[!pkgs %in% installed.packages()[,'Package']]
-          if (length(missing) > 0) stop('Failed to install: ', paste(missing, collapse=', '))
-        shell: Rscript {0}
-
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2
+      - name: Install and cache R dependencies
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          # Knot is not an R package: use an explicit list instead of deps::.
+          packages: |
+            any::ggplot2
+            any::svglite
+            any::jsonlite
+            any::digest
+          dependencies: '"hard"'
+          install-pandoc: 'false'
+          install-quarto: 'false'
 
       - name: Record runtime versions
         run: |
@@ -117,6 +131,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
 
       - name: Install dependencies
         working-directory: editors/vscode

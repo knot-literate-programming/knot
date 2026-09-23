@@ -113,6 +113,26 @@ CI runs workspace tests, R/Python integration tests and CLI PDF tests on Linux,
 macOS and Windows. It records runtime and dependency versions. Rust formatting
 and Clippy run on Linux, as do extension type checks, lint, bundling and packaging.
 
+For each PR, a new commit cancels the previous run of this CI workflow. Runs on
+`master` and release tags remain independent. The three-platform matrix and all
+test commands are unchanged by this optimization.
+
+Dependency caches are managed by the existing setup actions:
+
+- Rust uses `Swatinem/rust-cache`; restoration happens before R setup so Rtools
+  does not affect archive-tool selection on Windows.
+- R uses `r-lib/actions/setup-r-dependencies`, with an explicit package list and
+  required dependencies only. It respects the repositories configured by
+  `setup-r`, including binary packages when available. Its cache distinguishes
+  OS, R version, architecture and resolved dependencies; increment the action's
+  `cache-version` input if it needs invalidating.
+- pip caches downloads using `examples/anscombe/requirements.txt` as its key input.
+- npm caches downloads using `editors/vscode/package-lock.json` as its key input.
+
+Package installation and tests still run on cache hits. Caches do not replace
+version locks or guarantee unchanged upstream dependencies. Compare successful
+runs with warm caches when assessing time savings; the first run fills them.
+
 Two ignored `knot-lsp` tests require Tinymist and are not part of this CI suite.
 Neither the default tests nor VSIX packaging validate an interactive VS Code
 preview session. Navigation and unversioned upstream Tinymist diagnostics still
