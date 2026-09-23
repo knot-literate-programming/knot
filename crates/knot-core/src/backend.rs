@@ -3,6 +3,7 @@
 use crate::compiler::ChunkExecutionState;
 use crate::executors::{ExecutionOutput, ExecutionResult};
 use crate::parser::{Chunk, Layout, ResolvedChunkOptions, Show};
+use crate::path_utils::{escape_typst_path, escape_typst_string};
 use std::collections::HashMap;
 
 /// Helper function to format a HashMap of options into a Typst function call.
@@ -75,10 +76,7 @@ impl Backend for TypstBackend {
     ) -> String {
         let mut exports = String::new();
         for export in &output.exports {
-            let name = format!(
-                "\"{}\"",
-                escape_typst_path(std::path::Path::new(&export.name))
-            );
+            let name = format!("\"{}\"", escape_typst_string(&export.name));
             let path = escape_typst_path(&export.path);
             exports.push_str(&format!(
                 "#assert(not ({name} in knot-data), message: \"Duplicate Knot data export: \" + {name})\n#let knot-data = knot-data + (({name}): json(\"{path}\"),)\n"
@@ -318,16 +316,6 @@ fn push_presentation_args(resolved_options: &ResolvedChunkOptions, args: &mut Ve
     if let Some(v) = &resolved_options.align {
         args.push(format!("align: \"{}\"", v));
     }
-}
-
-/// Escape filesystem paths embedded in Typst string literals.
-pub(crate) fn escape_typst_path(path: &std::path::Path) -> String {
-    path.to_string_lossy()
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
-        .replace('\t', "\\t")
 }
 
 #[cfg(test)]

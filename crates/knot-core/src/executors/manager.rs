@@ -114,7 +114,7 @@ impl ExecutorManager {
                       // variant will cause a compilation error here
                 };
                 if let Some(root) = &self.working_directory {
-                    let root = super::path_utils::escape_path_for_code(root);
+                    let root = crate::path_utils::escape_path_for_code(root);
                     let code = match language {
                         crate::defaults::Language::R => format!("setwd('{root}')"),
                         crate::defaults::Language::Python => {

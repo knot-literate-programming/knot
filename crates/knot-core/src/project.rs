@@ -303,13 +303,7 @@ pub fn fix_paths_in_typst(source: &str, typ_file: &Path) -> Result<String> {
             })?;
         }
         result.push('"');
-        // Typst requires forward slashes, even when the host filesystem is Windows.
-        result.push_str(&format!(
-            "{}/{}/{}",
-            Defaults::LANGUAGE_FILES_DIR,
-            namespace,
-            crate::backend::escape_typst_path(Path::new(filename)),
-        ));
+        result.push_str(&crate::path_utils::published_typst_path(&relative)?);
         result.push('"');
     }
     result.push_str(&source[end..]);

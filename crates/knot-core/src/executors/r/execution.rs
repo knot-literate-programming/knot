@@ -8,8 +8,8 @@
 // If no metadata is provided, stdout text is used as fallback.
 
 use super::{RExecutor, formatters, process::RProcess};
-use crate::executors::path_utils::escape_path_for_code;
 use crate::executors::{ExecutionAttempt, GraphicsOptions, SideChannel};
+use crate::path_utils::escape_path_for_code;
 use anyhow::{Context, Result};
 use std::io::Write;
 use std::path::Path;

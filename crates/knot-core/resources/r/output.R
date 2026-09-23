@@ -10,7 +10,7 @@ base_plot <- function(expr, width = NULL, height = NULL, dpi = NULL, format = NU
   # Create file path
   hash <- digest::digest(paste(Sys.time(), runif(1)), algo = "xxhash64")
   filename <- sprintf("plot_%s.%s", hash, format)
-  filepath <- file.path(.get_base_dir(), filename)
+  filepath <- .knot_cache_path(filename)
 
   # Open device
   if (format == "svg") {
@@ -74,7 +74,7 @@ typst.default <- function(obj, ...) {
   # cache) to re-read the file rather than reusing a cached version.
   hash <- digest::digest(list(plot_obj, width, height, dpi, format), algo = "xxhash64")
   filename <- sprintf("plot_%s.%s", hash, format)
-  filepath <- file.path(.get_base_dir(), filename)
+  filepath <- .knot_cache_path(filename)
 
   device <- if (format == "svg") svglite::svglite else format
   ggplot2::ggsave(filepath, plot = plot_obj, width = width, height = height, dpi = dpi, device = device)
@@ -102,7 +102,7 @@ typst.default <- function(obj, ...) {
   # Create hash based on timestamp (can't easily hash the plot)
   hash <- digest::digest(paste(Sys.time(), runif(1)), algo = "xxhash64")
   filename <- sprintf("plot_%s.%s", hash, format)
-  filepath <- file.path(.get_base_dir(), filename)
+  filepath <- .knot_cache_path(filename)
 
   # Copy current device to file
   if (format == "svg") {
@@ -134,7 +134,7 @@ typst.default <- function(obj, ...) {
   # Hash content
   hash <- digest::digest(df, algo = "xxhash64")
   filename <- sprintf("dataframe_%s.csv", hash)
-  filepath <- file.path(.get_base_dir(), filename)
+  filepath <- .knot_cache_path(filename)
 
   write.csv(df, filepath, row.names = FALSE)
 
@@ -163,12 +163,7 @@ export_data <- function(data, name) {
     data, dataframe = "rows", auto_unbox = TRUE, null = "null", na = "null", digits = NA
   )))
   hash <- digest::digest(payload, algo = "sha256", serialize = FALSE)
-  filepath <- file.path(.get_base_dir(), paste0("data_r_", hash, ".json"))
-  # Rust canonical paths use the Windows extended-length prefix. Such paths
-  # cannot contain the forward slash that file.path() appends by default.
-  if (.Platform$OS.type == "windows") {
-    filepath <- chartr("/", "\\", filepath)
-  }
+  filepath <- .knot_cache_path(paste0("data_r_", hash, ".json"))
   bytes <- charToRaw(payload)
   # Do not rewrite valid files that an in-progress preview may already read.
   if (!file.exists(filepath) ||

@@ -68,3 +68,10 @@
   
   TRUE
 }
+
+# file.path's default slash cannot be appended to Windows extended paths (\\?\).
+# Use its native separator option for every R artifact, preserving that prefix.
+.knot_cache_path <- function(filename) {
+  file.path(.get_base_dir(), filename,
+            fsep = if (.Platform$OS.type == "windows") "\\" else "/")
+}

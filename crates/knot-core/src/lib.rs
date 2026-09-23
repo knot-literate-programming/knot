@@ -25,6 +25,7 @@ pub mod executors;
 pub mod formatting;
 pub mod graphics;
 pub mod parser;
+pub mod path_utils;
 pub mod project;
 
 pub use backend::{format_codly_call, format_local_call};
