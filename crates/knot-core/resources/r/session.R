@@ -1,9 +1,10 @@
 # Knot R Session Management
 
-save_session <- function(path) {
+save_session <- function(path, excluded = character()) {
   res <- tryCatch({
-    # Save objects
-    save.image(file = path)
+    # Select bindings without removing or reloading objects in the live session.
+    names_to_save <- setdiff(ls(envir = .GlobalEnv, all.names = TRUE), excluded)
+    save(list = names_to_save, file = path, envir = .GlobalEnv)
 
     # Save loaded packages
     packages_path <- sub("\\.RData$", "_packages.rds", path)

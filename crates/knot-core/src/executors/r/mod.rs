@@ -64,10 +64,15 @@ impl LanguageExecutor for RExecutor {
 use super::path_utils::escape_path_for_code;
 
 impl KnotExecutor for RExecutor {
-    fn save_session(&mut self, path: &Path) -> Result<()> {
+    fn save_session_excluding(&mut self, path: &Path, excluded: &[String]) -> Result<()> {
         // Delegate to R helper function
         let path_str = escape_path_for_code(path);
-        let code = format!("save_session('{}')", path_str);
+        let names = excluded
+            .iter()
+            .map(serde_json::to_string)
+            .collect::<std::result::Result<Vec<_>, _>>()?
+            .join(",");
+        let code = format!("save_session('{}', c({names}))", path_str);
         let out = self.query(&code)?;
         if out.contains("TRUE") {
             Ok(())
@@ -168,13 +173,6 @@ impl ConstantObjectHandler for RExecutor {
             object_name,
             object_path.display()
         );
-        Ok(())
-    }
-
-    fn remove_from_env(&mut self, object_name: &str) -> Result<()> {
-        let code = format!("rm(list = '{}', envir = .GlobalEnv)", object_name);
-        self.query(&code)?;
-        log::debug!("🗑️  Removed '{}' from R environment", object_name);
         Ok(())
     }
 

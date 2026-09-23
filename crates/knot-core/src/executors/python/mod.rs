@@ -103,9 +103,10 @@ impl LanguageExecutor for PythonExecutor {
 use super::path_utils::escape_path_for_code;
 
 impl KnotExecutor for PythonExecutor {
-    fn save_session(&mut self, path: &Path) -> Result<()> {
+    fn save_session_excluding(&mut self, path: &Path, excluded: &[String]) -> Result<()> {
         let path_str = escape_path_for_code(path);
-        let code = format!("print(save_session('{}'))", path_str);
+        let names = serde_json::to_string(excluded)?;
+        let code = format!("print(save_session('{}', {names}))", path_str);
         let out = self.query(&code)?;
         if out.trim() == "True" {
             Ok(())
@@ -200,17 +201,6 @@ impl ConstantObjectHandler for PythonExecutor {
             object_name,
             object_path.display()
         );
-        Ok(())
-    }
-
-    fn remove_from_env(&mut self, object_name: &str) -> Result<()> {
-        // Delegate to Python helper function
-        let code = format!(
-            "print(remove_from_env('{}'))",
-            object_name.replace('\'', "\\'")
-        );
-        self.query(&code)?;
-        log::debug!("🗑️  Removed '{}' from Python environment", object_name);
         Ok(())
     }
 

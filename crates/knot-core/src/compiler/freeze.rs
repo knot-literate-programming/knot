@@ -194,8 +194,9 @@ mod tests {
         }
     }
     impl KnotExecutor for FakeExecutor {
-        fn save_session(&mut self, path: &Path) -> Result<()> {
-            Ok(std::fs::write(path, &self.value)?)
+        fn save_session_excluding(&mut self, path: &Path, excluded: &[String]) -> Result<()> {
+            assert_eq!(excluded, ["x"]);
+            Ok(std::fs::write(path, "session without x")?)
         }
         fn load_session(&mut self, _: &Path) -> Result<()> {
             unreachable!()
@@ -217,10 +218,7 @@ mod tests {
             )?)
         }
         fn load_constant(&mut self, _: &str, _: &str, _: &Path) -> Result<()> {
-            Ok(())
-        }
-        fn remove_from_env(&mut self, _: &str) -> Result<()> {
-            Ok(())
+            panic!("Frozen objects must not be reloaded after successful execution")
         }
         fn object_extension(&self) -> &'static str {
             "fake"

@@ -188,3 +188,71 @@ fn test_save_and_load_session_python() {
 
     println!("✓ Python Session save/load works correctly");
 }
+
+#[test]
+#[ignore = "requires R and Python"]
+fn selective_snapshots_exclude_bindings_without_changing_live_objects() {
+    use knot_core::executors::path_utils::escape_path_for_code;
+    for python in [false, true] {
+        let temp = TempDir::new().unwrap();
+        let timeout = std::time::Duration::from_secs(30);
+        let mut exec: Box<dyn KnotExecutor> = if python {
+            Box::new(PythonExecutor::new(temp.path().into(), timeout).unwrap())
+        } else {
+            Box::new(RExecutor::new(temp.path().into(), timeout).unwrap())
+        };
+        exec.initialize().unwrap();
+        let unusual = "quote'\\name";
+        let name = serde_json::to_string(unusual).unwrap();
+        let setup = if python {
+            format!("x = [1, 2, 3]\nalias = x\ny = 42\nglobals()[{name}] = 17")
+        } else {
+            format!(
+                "x <- data.frame(a = 1:3)\nalias <- x\ny <- 42\nassign({name}, 17, envir = .GlobalEnv)"
+            )
+        };
+        exec.query(&setup).unwrap();
+        let excluded = vec!["x".into(), "alias".into(), unusual.into()];
+        let snapshot = temp.path().join(if python {
+            "selective.pkl"
+        } else {
+            "selective.RData"
+        });
+        exec.save_session_excluding(&snapshot, &excluded).unwrap();
+        let live = if python {
+            format!("print(x is alias and x == [1, 2, 3] and globals()[{name}] == 17)")
+        } else {
+            format!("cat(identical(x, alias) && identical(x$a, 1:3) && get({name}) == 17)")
+        };
+        assert_eq!(exec.query(&live).unwrap().trim().to_lowercase(), "true");
+        let path = escape_path_for_code(&snapshot);
+        let inspect = if python {
+            format!(
+                "print(set(pickle.load(open('{path}', 'rb'))) == {{'y', '__knot_modules__', '__knot_cwd__'}})"
+            )
+        } else {
+            format!(
+                "local({{ e <- new.env(); load('{path}', envir = e); cat(!any(c('x', 'alias', {name}) %in% ls(e, all.names = TRUE)) && e$y == 42) }})"
+            )
+        };
+        assert_eq!(exec.query(&inspect).unwrap().trim().to_lowercase(), "true");
+
+        // A failed write must not delete or replace the objects either.
+        assert!(exec.save_session_excluding(temp.path(), &excluded).is_err());
+        assert_eq!(exec.query(&live).unwrap().trim().to_lowercase(), "true");
+
+        // Default saving still includes all user bindings.
+        let full = temp
+            .path()
+            .join(if python { "full.pkl" } else { "full.RData" });
+        exec.save_session(&full).unwrap();
+        exec.query(if python {
+            "del x, alias, y"
+        } else {
+            "rm(x, alias, y)"
+        })
+        .unwrap();
+        exec.load_session(&full).unwrap();
+        assert_eq!(exec.query(&live).unwrap().trim().to_lowercase(), "true");
+    }
+}

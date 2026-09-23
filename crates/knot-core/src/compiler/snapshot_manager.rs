@@ -77,16 +77,13 @@ impl SnapshotManager {
             .filter(|(_, info)| info.language == lang)
             .map(|(key, info)| (key.clone(), info.clone()))
             .collect();
-        for info in frozen.values() {
-            exec.remove_from_env(&info.name)?;
-        }
+        let excluded = frozen
+            .values()
+            .map(|info| info.name.clone())
+            .collect::<Vec<_>>();
         let snapshot = cache.get_snapshot_path(hash, exec.snapshot_extension());
-        let saved = exec.save_session(&snapshot);
-        // Restore constants even if saving failed, before propagating the error.
-        for info in frozen.values() {
-            exec.load_constant(&info.name, &info.hash, &cache.cache_dir)?;
-        }
-        saved.with_context(|| format!("Failed to save {lang} snapshot {}", snapshot.display()))?;
+        exec.save_session_excluding(&snapshot, &excluded)
+            .with_context(|| format!("Failed to save {lang} snapshot {}", snapshot.display()))?;
 
         let reusable = !snapshot.with_extension("replay").exists();
         let mut paths = vec![snapshot];

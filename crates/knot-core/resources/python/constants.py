@@ -50,17 +50,6 @@ def load_constant(object_name, path):
     return False
 
 
-def remove_from_env(object_name):
-    """Remove an object from the global environment."""
-    import __main__
-    main_dict = __main__.__dict__
-
-    if object_name in main_dict:
-        del main_dict[object_name]
-        return True
-    return False
-
-
 def hash_objects_batch(names):
     """Compute hashes for multiple objects in a single call."""
     import json

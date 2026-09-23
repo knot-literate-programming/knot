@@ -58,6 +58,18 @@ each snapshot, so declarations later in the document do not affect an earlier
 restored prefix. A mutation produces an error and makes following nodes in the
 same language inert. Other language chains continue independently.
 
+Snapshot saving selects the non-frozen bindings without removing or reloading
+frozen objects in the running interpreter, even if the save fails. Frozen objects
+are loaded separately only when restoring a cached snapshot. Their contract is
+checked before a successful result or snapshot is saved. After an execution error,
+correcting the chunk resumes from the preceding valid state with its frozen data.
+
+Exclusion is by binding name. Other bindings can still serialize the same data;
+shared references between frozen data and other snapshot objects are not preserved
+in general on restoration. Prefer independent serializable values. Each `.knot`
+source has its own workspace, so splitting independent analyses into files also
+limits the lifetime of frozen variables.
+
 ## Rebuilding after environment changes
 
 Interpreter and installed-package versions are not yet part of cache identity.
