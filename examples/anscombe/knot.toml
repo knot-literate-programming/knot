@@ -9,5 +9,44 @@ timeout-secs = 120
 show = "output"
 layout = "vertical"
 fig-width = 7.0
-fig-height = 4.5
+fig-height = 4.1
 fig-format = "svg"
+
+gutter = "1em"
+
+# Code options
+code-radius = '4pt'
+code-inset = '0.5em'
+
+# Warning options
+warning-background = 'rgb("#ffe2b7")' # Soft orange warning panel
+warning-stroke = '1pt + rgb("#f5b066")'
+warning-inset = '0.8em'
+warning-radius = '4pt'
+
+# Output options
+output-stroke = '1pt + rgb("#999999")'
+output-inset = '0.5em'
+output-radius = '4pt'
+output-background = 'rgb("#FFFFFF")'
+
+# Codly options
+codly-lang-outset = '(x: 0pt, y: 0pt)'
+
+# Language-specific chunk defaults (optional)
+# These override global [chunk-defaults] for specific languages
+[r-chunks]
+code-stroke = '1pt + rgb("#CE412B")'
+
+[python-chunks]
+code-stroke = '1pt + rgb("#3572A5")'
+
+[r-error]
+code-stroke = '1pt + rgb("#CCCCCC")'
+code-background = 'rgb("#F5F5F5")'
+codly-zebra-fill = 'none'
+
+[python-error]
+code-stroke = '1pt + rgb("#CCCCCC")'
+code-background = 'rgb("#F5F5F5")'
+codly-zebra-fill = 'none'

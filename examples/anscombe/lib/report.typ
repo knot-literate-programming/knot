@@ -7,6 +7,14 @@
   set heading(numbering: "1.1")
   show raw: set text(size: 8pt)
   show: codly-init
+  codly(
+    languages: (
+      r: (name: "R", icon: "", color: rgb("#CE412B")),
+      python: (name: "Python", icon: "", color: rgb("#3572A5")),
+      output: (name: "#>", icon: "", color: rgb("#9999")),
+    ),
+    lang-radius: 100pt,
+  )
   body
 }
 
