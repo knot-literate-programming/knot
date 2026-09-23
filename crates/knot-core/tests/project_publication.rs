@@ -137,8 +137,11 @@ fn staged_r_snapshot_disabled_chain_replays_for_a_changed_suffix() {
     let output = build.compile(None).unwrap();
     build.publish(&output, true).unwrap();
     assert_eq!(
-        fs::read_to_string(root.path().join("executions")).unwrap(),
-        "once\n"
+        fs::read_to_string(root.path().join("executions"))
+            .unwrap()
+            .lines()
+            .collect::<Vec<_>>(),
+        ["once"]
     );
     let cache = knot_core::cache::Cache::new(get_cache_dir(root.path(), &path)).unwrap();
     assert!(
