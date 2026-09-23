@@ -130,3 +130,11 @@ pub struct ExecutedNode {
     /// `true` if this node caused an execution error (triggers Inert cascade).
     pub errored: bool,
 }
+
+impl PlannedNode {
+    /// A skipped declaration has no effect on the language session.
+    pub(super) fn declares_freeze(&self) -> bool {
+        !matches!(self.need, ExecutionNeed::Skip)
+            && matches!(&self.kind, PlannedNodeKind::Chunk { data, .. } if !data.chunk_options.freeze.is_empty())
+    }
+}

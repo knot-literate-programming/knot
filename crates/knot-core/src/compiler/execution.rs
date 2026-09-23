@@ -92,7 +92,8 @@ pub(super) fn run_language_chain(
         backend,
         cancellation,
     };
-    let mut sm = SnapshotManager::new(exec);
+    let allow_snapshots = !nodes.iter().any(|(_, node)| node.declares_freeze());
+    let mut sm = SnapshotManager::new(exec, allow_snapshots);
     let mut indexed = Vec::with_capacity(nodes.len());
     let mut broken = false;
 

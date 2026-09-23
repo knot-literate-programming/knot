@@ -40,7 +40,7 @@ node onward. Malformed or incompatible metadata is discarded.
 
 Each compilation starts with fresh interpreters and restores the required cached
 prefix. Removed variables cannot leak from a previous compilation. Snapshots are
-saved only after successful execution and freeze checks; skipped and cached nodes
+saved only for chains without active freeze declarations, after successful execution; skipped and cached nodes
 do not create replacement snapshots. The working directory is restored along
 with saved variables.
 
@@ -53,22 +53,22 @@ user-defined functions, classes and open file handles. When such objects are
 present, Knot marks the snapshot as non-reusable and replays the affected prefix
 on subsequent compilations. This favors correct execution over a cache hit.
 
-`freeze: [x, y]` applies only to the named objects. Their bindings are saved with
-each snapshot, so declarations later in the document do not affect an earlier
-restored prefix. A mutation produces an error and makes following nodes in the
-same language inert. Other language chains continue independently.
+`freeze: [x, y]` disables snapshot creation and restoration for the **entire
+language chain of that document**, including nodes before the declaration.
+Every compilation executes this chain from the beginning in a fresh interpreter,
+even when the source is unchanged or only one erroneous chunk was corrected.
+The editor also refuses to restore snapshots from a frozen chain for inspection.
+Cached outputs can be stored for rendering, but do not skip execution in that chain.
 
-Snapshot saving selects the non-frozen bindings without removing or reloading
-frozen objects in the running interpreter, even if the save fails. Frozen objects
-are loaded separately only when restoring a cached snapshot. Their contract is
-checked before a successful result or snapshot is saved. After an execution error,
-correcting the chunk resumes from the preceding valid state with its frozen data.
+The named objects remain live throughout execution. Their fingerprints are
+checked before successful results are cached; a mutation makes following nodes
+inert. This avoids reconstructing objects from separate snapshots, which could
+silently break shared references. It does not make external dependencies or
+nondeterministic code reproducible automatically.
 
-Exclusion is by binding name. Other bindings can still serialize the same data;
-shared references between frozen data and other snapshot objects are not preserved
-in general on restoration. Prefer independent serializable values. Each `.knot`
-source has its own workspace, so splitting independent analyses into files also
-limits the lifetime of frozen variables.
+Declarations in `eval: false` chunks do not activate this policy. Other language
+chains and other `.knot` files keep their normal cache. Split independent analyses
+into separate files to limit the lifetime of large variables and the cost of replay.
 
 ## Rebuilding after environment changes
 

@@ -63,7 +63,7 @@ pub struct SnapshotEntry {
     pub freeze_objects: HashMap<String, FreezeObjectInfo>,
 }
 
-pub const CACHE_FORMAT_VERSION: u32 = 2;
+pub const CACHE_FORMAT_VERSION: u32 = 3;
 
 impl Default for CacheMetadata {
     fn default() -> Self {

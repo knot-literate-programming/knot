@@ -103,10 +103,9 @@ impl LanguageExecutor for PythonExecutor {
 use super::path_utils::escape_path_for_code;
 
 impl KnotExecutor for PythonExecutor {
-    fn save_session_excluding(&mut self, path: &Path, excluded: &[String]) -> Result<()> {
+    fn save_session(&mut self, path: &Path) -> Result<()> {
         let path_str = escape_path_for_code(path);
-        let names = serde_json::to_string(excluded)?;
-        let code = format!("print(save_session('{}', {names}))", path_str);
+        let code = format!("print(save_session('{}'))", path_str);
         let out = self.query(&code)?;
         if out.trim() == "True" {
             Ok(())

@@ -283,6 +283,18 @@ impl Compiler {
             });
         }
 
+        // A partial snapshot cannot preserve the graph shared with frozen objects.
+        // Replay the entire affected language, including nodes before the declaration.
+        let frozen_languages: HashSet<_> = planned
+            .iter()
+            .filter(|node| node.declares_freeze())
+            .map(|node| node.lang.clone())
+            .collect();
+        for node in &mut planned {
+            if frozen_languages.contains(&node.lang) && !matches!(node.need, ExecutionNeed::Skip) {
+                node.need = ExecutionNeed::MustExecute;
+            }
+        }
         Ok(planned)
     }
 

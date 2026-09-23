@@ -37,7 +37,7 @@ inline expressions, mixed-language documents and session snapshots.
 
 `cache_correctness.rs` exercises document isolation, dependency roots, planning,
 artifact copying, corrupted files, cold/warm/clean builds, Python snapshot replay,
-and R/Python freeze restoration. The default suite also uses a fake executor to
+and R/Python freeze replay and Python shared-reference preservation. The default suite also uses a fake executor to
 check freeze contracts and inert cascades without installing interpreters.
 
 ```bash

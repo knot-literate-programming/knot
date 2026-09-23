@@ -194,9 +194,8 @@ mod tests {
         }
     }
     impl KnotExecutor for FakeExecutor {
-        fn save_session_excluding(&mut self, path: &Path, excluded: &[String]) -> Result<()> {
-            assert_eq!(excluded, ["x"]);
-            Ok(std::fs::write(path, "session without x")?)
+        fn save_session(&mut self, _: &Path) -> Result<()> {
+            panic!("Frozen chains must not save snapshots")
         }
         fn load_session(&mut self, _: &Path) -> Result<()> {
             unreachable!()
@@ -243,6 +242,28 @@ mod tests {
         let chunk = &doc.chunks[0];
         register_freeze_objects(chunk, &chunk.options.freeze, &mut exec, &cache).unwrap();
         assert_eq!(cache.lock().unwrap().metadata.freeze_objects.len(), 1);
+        // Reject even an otherwise intact legacy snapshot before loading anything.
+        {
+            let mut cache = cache.lock().unwrap();
+            let file = cache.cache_dir.join("snapshot_legacy.fake");
+            std::fs::write(&file, "state").unwrap();
+            let frozen = cache.metadata.freeze_objects.clone();
+            cache.metadata.snapshots.insert(
+                "legacy".into(),
+                crate::cache::SnapshotEntry {
+                    reusable: true,
+                    files: [(
+                        "snapshot_legacy.fake".into(),
+                        crate::cache::hashing::hash_file(&file).unwrap(),
+                    )]
+                    .into(),
+                    freeze_objects: frozen,
+                },
+            );
+            assert!(!cache.snapshot_is_valid("legacy"));
+            assert!(cache.restore_snapshot("legacy", exec.as_mut()).is_err());
+        }
+
         assert!(
             check_freeze_contract(&planned[0], &mut exec, &cache)
                 .unwrap()

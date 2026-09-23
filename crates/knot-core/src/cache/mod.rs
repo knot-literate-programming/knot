@@ -195,6 +195,7 @@ impl Cache {
     pub fn snapshot_is_valid(&self, hash: &str) -> bool {
         self.metadata.snapshots.get(hash).is_some_and(|entry| {
             entry.reusable
+                && entry.freeze_objects.is_empty()
                 && !entry.files.is_empty()
                 && entry.files.iter().all(|(path, expected)| {
                     hashing::hash_file(&self.cache_dir.join(path))
@@ -203,7 +204,7 @@ impl Cache {
         })
     }
 
-    /// Validate and restore the session and frozen bindings of one snapshot.
+    /// Validate and restore a complete session; snapshots with frozen bindings are rejected.
     /// Callers choose the snapshot and manage the interpreter lifetime.
     pub fn restore_snapshot(
         &self,
@@ -218,26 +219,7 @@ impl Cache {
         let path = self.get_snapshot_path(hash, executor.snapshot_extension());
         executor
             .load_session(&path)
-            .with_context(|| format!("Failed to restore snapshot {}", path.display()))?;
-        self.restore_constants(hash, executor)
-    }
-
-    /// Restore frozen objects associated with this snapshot, not with a later
-    /// state of the document. Shared by compilation and editor completion.
-    fn restore_constants(
-        &self,
-        hash: &str,
-        executor: &mut dyn crate::executors::KnotExecutor,
-    ) -> Result<()> {
-        let entry = self
-            .metadata
-            .snapshots
-            .get(hash)
-            .ok_or_else(|| anyhow!("Snapshot metadata missing: {}", hash))?;
-        for info in entry.freeze_objects.values() {
-            executor.load_constant(&info.name, &info.hash, &self.cache_dir)?;
-        }
-        Ok(())
+            .with_context(|| format!("Failed to restore snapshot {}", path.display()))
     }
 
     /// Save the cache metadata to disk

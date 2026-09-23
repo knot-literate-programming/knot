@@ -150,9 +150,9 @@ This is the core trade-off:
 
 | | Default (no freeze) | With `freeze` |
 |---|---|---|
-| **Snapshots** | Heavy — large objects included in each one | Light — large objects excluded |
-| **Disk usage** | Grows with number of downstream chunks | Object stored once |
-| **Snapshot restore** | One large file to read | Small snapshot + separate object load |
+| **Snapshots** | Heavy — large objects included in each one | None for this language chain |
+| **Disk usage** | Grows with number of downstream chunks | No repeated environment snapshots |
+| **Snapshot restore** | One large file to read | Disabled; the entire chain runs again |
 | **Constraint** | None | Object must not be mutated downstream |
 
 ### How freeze works
@@ -166,22 +166,17 @@ model <- train(training_data)
 
 When you declare `freeze: [model, training_data]`, Knot:
 
-1. **Serialises** each named object into content-addressed storage
-   (`.knot_cache/objects/{hash}.ext`) immediately after the chunk executes.
-2. **Excludes** their named bindings from subsequent snapshots, while leaving
-   the objects in the live interpreter. Saving a snapshot does not remove or
-   reload them.
-3. **Reloads** the objects separately when restoring a cached snapshot, including
-   when resuming execution after correcting an error.
+1. Starts a fresh interpreter and executes the entire language chain on every
+   compilation, including chunks before the declaration and unchanged chunks.
+2. Creates and restores **no snapshots** for that chain. Separately restoring
+   frozen objects could silently break aliases, nested references or shared views.
+   Re-execution leaves object relationships under the language's normal semantics.
+3. Records each named object's fingerprint and checks the contract downstream.
 
-This avoids repeating the named objects in each snapshot and reloading them after
-successful chunks. Contract checks still fingerprint their contents and can
-require serialization.
-
-Exclusion is by name, not a traversal of every reference: an alias or a container
-that references a frozen object can still serialize its contents. Shared identity
-between a frozen object and other snapshot objects is not guaranteed after a
-restore. Use independent serializable values for frozen data.
+This avoids storing large environments repeatedly, at the cost of full
+re-execution. After correcting an error, the chain starts again from its beginning.
+A declaration in an `eval: false` chunk does not activate this policy. Other
+languages and other `.knot` files retain their normal incremental cache.
 
 ### The immutability contract
 

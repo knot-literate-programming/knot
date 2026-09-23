@@ -8,13 +8,15 @@ use std::collections::HashMap;
 
 pub struct SnapshotManager {
     loaded_hash: Option<String>,
+    allow_snapshots: bool,
     exec: Option<Box<dyn KnotExecutor>>,
 }
 
 impl SnapshotManager {
-    pub fn new(exec: Option<Box<dyn KnotExecutor>>) -> Self {
+    pub fn new(exec: Option<Box<dyn KnotExecutor>>, allow_snapshots: bool) -> Self {
         Self {
             loaded_hash: None,
+            allow_snapshots,
             exec,
         }
     }
@@ -54,6 +56,10 @@ impl SnapshotManager {
         if previous_hash.is_empty() || self.loaded_hash.as_deref() == Some(previous_hash) {
             return Ok(());
         }
+        anyhow::ensure!(
+            self.allow_snapshots,
+            "Cannot restore a snapshot in a language chain with freeze declarations"
+        );
         let Some(exec) = self.exec.as_deref_mut() else {
             return Ok(());
         };
@@ -70,19 +76,13 @@ impl SnapshotManager {
         let Some(exec) = self.exec.as_deref_mut() else {
             return Ok(());
         };
-        let frozen: HashMap<_, _> = cache
-            .metadata
-            .freeze_objects
-            .iter()
-            .filter(|(_, info)| info.language == lang)
-            .map(|(key, info)| (key.clone(), info.clone()))
-            .collect();
-        let excluded = frozen
-            .values()
-            .map(|info| info.name.clone())
-            .collect::<Vec<_>>();
+        if !self.allow_snapshots {
+            cache.metadata.snapshots.remove(hash);
+            self.loaded_hash = Some(hash.to_string());
+            return Ok(());
+        }
         let snapshot = cache.get_snapshot_path(hash, exec.snapshot_extension());
-        exec.save_session_excluding(&snapshot, &excluded)
+        exec.save_session(&snapshot)
             .with_context(|| format!("Failed to save {lang} snapshot {}", snapshot.display()))?;
 
         let reusable = !snapshot.with_extension("replay").exists();
@@ -93,13 +93,6 @@ impl SnapshotManager {
                     .cache_dir
                     .join(format!("snapshot_{hash}_packages.rds")),
             );
-        }
-        for info in frozen.values() {
-            paths.push(cache.cache_dir.join("objects").join(format!(
-                "{}.{}",
-                info.hash,
-                exec.object_extension()
-            )));
         }
         let files = paths
             .into_iter()
@@ -116,7 +109,7 @@ impl SnapshotManager {
             SnapshotEntry {
                 reusable,
                 files,
-                freeze_objects: frozen,
+                freeze_objects: HashMap::new(),
             },
         );
         self.loaded_hash = Some(hash.to_string());

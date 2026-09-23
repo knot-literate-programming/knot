@@ -266,16 +266,17 @@ fn incomplete_python_snapshot_replays_prefix_instead_of_losing_definitions() {
 
 #[test]
 #[ignore = "requires R"]
-fn frozen_r_objects_restore_and_corruption_forces_reexecution() {
+fn frozen_r_chain_replays_without_snapshots() {
     let (root, path, mut compiler) = fixture();
     let source = "```{r declaration}\n#| freeze: [x]\nx <- c(1, 2)\ny <- 3\n```\n```{r consumer}\ny <- 4\nprint(x + y)\n```";
     let cold = compile(&mut compiler, source);
-    assert_eq!(hits(&plan(&mut compiler, source)), [true, true]);
+    assert_eq!(hits(&plan(&mut compiler, source)), [false, false]);
     let changed = source.replace("y <- 4", "y <- 5");
     let warm = compile(&mut Compiler::new(&path).unwrap(), &changed);
     let (_fresh_root, _, mut fresh) = fixture();
     assert_eq!(warm, compile(&mut fresh, &changed));
     let stored = cache(root.path(), &path);
+    assert!(stored.metadata.snapshots.is_empty());
     let frozen = &stored.metadata.freeze_objects["r::x"];
     fs::write(
         stored
@@ -529,12 +530,12 @@ fn frozen_state_recovers_after_contract_and_runtime_errors() {
             assert!(output.contains("is-inert: true"), "{output}");
             let fixed = source.replace(bad, repaired);
             let mut resumed = Compiler::new(&path).unwrap();
-            assert_eq!(hits(&plan(&mut resumed, &fixed)), [true, false, false]);
+            assert_eq!(hits(&plan(&mut resumed, &fixed)), [false, false, false]);
             let recovered = compile(&mut resumed, &fixed);
             let (_fresh, _, mut cold) = fixture();
             assert_eq!(recovered, compile(&mut cold, &fixed));
             assert!(!recovered.contains("is-inert: true"));
-            assert_eq!(hits(&plan(&mut resumed, &fixed)), [true, true, true]);
+            assert_eq!(hits(&plan(&mut resumed, &fixed)), [false, false, false]);
         }
     }
 }
@@ -546,4 +547,48 @@ fn frozen_python_alias_stays_live_and_its_mutation_is_detected() {
     let source = "```{python}\n#| freeze: [x]\nx = [1, 2]\nalias = x\n```\n```{python}\nassert alias is x\nalias.append(3)\n```";
     let result = compile(&mut compiler, source);
     assert!(result.contains("Freeze contract violated"), "{result}");
+}
+
+#[test]
+#[ignore = "requires Python"]
+fn late_freeze_replays_shared_graphs_without_snapshots() {
+    let (root, path, mut compiler) = fixture();
+    let prefix = "```{python}\nx = {'col': []}\nx['self'] = x\nalias = x\nchild = x['col']\ncontainer = {'root': x}\n```\n";
+    compile(&mut compiler, prefix);
+    assert_eq!(hits(&plan(&mut compiler, prefix)), [true]);
+    let source = format!(
+        "{prefix}```{{python}}\n#| freeze: [x]\nassert alias is x\n```\n```{{python}}\nassert container['root'] is x\nassert child is x['col']\nassert x['self'] is x\nprint('graph intact')\n```\n`{{python}} alias is x`"
+    );
+    for text in [
+        &source,
+        &source,
+        &source.replace("graph intact", "still intact"),
+    ] {
+        assert_eq!(hits(&plan(&mut compiler, text)), [false; 4]);
+        let output = compile(&mut compiler, text);
+        assert!(!output.contains("error:"), "{output}");
+        let stored = cache(root.path(), &path);
+        for node in plan(&mut compiler, text) {
+            assert!(!stored.metadata.snapshots.contains_key(&node.hash));
+        }
+    }
+    let mutated = source.replace("print('graph intact')", "child.append(1)");
+    assert!(compile(&mut compiler, &mutated).contains("Freeze contract violated"));
+    let mut restarted = Compiler::new(&path).unwrap();
+    let (_fresh_root, _, mut fresh) = fixture();
+    assert_eq!(
+        compile(&mut restarted, &source),
+        compile(&mut fresh, &source)
+    );
+}
+
+#[test]
+#[ignore = "requires R and Python"]
+fn freeze_policy_is_scoped_to_active_declarations_and_language() {
+    let (_root, _, mut compiler) = fixture();
+    let source = "```{python}\n#| freeze: [x]\nx = [1]\n```\n```{r}\nx <- 1\n```\n```{r}\n#| eval: false\n#| freeze: [x]\nstop('skipped')\n```";
+    compile(&mut compiler, source);
+    let nodes = plan(&mut compiler, source);
+    assert_eq!(hits(&nodes), [false, true, false]);
+    assert!(matches!(nodes[2].need, ExecutionNeed::Skip));
 }

@@ -54,24 +54,22 @@ group_by_language(planned_nodes)
 
 Within each `run_language_chain`:
 
-1. Traverse nodes in document order, reusing cached results where possible.
-2. Before a `MustExecute` node, restore the preceding valid snapshot if needed,
-   including its frozen objects, then execute the node.
+1. If any active chunk declares `freeze`, the planner marks every non-skipped
+   node of that language `MustExecute`, including the prefix before the declaration.
+2. Such a chain runs in a fresh interpreter without saving or restoring snapshots.
+   Other chains reuse cached results and restore preceding valid snapshots as needed.
 3. Runtime errors stop subsequent nodes of that language (`Inert`). A successful
-   execution is checked against the active freeze contracts before any success is
+   execution is checked against active freeze contracts before any success is
    cached; a violation also cascades `Inert`.
-4. Register new freeze declarations, then save a snapshot with
-   `save_session_excluding`: R uses an explicit `save(list = ..., envir = .GlobalEnv)`
-   selection; Python filters the state dictionary before serialization. Neither
-   helper removes or reloads live bindings.
-5. Record the snapshot's frozen bindings and cache the successful result.
+4. Register new freeze declarations and cache successful results. Save a complete
+   session snapshot only when the chain contains no active freeze declaration.
 
 The `ExecutorManager` uses a take/put-back pattern so executors can be moved
 into threads without lifetime issues.
 
 `SnapshotManager` saves and restores interpreter state (the R/Python environment
 after each successfully executed node). This allows re-executing chunk 5 in a 20-chunk document
-without re-running chunks 1-4.
+without re-running chunks 1-4, provided that the chain has no active `freeze` declaration.
 
 ---
 
