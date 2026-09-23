@@ -253,9 +253,11 @@ fn r_plot_dimensions_change_artifact_identity() {
         ExecutionAttempt, ExecutionResult, GraphicsOptions, LanguageExecutor, r::RExecutor,
     };
     let root = tempfile::tempdir().unwrap();
+    // Cold ggplot2/SVG startup can exceed 30s on a busy Windows CI runner.
+    // This test checks artifact identity, not execution speed.
     let mut executor = RExecutor::new(
         root.path().to_path_buf(),
-        std::time::Duration::from_secs(30),
+        std::time::Duration::from_secs(120),
     )
     .unwrap();
     executor.initialize().unwrap();
