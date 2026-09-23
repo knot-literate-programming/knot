@@ -1,0 +1,63 @@
+#pagebreak()
+= Python and plotnine
+
+== Question and data
+
+Do the four series have similar least-squares summaries despite different
+geometries? Read the same 44 observations from the versioned CSV.
+
+```{python}
+#| show: both
+#| depends: [data/anscombe.csv]
+import pandas as pd
+points = pd.read_csv("data/anscombe.csv")
+```
+
+== Calculation
+
+Estimate a line separately for each series, using sample variances with divisor
+$n-1$. Export the unrounded summary for Typst and cross-language checks.
+
+```{python}
+#| show: none
+summaries = []
+lines = []
+for series, d in points.groupby("series", sort=True):
+    x, y = d["x"], d["y"]
+    slope = float(((x - x.mean()) * (y - y.mean())).sum() / ((x - x.mean()) ** 2).sum())
+    intercept = float(y.mean() - slope * x.mean())
+    summaries.append(dict(series=series, n=len(d), mean_x=float(x.mean()),
+        mean_y=float(y.mean()), var_x=float(x.var(ddof=1)), var_y=float(y.var(ddof=1)),
+        slope=slope, intercept=intercept, r_squared=float(x.corr(y) ** 2)))
+    lines.extend(dict(series=series, x=t, y=intercept + slope * t) for t in (3, 20))
+export_data(summaries, "python-summary")
+```
+
+== Numerical summary
+
+#if "python-summary" in knot-data {
+  results-table(knot-data.at("python-summary"))
+} else { [Results pending or unavailable.] }
+
+There are `{python} len(points)` observations. The means and fitted coefficients
+are almost the same across the four series. Inspecting only this table would
+hide the main differences.
+
+== Graphical check
+
+The panels share their scales; the grey lines are the precomputed least-squares
+fits, not new calculations performed by the graphics package.
+
+```{python}
+from plotnine import ggplot, aes, geom_line, geom_point, facet_wrap, coord_cartesian, labs, theme_minimal
+plot = (ggplot(points, aes("x", "y"))
+    + geom_line(data=pd.DataFrame(lines), color="#64748b", size=0.6)
+    + geom_point(color="#176b87", size=2)
+    + facet_wrap("series", ncol=2)
+    + coord_cartesian(xlim=(3, 20), ylim=(2, 14))
+    + labs(x="x", y="y") + theme_minimal(base_size=11))
+typst(plot)
+del plot
+```
+
+#interpretation

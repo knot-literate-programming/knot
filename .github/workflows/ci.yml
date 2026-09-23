@@ -54,7 +54,7 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          pip install pandas matplotlib
+          python -m pip install -r examples/anscombe/requirements.txt
 
       - name: Install system dependencies (Linux only)
         if: runner.os == 'Linux'

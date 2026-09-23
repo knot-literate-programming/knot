@@ -1,0 +1,12 @@
+#import "lib/report.typ": *
+#show: report
+
+#text(size: 24pt, weight: "bold")[Anscombe: when a calculation fails]
+
+This companion deliberately contains runtime errors. It is excluded from the
+successful reference build. A failed chain must stop without preventing the
+other language from progressing. The generated Typst document contains the
+diagnostics. A generated PDF can contain runtime errors: its existence alone
+is not evidence of a successful scientific calculation.
+
+/* KNOT-INJECT-CHAPTERS */

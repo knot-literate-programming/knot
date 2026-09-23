@@ -1,0 +1,11 @@
+# Copy over knot.toml in a disposable copy of this example.
+[document]
+main = "errors-main.knot"
+includes = ["anscombe-errors.knot"]
+
+[execution]
+timeout-secs = 120
+
+[chunk-defaults]
+show = "both"
+layout = "vertical"

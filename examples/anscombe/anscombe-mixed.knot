@@ -1,0 +1,97 @@
+#pagebreak()
+= R and Python, drawn by Gribouille
+
+== Question and data
+
+Repeat the same analysis, assigning series I–II to R and III–IV to Python.
+Both chains read the input independently; the document order does not impose
+an execution order between languages.
+
+```{r}
+#| show: both
+#| depends: [data/anscombe.csv]
+points <- read.csv("data/anscombe.csv")
+points <- subset(points, series %in% c("I", "II"))
+```
+
+```{python}
+#| show: both
+#| depends: [data/anscombe.csv]
+import pandas as pd
+points = pd.read_csv("data/anscombe.csv")
+points = points[points["series"].isin(["III", "IV"])]
+```
+
+```{r}
+#| show: none
+summaries <- do.call(rbind, lapply(split(points, points$series), function(d) {
+  model <- lm(y ~ x, data = d)
+  data.frame(series = d$series[1], n = nrow(d),
+    mean_x = mean(d$x), mean_y = mean(d$y),
+    var_x = var(d$x), var_y = var(d$y),
+    slope = unname(coef(model)[2]), intercept = unname(coef(model)[1]),
+    r_squared = summary(model)$r.squared)
+}))
+lines <- do.call(rbind, lapply(seq_len(nrow(summaries)), function(i) {
+  s <- summaries[i, ]
+  data.frame(series = s$series, x = c(3, 20),
+    y = s$intercept + s$slope * c(3, 20))
+}))
+export_data(summaries, "mixed-r-summary")
+export_data(points, "mixed-r-points")
+export_data(lines, "mixed-r-lines")
+```
+
+```{python}
+#| show: none
+summaries = []
+lines = []
+for series, d in points.groupby("series", sort=True):
+    x, y = d["x"], d["y"]
+    slope = float(((x - x.mean()) * (y - y.mean())).sum() / ((x - x.mean()) ** 2).sum())
+    intercept = float(y.mean() - slope * x.mean())
+    summaries.append(dict(series=series, n=len(d), mean_x=float(x.mean()),
+        mean_y=float(y.mean()), var_x=float(x.var(ddof=1)), var_y=float(y.var(ddof=1)),
+        slope=slope, intercept=intercept, r_squared=float(x.corr(y) ** 2)))
+    lines.extend(dict(series=series, x=t, y=intercept + slope * t) for t in (3, 20))
+export_data(summaries, "mixed-python-summary")
+export_data(points.to_dict(orient="records"), "mixed-python-points")
+export_data(lines, "mixed-python-lines")
+```
+
+== Numerical summary
+
+#if ("mixed-r-summary", "mixed-python-summary").all(key => key in knot-data) {
+  results-table(knot-data.at("mixed-r-summary") + knot-data.at("mixed-python-summary"))
+} else { [Results pending or unavailable.] }
+
+R handles `{r} nrow(points)` observations and Python handles `{python} len(points)`.
+The means, variances and regression coefficients use the same definitions as
+in the previous variants.
+
+== Graphical check
+
+#import "@preview/gribouille:0.7.0" as gg
+
+#if ("mixed-r-points", "mixed-python-points", "mixed-r-lines", "mixed-python-lines").all(key => key in knot-data) {
+  let points = knot-data.at("mixed-r-points") + knot-data.at("mixed-python-points")
+  let lines = knot-data.at("mixed-r-lines") + knot-data.at("mixed-python-lines")
+  gg.plot(
+    data: points,
+    mapping: gg.aes(x: "x", y: "y"),
+    layers: (
+      gg.geom-line(data: lines, colour: rgb("#64748b"), stroke: 0.6pt),
+      gg.geom-point(colour: rgb("#176b87"), size: 2pt),
+    ),
+    facet: gg.facet-wrap("series", ncolumn: 2),
+    coord: gg.coord-cartesian(x-limits: (3, 20), y-limits: (2, 14)),
+    labels: gg.labels(x: "x", y: "y"),
+    theme: gg.theme-minimal(), width: 16cm, height: 10cm,
+  )
+} else { [Figure pending: the required exports are unavailable.] }
+
+#v(12pt)
+#interpretation
+
+*One drawing layer.* Gribouille receives the same row structure from both
+languages. Its role here is graphical composition; it does not estimate a model.

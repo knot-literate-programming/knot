@@ -311,3 +311,6 @@ Exported values: #knot-data.at("r-values")
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[path = "integration_pdf/anscombe.rs"]
+mod anscombe;

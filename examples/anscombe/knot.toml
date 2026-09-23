@@ -1,0 +1,13 @@
+[document]
+main = "main.knot"
+includes = ["anscombe-r.knot", "anscombe-python.knot", "anscombe-mixed.knot"]
+
+[execution]
+timeout-secs = 120
+
+[chunk-defaults]
+show = "output"
+layout = "vertical"
+fig-width = 7.0
+fig-height = 4.5
+fig-format = "svg"
