@@ -168,37 +168,44 @@ When you declare `freeze: [model, training_data]`, Knot:
 
 1. **Serialises** each named object into content-addressed storage
    (`.knot_cache/objects/{hash}.ext`) immediately after the chunk executes.
-2. **Excludes** those objects from all subsequent snapshots, keeping them
-   lightweight.
-3. **Reloads** the objects separately after every snapshot restore — so the
-   interpreter always has them available.
+2. **Excludes** their named bindings from subsequent snapshots, while leaving
+   the objects in the live interpreter. Saving a snapshot does not remove or
+   reload them.
+3. **Reloads** the objects separately when restoring a cached snapshot, including
+   when resuming execution after correcting an error.
 
-The objects are still serialised and deserialised; the gain is that snapshots
-themselves stay small and fast to write and read, and the objects live on disk
-only once regardless of how many chunks follow.
+This avoids repeating the named objects in each snapshot and reloading them after
+successful chunks. Contract checks still fingerprint their contents and can
+require serialization.
+
+Exclusion is by name, not a traversal of every reference: an alias or a container
+that references a frozen object can still serialize its contents. Shared identity
+between a frozen object and other snapshot objects is not guaranteed after a
+restore. Use independent serializable values for frozen data.
 
 ### The immutability contract
 
-In exchange, Knot computes an [xxHash64](https://xxhash.com/) fingerprint of each
-frozen object immediately after declaration. After every subsequent chunk in the
+In exchange, Knot computes a fingerprint of each frozen object immediately after
+declaration (xxHash64 in R; xxHash64 in Python when available, otherwise SHA-256). After every subsequent chunk in the
 same language chain that must re-execute, Knot recomputes the fingerprints and
 compares them against the stored values. If they differ — meaning some downstream
 code accidentally modified them — Knot marks the violation and suspends execution
 of the rest of the chain, surfacing the error in the preview and in VS Code
 diagnostics.
 
-This gives you a **compile-time contract**: "these objects must not change after
-this point." If they do, you find out immediately, not after you have published the
-document.
-
-xxHash64 was chosen for its speed: it can fingerprint hundreds of megabytes per
-second, making it practical even for large in-memory objects.
+This gives you a **runtime stability contract**: the serialized state of these
+objects must remain unchanged at execution boundaries. It detects a changed final
+state, not a temporary mutation that a chunk undoes before the check.
 
 ### When to use freeze
 
 Use `freeze` when an object is **large and immutable** after its creation chunk —
 a trained model, a loaded dataset, a precomputed matrix. Do not use it for objects
 that downstream chunks are expected to modify.
+
+Split independent analyses into separate `.knot` files to keep their workspaces
+small: each file has its own interpreter sessions and freeze declarations.
+Exchange data explicitly through files and declared dependencies where needed.
 
 ---
 

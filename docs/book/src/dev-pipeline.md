@@ -54,13 +54,17 @@ group_by_language(planned_nodes)
 
 Within each `run_language_chain`:
 
-1. Iterate over `MustExecute` nodes in document order.
-2. For each node, call the executor (`RExecutor` or `PythonExecutor`).
-3. Write the result to cache (success or error).
-4. If the result is an error, all subsequent nodes in the chain become `Inert`
-   (interpreter state is uncertain).
-5. If `freeze` objects are declared, `check_freeze_contract` is called after
-   each subsequent `MustExecute` node — a hash mismatch also cascades `Inert`.
+1. Traverse nodes in document order, reusing cached results where possible.
+2. Before a `MustExecute` node, restore the preceding valid snapshot if needed,
+   including its frozen objects, then execute the node.
+3. Runtime errors stop subsequent nodes of that language (`Inert`). A successful
+   execution is checked against the active freeze contracts before any success is
+   cached; a violation also cascades `Inert`.
+4. Register new freeze declarations, then save a snapshot with
+   `save_session_excluding`: R uses an explicit `save(list = ..., envir = .GlobalEnv)`
+   selection; Python filters the state dictionary before serialization. Neither
+   helper removes or reloads live bindings.
+5. Record the snapshot's frozen bindings and cache the successful result.
 
 The `ExecutorManager` uses a take/put-back pattern so executors can be moved
 into threads without lifetime issues.

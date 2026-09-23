@@ -275,8 +275,14 @@ pub trait LanguageExecutor: Send + Sync {
 
 /// Combined trait for language executors that support caching and constant objects
 pub trait KnotExecutor: LanguageExecutor + ConstantObjectHandler + Send + Sync {
-    /// Save the current environment session to a file
-    fn save_session(&mut self, path: &Path) -> Result<()>;
+    /// Save the current environment session to a file.
+    fn save_session(&mut self, path: &Path) -> Result<()> {
+        self.save_session_excluding(path, &[])
+    }
+
+    /// Save a session without the named bindings, leaving the live environment intact.
+    /// Objects reachable through other bindings may still be serialized.
+    fn save_session_excluding(&mut self, path: &Path, excluded: &[String]) -> Result<()>;
 
     /// Load an environment session from a file
     fn load_session(&mut self, path: &Path) -> Result<()>;
@@ -323,11 +329,6 @@ pub trait ConstantObjectHandler: Send + Sync {
     ///
     /// Restores the object into the language environment
     fn load_constant(&mut self, object_name: &str, hash: &str, cache_dir: &Path) -> Result<()>;
-
-    /// Remove an object from the language environment
-    ///
-    /// Used to exclude constant objects from environment snapshots
-    fn remove_from_env(&mut self, object_name: &str) -> Result<()>;
 
     /// File extension for serialized objects (.rds, .pkl, .jls)
     fn object_extension(&self) -> &'static str;

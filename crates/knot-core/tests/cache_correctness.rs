@@ -490,3 +490,60 @@ fn batch_and_streaming_compilation_produce_the_same_output_and_cache() {
         assert_eq!(compile(&mut reloaded, &source), batch_output);
     }
 }
+
+#[test]
+#[ignore = "requires R and Python"]
+fn frozen_state_recovers_after_contract_and_runtime_errors() {
+    for (lang, create, mutate, fail, repaired, consume) in [
+        (
+            "python",
+            "x = [1, 2]",
+            "x.append(3)",
+            "x.append(3)\nraise ValueError('intentional')",
+            "y = 5",
+            "print(sum(x) + y)",
+        ),
+        (
+            "r",
+            "x <- c(1, 2)",
+            "x <- c(x, 3)",
+            "x <- c(x, 3)\nstop('intentional')",
+            "y <- 5",
+            "print(sum(x) + y)",
+        ),
+    ] {
+        for bad in [mutate, fail] {
+            let (_root, path, mut compiler) = fixture();
+            let source = format!(
+                "```{{{lang} setup}}\n#| freeze: [x]\n{create}\n```\n```{{{lang} work}}\n{bad}\n```\n```{{{lang} result}}\n{consume}\n```"
+            );
+            let output = compile(&mut compiler, &source);
+            assert!(
+                output.contains(if bad == mutate {
+                    "Freeze contract violated"
+                } else {
+                    "intentional"
+                }),
+                "{output}"
+            );
+            assert!(output.contains("is-inert: true"), "{output}");
+            let fixed = source.replace(bad, repaired);
+            let mut resumed = Compiler::new(&path).unwrap();
+            assert_eq!(hits(&plan(&mut resumed, &fixed)), [true, false, false]);
+            let recovered = compile(&mut resumed, &fixed);
+            let (_fresh, _, mut cold) = fixture();
+            assert_eq!(recovered, compile(&mut cold, &fixed));
+            assert!(!recovered.contains("is-inert: true"));
+            assert_eq!(hits(&plan(&mut resumed, &fixed)), [true, true, true]);
+        }
+    }
+}
+
+#[test]
+#[ignore = "requires Python"]
+fn frozen_python_alias_stays_live_and_its_mutation_is_detected() {
+    let (_root, _, mut compiler) = fixture();
+    let source = "```{python}\n#| freeze: [x]\nx = [1, 2]\nalias = x\n```\n```{python}\nassert alias is x\nalias.append(3)\n```";
+    let result = compile(&mut compiler, source);
+    assert!(result.contains("Freeze contract violated"), "{result}");
+}
