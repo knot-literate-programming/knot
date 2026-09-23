@@ -149,3 +149,30 @@ typst.default <- function(obj, ...) {
 
   invisible(df)
 }
+
+# Export JSON data for Typst without rendering a table or other visible output.
+# Data frames become arrays of records; NA values become JSON null.
+export_data <- function(data, name) {
+  if (!is.character(name) || length(name) != 1L || is.na(name) || !nzchar(name)) {
+    stop("export_data name must be a non-empty string")
+  }
+  if (!nzchar(Sys.getenv("KNOT_METADATA_FILE"))) {
+    stop("export_data must run inside a Knot chunk")
+  }
+  payload <- enc2utf8(as.character(jsonlite::toJSON(
+    data, dataframe = "rows", auto_unbox = TRUE, null = "null", na = "null", digits = NA
+  )))
+  hash <- digest::digest(payload, algo = "sha256", serialize = FALSE)
+  filepath <- file.path(.get_base_dir(), paste0("data_r_", hash, ".json"))
+  bytes <- charToRaw(payload)
+  # Do not rewrite valid files that an in-progress preview may already read.
+  if (!file.exists(filepath) ||
+      !identical(readBin(filepath, "raw", n = file.info(filepath)$size), bytes)) {
+    writeBin(bytes, filepath)
+  }
+  .write_metadata(list(
+    type = "dataexport", name = name,
+    path = normalizePath(filepath, mustWork = TRUE)
+  ))
+  invisible(NULL)
+}

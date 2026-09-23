@@ -130,11 +130,22 @@ impl Cache {
     ) -> Result<()> {
         let files_to_cache = storage::save_result(&self.cache_dir, &hash, output)?;
 
+        let mut exports = output.exports.clone();
+        for export in &mut exports {
+            let filename = export.path.file_name().context("Export has no filename")?;
+            if export.path.canonicalize()? != self.cache_dir.join(filename).canonicalize()? {
+                anyhow::bail!("Data export must be inside the chunk cache");
+            }
+            export.path = filename.into();
+        }
+
         let file_hashes = files_to_cache
             .iter()
+            .map(PathBuf::from)
+            .chain(exports.iter().map(|export| export.path.clone()))
             .map(|file| {
                 Ok((
-                    file.clone(),
+                    file.to_string_lossy().into_owned(),
                     hashing::hash_file(&self.cache_dir.join(file))?,
                 ))
             })
@@ -143,6 +154,7 @@ impl Cache {
         // Record successful execution even when there are no output files.
         self.save_chunk_entry(ChunkCacheEntry {
             files: files_to_cache,
+            exports,
             file_hashes,
             warnings: output.warnings.clone(),
             ..Self::chunk_entry(chunk_index, chunk_name, language, hash, dependencies)
@@ -162,6 +174,7 @@ impl Cache {
             language,
             hash,
             files: Vec::new(),
+            exports: Vec::new(),
             file_hashes: Default::default(),
             warnings: Vec::new(),
             error: None,
@@ -347,6 +360,7 @@ mod tests {
         let mut cache = Cache::new(root.path().to_path_buf()).unwrap();
         let output = ExecutionOutput {
             result: ExecutionResult::Text("answer".into()),
+            exports: Vec::new(),
             warnings: vec![],
         };
         cache

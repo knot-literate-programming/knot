@@ -87,25 +87,29 @@ pub fn get_cached_result(
         return Ok(ExecutionAttempt::RuntimeError(error));
     }
 
-    // Handle chunks with no output files (e.g., assignments without print)
-    if entry.files.is_empty() {
-        return Ok(ExecutionAttempt::Success(ExecutionOutput {
-            result: ExecutionResult::Text(String::new()),
-            warnings: entry.warnings.clone(),
-        }));
-    }
-
-    // Verify all files exist
-    for file in &entry.files {
-        let path = cache_dir.join(file);
+    // Exports are independent of visible results, including export-only chunks.
+    for file in entry
+        .files
+        .iter()
+        .map(Path::new)
+        .chain(entry.exports.iter().map(|e| e.path.as_path()))
+    {
         let expected = entry
             .file_hashes
-            .get(file)
-            .ok_or_else(|| anyhow!("Missing cache checksum: {}", file))?;
-        if super::hashing::hash_file(&path)? != *expected {
-            return Err(anyhow!("Cache file changed: {:?}", path));
+            .get(&file.to_string_lossy().into_owned())
+            .ok_or_else(|| anyhow!("Missing cache checksum: {}", file.display()))?;
+        if super::hashing::hash_file(&cache_dir.join(file))? != *expected {
+            return Err(anyhow!("Cache file changed: {}", file.display()));
         }
     }
+    let exports = entry
+        .exports
+        .iter()
+        .map(|export| crate::executors::DataExport {
+            name: export.name.clone(),
+            path: cache_dir.join(&export.path),
+        })
+        .collect();
 
     // Classify a cached file path by its extension
     fn file_type(path: &Path) -> &'static str {
@@ -123,6 +127,7 @@ pub fn get_cached_result(
     //   TextAndPlot           → [txt, plot]
     //   DataFrameAndPlot      → [csv, plot]
     let result = match entry.files.as_slice() {
+        [] => ExecutionResult::Text(String::new()),
         [single] => {
             let path = cache_dir.join(single);
             match file_type(&path) {
@@ -158,6 +163,7 @@ pub fn get_cached_result(
 
     Ok(ExecutionAttempt::Success(ExecutionOutput {
         result,
+        exports,
         warnings: entry.warnings.clone(),
     }))
 }

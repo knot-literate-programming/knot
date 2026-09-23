@@ -380,6 +380,7 @@ fn execute_for_node(
 
             Ok(ExecutionAttempt::Success(ExecutionOutput {
                 result: ExecutionResult::Text(final_result),
+                exports: Vec::new(),
                 warnings: vec![],
             }))
         }

@@ -255,3 +255,59 @@ fn snapshot_warning_renders_to_pdf_and_global_flag_reexecutes() {
         source
     );
 }
+
+#[test]
+#[ignore = "requires Typst, R with jsonlite/digest, and Python"]
+fn named_exports_are_readable_by_typst_and_duplicate_names_fail() {
+    let root = tempfile::tempdir().unwrap();
+    fs::write(
+        root.path().join("knot.toml"),
+        "[document]\nmain = 'main.knot'\n",
+    )
+    .unwrap();
+    let source = r#"
+```{r}
+#| show: none
+export_data(data.frame(x = c(1, 2), y = c(3, 4)), "r-values")
+```
+```{python}
+#| show: none
+export_data([{"x": 1, "y": 3}, {"x": 2, "y": 4}], "python-values")
+```
+#assert.eq(knot-data.at("r-values"), knot-data.at("python-values"))
+#assert.eq(knot-data.at("r-values").at(1).y, 4)
+Exported values: #knot-data.at("r-values")
+"#;
+    fs::write(root.path().join("main.knot"), source).unwrap();
+    let run = || {
+        Command::new(env!("CARGO_BIN_EXE_knot"))
+            .args(["build", "--no-snapshots"])
+            .current_dir(root.path())
+            .output()
+            .unwrap()
+    };
+    let output = run();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        fs::read(root.path().join("main.pdf"))
+            .unwrap()
+            .starts_with(b"%PDF-")
+    );
+    // A collision across languages must not silently replace another dataset.
+    fs::write(
+        root.path().join("main.knot"),
+        source.replace("\"python-values\"", "\"r-values\""),
+    )
+    .unwrap();
+    let output = run();
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("Duplicate Knot data export"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

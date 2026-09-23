@@ -304,6 +304,7 @@ fn planning_classifies_hits_misses_skips_and_cascade_without_interpreters() {
                 node.hash.clone(),
                 &ExecutionOutput {
                     result: ExecutionResult::Text("result".into()),
+                    exports: Vec::new(),
                     warnings: vec![],
                 },
                 vec![],

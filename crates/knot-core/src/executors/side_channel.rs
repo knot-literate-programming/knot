@@ -21,6 +21,8 @@ pub enum OutputMetadata {
     },
     /// A DataFrame that was serialized to CSV
     DataFrame { path: PathBuf },
+    /// A named JSON dataset for Typst, separate from visible output.
+    DataExport { name: String, path: PathBuf },
     /// Plain text output (fallback)
     Text { content: String },
 }
