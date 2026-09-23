@@ -164,11 +164,18 @@ export_data <- function(data, name) {
   )))
   hash <- digest::digest(payload, algo = "sha256", serialize = FALSE)
   filepath <- file.path(.get_base_dir(), paste0("data_r_", hash, ".json"))
+  # Rust canonical paths use the Windows extended-length prefix. Such paths
+  # cannot contain the forward slash that file.path() appends by default.
+  if (.Platform$OS.type == "windows") {
+    filepath <- chartr("/", "\\", filepath)
+  }
   bytes <- charToRaw(payload)
   # Do not rewrite valid files that an in-progress preview may already read.
   if (!file.exists(filepath) ||
       !identical(readBin(filepath, "raw", n = file.info(filepath)$size), bytes)) {
-    writeBin(bytes, filepath)
+    tryCatch(writeBin(bytes, filepath), error = function(e) {
+      stop(sprintf("Cannot export data to %s: %s", filepath, conditionMessage(e)))
+    })
   }
   .write_metadata(list(
     type = "dataexport", name = name,

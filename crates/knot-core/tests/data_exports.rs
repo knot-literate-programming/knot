@@ -84,7 +84,7 @@ export_data({"label": "été", "empty": []}, "python-extra")
 "#;
     fs::write(root.join("chapter.knot"), source).unwrap();
     let first = build(&root);
-    assert!(first.contains("json(\"_knot_files/"));
+    assert!(first.contains("json(\"_knot_files"));
     assert!(!first.contains(".build-"));
     let expected = serde_json::json!([{"x":1,"y":3},{"x":2,"y":4}]);
     let cache_dir = get_cache_dir(&root, root.join("chapter.knot"));
@@ -178,7 +178,11 @@ fn failed_and_cancelled_chunks_do_not_publish_exports() {
         .unwrap();
         let build = ProjectBuild::prepare(&root, &HashMap::new(), Cancellation::default()).unwrap();
         let output = build.compile(None).unwrap();
-        assert!(output.typ_content.contains("deliberate failure"));
+        assert!(
+            output.typ_content.contains("deliberate failure"),
+            "{}",
+            output.typ_content
+        );
         assert!(
             !output.typ_content.contains("json(\""),
             "failed chunk must discard exports"
