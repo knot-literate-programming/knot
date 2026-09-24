@@ -26,6 +26,14 @@ pub mod side_channel;
 /// Spawns two threads, one per stream, and waits for both with the given timeout.
 /// Returns `Some((stdout, stderr, reader_out, reader_err))` on success,
 /// or `None` if either stream does not produce a boundary within `timeout`.
+/// Time allowed for an interpreter to start: the chunk timeout, but never
+/// less than [`Defaults::INTERPRETER_STARTUP_TIMEOUT_SECS`](crate::Defaults).
+pub(crate) fn startup_timeout(chunk_timeout: Duration) -> Duration {
+    chunk_timeout.max(Duration::from_secs(
+        crate::Defaults::INTERPRETER_STARTUP_TIMEOUT_SECS,
+    ))
+}
+
 pub(crate) fn read_streams_until_boundary(
     stdout: BufReader<ChildStdout>,
     stderr: BufReader<ChildStderr>,
@@ -300,4 +308,17 @@ pub trait KnotExecutor: LanguageExecutor + Send + Sync {
 
     /// File extension for environment snapshots (.RData, .pkl, .jls)
     fn snapshot_extension(&self) -> &'static str;
+}
+
+#[cfg(test)]
+mod startup_tests {
+    use super::*;
+
+    #[test]
+    fn startup_is_never_limited_by_a_short_chunk_timeout() {
+        let short = Duration::from_millis(500);
+        let long = Duration::from_secs(600);
+        assert_eq!(startup_timeout(short), Duration::from_secs(60));
+        assert_eq!(startup_timeout(long), long);
+    }
 }

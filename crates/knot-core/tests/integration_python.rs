@@ -242,7 +242,7 @@ fn test_python_timeout() {
     assert!(result.is_err(), "Execution should fail with timeout error");
     let err_msg = result.unwrap_err().to_string();
     assert!(
-        err_msg.contains("timed out"),
+        err_msg.contains("timed out after 500ms"),
         "Error should mention timeout, got: {}",
         err_msg
     );

@@ -85,7 +85,7 @@ impl RProcess {
         self.child = Some(child);
         self._helper_file = Some(temp_file);
 
-        let _ = self.read_until_boundary()?;
+        self.during_startup(|process| process.read_until_boundary().map(drop))?;
 
         // NOW start the main loop which will wait for code on stdin
         let stdin = self.stdin.as_mut().unwrap();
@@ -118,12 +118,18 @@ impl RProcess {
             }
             None => {
                 self.terminate();
-                Err(anyhow!(
-                    "R execution timed out after {} seconds",
-                    self.timeout.as_secs()
-                ))
+                Err(anyhow!("R execution timed out after {:?}", self.timeout))
             }
         }
+    }
+
+    /// Run `f` with the startup timeout instead of the chunk timeout.
+    pub fn during_startup<T>(&mut self, f: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+        let chunk_timeout = self.timeout;
+        self.timeout = crate::executors::startup_timeout(chunk_timeout);
+        let result = f(self).with_context(|| format!("R did not start within {:?}", self.timeout));
+        self.timeout = chunk_timeout;
+        result
     }
 
     /// Terminate the R process

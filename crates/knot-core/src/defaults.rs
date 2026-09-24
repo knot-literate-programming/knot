@@ -108,6 +108,11 @@ impl Defaults {
     /// Default timeout (in seconds) for R/Python chunk execution.
     /// Overridable via `[execution] timeout-secs` in knot.toml.
     pub const DEFAULT_EXECUTION_TIMEOUT_SECS: u64 = 30;
+
+    /// Minimum time allowed for an interpreter to start and load the Knot
+    /// helpers. Startup is not governed by the per-chunk timeout: a short
+    /// `timeout-secs` must not prevent R or Python from starting on a slow machine.
+    pub const INTERPRETER_STARTUP_TIMEOUT_SECS: u64 = 60;
 }
 
 #[cfg(test)]

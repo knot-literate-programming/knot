@@ -60,10 +60,14 @@ impl LanguageExecutor for PythonExecutor {
         self.process.initialize()?;
 
         // Execute all helper scripts to define functions like typst() in the global scope
-        for (_name, content) in crate::PYTHON_HELPERS {
-            self.query(content)?;
-        }
-        self.query("_knot_initial_bindings = globals().copy()")?;
+        self.process.during_startup(|process| {
+            let helpers = crate::PYTHON_HELPERS.iter().map(|(_, content)| *content);
+            for code in helpers.chain(["_knot_initial_bindings = globals().copy()"]) {
+                process.execute_code(code)?;
+                process.read_until_boundary()?;
+            }
+            Ok(())
+        })?;
         log::info!("✓ Loaded knot Python helper scripts");
 
         Ok(())

@@ -134,11 +134,21 @@ impl PythonProcess {
             None => {
                 self.terminate();
                 Err(anyhow!(
-                    "Python execution timed out after {} seconds",
-                    self.timeout.as_secs()
+                    "Python execution timed out after {:?}",
+                    self.timeout
                 ))
             }
         }
+    }
+
+    /// Run `f` with the startup timeout instead of the chunk timeout.
+    pub fn during_startup<T>(&mut self, f: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+        let chunk_timeout = self.timeout;
+        self.timeout = crate::executors::startup_timeout(chunk_timeout);
+        let result =
+            f(self).with_context(|| format!("Python did not start within {:?}", self.timeout));
+        self.timeout = chunk_timeout;
+        result
     }
 
     pub fn terminate(&mut self) {
