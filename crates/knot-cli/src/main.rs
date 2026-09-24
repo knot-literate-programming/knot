@@ -99,8 +99,20 @@ fn main() -> Result<()> {
             build_project_with_options(None, *no_snapshots)?;
         }
         Commands::Clean => {
-            knot_core::clean_project(None)?;
-            println!("\n✅ Project cleaned successfully!");
+            let summary = knot_core::clean_project_with_summary(None)?;
+            if summary.files == 0 {
+                println!("Nothing to clean.");
+            } else if summary.unreadable_indexes > 0 {
+                println!(
+                    "Cleaned project: {} files removed; chunk count unavailable ({} unreadable cache indexes).",
+                    summary.files, summary.unreadable_indexes
+                );
+            } else {
+                println!(
+                    "Cleaned project: {} cached chunks invalidated, {} files removed.",
+                    summary.chunks, summary.files
+                );
+            }
         }
         Commands::Format { file, check } => {
             let changed =

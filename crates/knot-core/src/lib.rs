@@ -18,6 +18,7 @@
 pub mod backend;
 pub mod cache;
 pub mod cancellation;
+mod cleaning;
 pub mod compiler;
 pub mod config;
 pub mod defaults;
@@ -29,6 +30,7 @@ pub mod path_utils;
 pub mod project;
 
 pub use backend::{format_codly_call, format_local_call};
+pub use cleaning::{CleanSummary, clean_project, clean_project_with_summary};
 pub use compiler::Compiler;
 pub use compiler::formatters::CodeFormatter;
 pub use compiler::sync;
@@ -94,8 +96,6 @@ pub static SCRIPTS_VERSION: once_cell::sync::Lazy<String> = once_cell::sync::Laz
     format!("{:x}", hasher.finalize())[..16].to_string()
 });
 
-use anyhow::{Context, Result};
-use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Return a versioned cache directory keyed by the complete document path.
@@ -118,96 +118,4 @@ pub fn get_cache_dir(project_root: &Path, document_path: impl AsRef<Path>) -> Pa
         .join(Defaults::CACHE_DIR_NAME)
         .join("v2")
         .join(key)
-}
-
-/// Clean project (remove cache and generated files)
-///
-/// # Arguments
-/// * `start_path` - Optional path (file or directory) to start searching for knot.toml.
-///   If a file is provided, starts searching from its parent directory.
-///   If None, uses current working directory.
-pub fn clean_project(start_path: Option<&Path>) -> Result<()> {
-    use log::info;
-
-    info!("🧹 Cleaning project...");
-
-    // 1. Find project root (handles both files and directories)
-    let search_path = if let Some(path) = start_path {
-        path.to_path_buf()
-    } else {
-        std::env::current_dir().context("Failed to get current directory")?
-    };
-
-    let project_root = config::Config::find_project_root(&search_path)?;
-
-    info!("📁 Project root: {}", project_root.display());
-
-    // 2. Remove .knot_cache directory
-    let cache_dir = project_root.join(Defaults::CACHE_DIR_NAME);
-    if cache_dir.exists() {
-        fs::remove_dir_all(&cache_dir)
-            .with_context(|| format!("Failed to remove cache directory: {:?}", cache_dir))?;
-        info!(
-            "  ✓ Removed cache directory: {:?}",
-            Defaults::CACHE_DIR_NAME
-        );
-    }
-
-    // 3. Remove _knot_files directory
-    let r_files_dir = project_root.join(Defaults::LANGUAGE_FILES_DIR);
-    if r_files_dir.exists() {
-        fs::remove_dir_all(&r_files_dir).with_context(|| {
-            format!("Failed to remove helper files directory: {:?}", r_files_dir)
-        })?;
-        info!(
-            "  ✓ Removed helper files directory: {:?}",
-            Defaults::LANGUAGE_FILES_DIR
-        );
-    }
-
-    // 4. Remove generated .typ and .pdf files
-    // Read knot.toml to get the main filename and derive stem
-    let (config, _) = config::Config::find_and_load(&project_root)?;
-    if let Some(main_file_name) = config.document.main {
-        let main_stem = Path::new(&main_file_name)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("main");
-
-        // Remove {stem}.typ and {stem}.pdf (e.g., main.typ, main.pdf)
-        let typ_file = project_root.join(format!("{}.typ", main_stem));
-        let pdf_file = project_root.join(format!("{}.pdf", main_stem));
-
-        if typ_file.exists() {
-            fs::remove_file(&typ_file)
-                .with_context(|| format!("Failed to remove file: {:?}", typ_file))?;
-            info!("  ✓ Removed {}.typ", main_stem);
-        }
-
-        if pdf_file.exists() {
-            fs::remove_file(&pdf_file)
-                .with_context(|| format!("Failed to remove file: {:?}", pdf_file))?;
-            info!("  ✓ Removed {}.pdf", main_stem);
-        }
-    }
-
-    // Also remove any hidden .*.typ and .*.pdf files (legacy or intermediate files)
-    let entries = fs::read_dir(&project_root)?;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let filename = path.file_name().and_then(|n| n.to_str());
-
-        match (path.is_file(), filename) {
-            (true, Some(name))
-                if name.starts_with('.') && (name.ends_with(".typ") || name.ends_with(".pdf")) =>
-            {
-                fs::remove_file(&path)
-                    .with_context(|| format!("Failed to remove file: {:?}", path))?;
-                info!("  ✓ Removed legacy file: {}", name);
-            }
-            _ => {}
-        }
-    }
-
-    Ok(())
 }
