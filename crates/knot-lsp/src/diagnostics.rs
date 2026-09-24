@@ -16,6 +16,14 @@ use knot_core::get_cache_dir;
 use knot_core::parser::parse_document;
 use tower_lsp::lsp_types::*;
 
+/// The PDF renders the same severity (red error or yellow warning).
+fn lsp_severity(severity: knot_core::parser::ast::Severity) -> DiagnosticSeverity {
+    match severity {
+        knot_core::parser::ast::Severity::Error => DiagnosticSeverity::ERROR,
+        knot_core::parser::ast::Severity::Warning => DiagnosticSeverity::WARNING,
+    }
+}
+
 /// Generate diagnostics for a document
 pub fn get_diagnostics(uri: &Url, text: &str, include_runtime: bool) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
@@ -60,11 +68,7 @@ pub fn get_diagnostics(uri: &Url, text: &str, include_runtime: bool) -> Vec<Diag
             let line_text = text.lines().nth(target_line).unwrap_or("");
             let line_len_utf16 = line_text.encode_utf16().count() as u32;
 
-            let severity = if error.message.contains("Unknown chunk option") {
-                DiagnosticSeverity::WARNING
-            } else {
-                DiagnosticSeverity::ERROR
-            };
+            let severity = lsp_severity(error.severity);
 
             diagnostics.push(Diagnostic {
                 range: Range {
@@ -223,16 +227,12 @@ pub fn get_diagnostics(uri: &Url, text: &str, include_runtime: bool) -> Vec<Diag
     // Check for errors in inline expressions
     for inline in doc.inline_exprs {
         for error in inline.errors {
-            let start_pos = mapper.position_at_offset(inline.start);
             diagnostics.push(Diagnostic {
                 range: Range {
-                    start: start_pos,
-                    end: Position {
-                        line: start_pos.line,
-                        character: start_pos.character + 1, // Highlight `
-                    },
+                    start: mapper.position_at_offset(inline.start),
+                    end: mapper.position_at_offset(inline.end),
                 },
-                severity: Some(DiagnosticSeverity::ERROR),
+                severity: Some(lsp_severity(error.severity)),
                 source: Some("knot".to_string()),
                 message: error.message,
                 ..Diagnostic::default()
@@ -285,5 +285,23 @@ mod tests {
         assert_eq!(lines, [2, 6], "{errors:?}");
         assert!(errors[0].message.starts_with("Invalid YAML header"));
         assert!(errors[1].message.starts_with("Unclosed chunk"));
+    }
+
+    #[test]
+    fn option_diagnostics_use_their_own_severity() {
+        let uri = Url::parse("file:///main.knot").unwrap();
+        let text = "```{r}\n#| unknown-opt: 1\nx\n```\n\n```{r}\n#| eval: maybe\nx\n```\n\n`{r, foo=1} 1`\n";
+        let severities: Vec<_> = get_diagnostics(&uri, text, false)
+            .into_iter()
+            .map(|d| d.severity.unwrap())
+            .collect();
+        assert_eq!(
+            severities,
+            [
+                DiagnosticSeverity::WARNING,
+                DiagnosticSeverity::ERROR,
+                DiagnosticSeverity::WARNING
+            ]
+        );
     }
 }

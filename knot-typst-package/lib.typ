@@ -219,6 +219,18 @@
   }
 }
 
+/// Diagnostic attached to an inline expression (invalid or ignored option),
+/// placed right after its result. Errors are red, warnings yellow, matching
+/// the chunk blocks and the editor.
+#let knot-inline-diagnostic(message, error: true) = box(
+  fill: if error { rgb("#ef4444") } else { rgb("#fff4ce") },
+  stroke: if error { 0.5pt + rgb("#b91c1c") } else { 0.5pt + rgb("#facc15") },
+  inset: (x: 3pt),
+  outset: (y: 2pt),
+  radius: 2pt,
+  text(fill: if error { white } else { rgb("#854d0e") }, size: 0.8em, message),
+)
+
 /// Presentation replacement: shows code on overlay 1, output on overlay 2
 /// at the same position. Override with touying's `alternatives` after import:
 ///   #let knot-replace(code: none, output: none, ..rest) = alternatives(

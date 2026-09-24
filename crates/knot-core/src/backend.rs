@@ -83,13 +83,14 @@ impl Backend for TypstBackend {
                 "#assert(not ({name} in knot-data), message: \"Duplicate Knot data export: \" + {name})\n#let knot-data = knot-data + (({name}): json(\"{path}\"),)\n"
             ));
         }
-        if matches!(resolved_options.show, Show::None) {
+        // `show: none` hides code and output, never diagnostics about the chunk.
+        if matches!(resolved_options.show, Show::None) && chunk.errors.is_empty() {
             return exports;
         }
 
         let mut args = vec![];
         push_base_args(chunk, state, &mut args);
-        push_warnings_arg(output, resolved_options, &mut args);
+        push_warnings_arg(chunk, output, resolved_options, &mut args);
         push_code_arg(chunk, codly_options, resolved_options, &mut args);
         push_output_arg(output, resolved_options, &mut args);
         push_presentation_args(resolved_options, &mut args);
@@ -130,49 +131,53 @@ fn push_base_args(chunk: &Chunk, state: &ChunkExecutionState, args: &mut Vec<Str
         ChunkExecutionState::Ready => {}
     }
 
-    if !chunk.errors.is_empty() {
-        let mut error_list = chunk
-            .errors
-            .iter()
-            .map(|e| text_content(&e.message))
-            .collect::<Vec<_>>()
-            .join(", ");
-        // In Typst, (item,) is a single-element array.
-        if chunk.errors.len() == 1 {
-            error_list.push(',');
-        }
-        args.push(format!("errors: ({})", error_list));
+    let errors: Vec<_> = chunk
+        .errors
+        .iter()
+        .filter(|e| e.is_error())
+        .map(|e| text_content(&e.message))
+        .collect();
+    if !errors.is_empty() {
+        args.push(format!("errors: {}", typst_array(&errors)));
+    }
+}
+
+/// A Typst array literal; `(item,)` is the single-element form.
+fn typst_array(items: &[String]) -> String {
+    if items.len() == 1 {
+        format!("({},)", items[0])
+    } else {
+        format!("({})", items.join(", "))
     }
 }
 
 /// Pushes the `warnings:` argument based on visibility setting.
 fn push_warnings_arg(
+    chunk: &Chunk,
     output: &ExecutionOutput,
     resolved_options: &ResolvedChunkOptions,
     args: &mut Vec<String>,
 ) {
-    if output.warnings.is_empty() {
+    // Ignored options are always reported; runtime warnings follow the
+    // `warnings-visibility` option and are hidden, like the output, by `show: none`.
+    let mut warnings: Vec<_> = chunk
+        .errors
+        .iter()
+        .filter(|e| !e.is_error())
+        .map(|e| text_content(&e.message))
+        .collect();
+    let visibility = resolved_options.warnings_visibility;
+    if !matches!(visibility, crate::parser::WarningsVisibility::None)
+        && !matches!(resolved_options.show, Show::None)
+    {
+        warnings.extend(output.warnings.iter().map(|w| text_content(&w.message)));
+    }
+    if warnings.is_empty() {
         return;
     }
-    match resolved_options.warnings_visibility {
-        crate::parser::WarningsVisibility::None => {
-            // Suppress warnings entirely
-        }
-        visibility => {
-            let mut warning_list = output
-                .warnings
-                .iter()
-                .map(|w| text_content(&w.message))
-                .collect::<Vec<_>>()
-                .join(", ");
-            if output.warnings.len() == 1 {
-                warning_list.push(',');
-            }
-            args.push(format!("warnings: ({})", warning_list));
-            if matches!(visibility, crate::parser::WarningsVisibility::Inline) {
-                args.push("warnings-position: \"inline\"".to_string());
-            }
-        }
+    args.push(format!("warnings: {}", typst_array(&warnings)));
+    if matches!(visibility, crate::parser::WarningsVisibility::Inline) {
+        args.push("warnings-position: \"inline\"".to_string());
     }
 }
 
@@ -397,6 +402,59 @@ mod tests {
             code_start_byte: 0,
             code_end_byte: 0,
         }
+    }
+
+    #[test]
+    fn option_warnings_and_errors_keep_their_severity_even_with_show_none() {
+        let backend = TypstBackend::new();
+        let output = ExecutionOutput {
+            result: ExecutionResult::Text("[1] 2".to_string()),
+            exports: Vec::new(),
+            warnings: vec![crate::executors::RuntimeWarning {
+                message: "runtime".into(),
+                call: None,
+                line: None,
+            }],
+        };
+        for show in [Show::Both, Show::None] {
+            let mut chunk = create_test_chunk("r", "1 + 1", None, show, None);
+            chunk
+                .errors
+                .push(crate::parser::ChunkError::warning("ignored option", None));
+            chunk
+                .errors
+                .push(crate::parser::ChunkError::new("invalid value", None));
+            let resolved = chunk.options.resolve();
+            let result = backend.format_chunk(
+                &chunk,
+                &chunk.codly_options,
+                &resolved,
+                &output,
+                &ChunkExecutionState::Ready,
+            );
+            assert!(
+                result.contains(r#"errors: ([#"invalid value"],)"#),
+                "{result}"
+            );
+            // Runtime warnings are output: `show: none` hides them.
+            let warnings = if show == Show::None {
+                r#"warnings: ([#"ignored option"],)"#
+            } else {
+                r#"warnings: ([#"ignored option"], [#"runtime"])"#
+            };
+            assert!(result.contains(warnings), "{result}");
+        }
+
+        let chunk = create_test_chunk("r", "1 + 1", None, Show::None, None);
+        let resolved = chunk.options.resolve();
+        let result = backend.format_chunk(
+            &chunk,
+            &chunk.codly_options,
+            &resolved,
+            &output,
+            &ChunkExecutionState::Ready,
+        );
+        assert_eq!(result, "", "a clean hidden chunk renders nothing");
     }
 
     #[test]

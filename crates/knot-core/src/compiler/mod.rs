@@ -557,6 +557,19 @@ pub fn assemble_pass(executed: &[ExecutedNode], doc: &Document, source_file: &st
             );
         } else {
             output.push_str(&node.typst_content);
+            if let Some(inline) = doc
+                .inline_exprs
+                .iter()
+                .find(|e| e.start == node.source_start)
+            {
+                for diagnostic in &inline.errors {
+                    output.push_str(&format!(
+                        "#knot-inline-diagnostic({}, error: {});",
+                        crate::typst_syntax::string_literal(&diagnostic.message),
+                        diagnostic.is_error()
+                    ));
+                }
+            }
         }
 
         // Advance past the closing fence's trailing newline for chunks.
@@ -981,6 +994,19 @@ mod tests {
         assert!(result.contains("BBB "), "Inter-node text 'BBB ' missing");
         assert!(result.contains("2"), "Inline result missing");
         assert!(result.ends_with(" CCC"), "Suffix ' CCC' missing");
+    }
+
+    #[test]
+    fn test_assemble_inline_diagnostics_follow_the_result() {
+        let source = "A `{r, foo=1} x` B";
+        let doc = Document::parse(source.into());
+        let inline = &doc.inline_exprs[0];
+        let node = make_executed_node(inline.start, inline.end, "42", false, 0);
+        let result = assemble_pass(&[node], &doc, "test.knot");
+        assert_eq!(
+            result,
+            "A 42#knot-inline-diagnostic(\"Unknown inline option: 'foo' (ignored)\", error: false); B"
+        );
     }
 
     #[test]

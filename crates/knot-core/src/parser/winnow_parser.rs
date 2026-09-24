@@ -331,35 +331,58 @@ fn parse_inline_options(options_str: &str) -> (InlineOptions, Vec<ChunkError>) {
         input = input[1..].trim();
     }
 
-    if let Ok(pairs) = parse_kv_pairs.parse_next(&mut input) {
-        for (key, value) in pairs {
-            match key {
-                "eval" => options.eval = Some(value == "true"),
-                "show" => {
-                    options.show = match value {
-                        "output" => Some(Show::Output),
-                        "code" => Some(Show::Code),
-                        "both" => Some(Show::Both),
-                        "none" => Some(Show::None),
-                        _ => {
-                            errors.push(ChunkError::new(
-                                format!("Invalid show value '{}'", value),
-                                None,
-                            ));
-                            None
-                        }
+    let options_text = input;
+    let pairs = match parse_kv_pairs.parse_next(&mut input) {
+        Ok(pairs) if input.trim().is_empty() => pairs,
+        _ => {
+            // Nothing is applied from a malformed list.
+            errors.push(ChunkError::new(
+                format!("Invalid inline options '{options_text}': expected key=value pairs"),
+                None,
+            ));
+            return (options, errors);
+        }
+    };
+    for (key, value) in pairs {
+        match key {
+            "eval" => match value {
+                "true" => options.eval = Some(true),
+                "false" => options.eval = Some(false),
+                _ => errors.push(ChunkError::new(
+                    format!("Invalid eval value '{value}' (expected true or false)"),
+                    None,
+                )),
+            },
+            "show" => {
+                options.show = match value {
+                    "output" => Some(Show::Output),
+                    "code" => Some(Show::Code),
+                    "both" => Some(Show::Both),
+                    "none" => Some(Show::None),
+                    _ => {
+                        errors.push(ChunkError::new(
+                            format!("Invalid show value '{}'", value),
+                            None,
+                        ));
+                        None
                     }
                 }
-                "digits" => {
-                    if let Ok(n) = value.parse::<u32>() {
-                        options.digits = Some(n);
-                    } else {
-                        errors.push(ChunkError::new(format!("Option 'digits': {}", value), None));
-                    }
+            }
+            "digits" => {
+                if let Ok(n) = value.parse::<u32>() {
+                    options.digits = Some(n);
+                } else {
+                    errors.push(ChunkError::new(
+                        format!("Invalid digits value '{value}' (expected a non-negative integer)"),
+                        None,
+                    ));
                 }
-                _ => {
-                    errors.push(ChunkError::new(format!("Unknown option: '{}'", key), None));
-                }
+            }
+            _ => {
+                errors.push(ChunkError::warning(
+                    format!("Unknown inline option: '{key}' (ignored)"),
+                    None,
+                ));
             }
         }
     }
@@ -446,6 +469,40 @@ mod tests {
         // Inline expressions inside the unclosed chunk are never executed.
         assert_eq!(doc.inline_exprs.len(), 1);
         assert_eq!(doc.inline_exprs[0].code, "1");
+    }
+
+    #[test]
+    fn test_inline_option_diagnostics_have_severity() {
+        use crate::parser::ast::Severity;
+        let doc = Document::parse(
+            "`{r, foo=1} 1` `{r, eval=yes} 2` `{r, digits=x} 3` `{r, digits 2} 4`".into(),
+        );
+        let diagnostics: Vec<_> = doc
+            .inline_exprs
+            .iter()
+            .map(|e| {
+                let d = &e.errors[0];
+                (d.severity, d.message.split(':').next().unwrap().to_string())
+            })
+            .collect();
+        assert_eq!(
+            diagnostics,
+            [
+                (Severity::Warning, "Unknown inline option".to_string()),
+                (
+                    Severity::Error,
+                    "Invalid eval value 'yes' (expected true or false)".to_string()
+                ),
+                (
+                    Severity::Error,
+                    "Invalid digits value 'x' (expected a non-negative integer)".to_string()
+                ),
+                (
+                    Severity::Error,
+                    "Invalid inline options 'digits 2'".to_string()
+                ),
+            ]
+        );
     }
 
     #[test]
