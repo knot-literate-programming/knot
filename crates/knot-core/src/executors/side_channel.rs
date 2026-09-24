@@ -136,13 +136,13 @@ impl SideChannel {
             });
         }
 
-        // Final fallback: if parsing still fails, return empty metadata instead of bailing out.
-        // This prevents a single malformed JSON from stopping the whole compilation.
-        log::warn!(
-            "Malformed side-channel JSON. Using empty metadata. Content: {}",
-            content
-        );
-        Ok(KnotMetadata::default())
+        // Unreadable results: whether the code succeeded is unknown. Report an
+        // infrastructure failure (rendered on the chunk, not cached) rather
+        // than pretending the chunk produced nothing.
+        let preview: String = content.chars().take(200).collect();
+        anyhow::bail!(
+            "Knot could not read this chunk's results (malformed side-channel data): {preview}"
+        )
     }
 
     /// Get the path to the metadata file
@@ -188,6 +188,18 @@ mod tests {
         let channel = SideChannel::new().unwrap();
         let metadata = channel.read_metadata().unwrap();
         assert_eq!(metadata.results.len(), 0);
+    }
+
+    #[test]
+    fn malformed_metadata_is_an_error_not_empty_results() {
+        let channel = SideChannel::new().unwrap();
+        std::fs::write(&channel.metadata_file, "{\"results\": [").unwrap();
+        let error = channel.read_metadata().unwrap_err().to_string();
+        assert!(
+            error.contains("could not read this chunk's results"),
+            "{error}"
+        );
+        std::fs::remove_file(&channel.metadata_file).unwrap();
     }
 
     #[test]

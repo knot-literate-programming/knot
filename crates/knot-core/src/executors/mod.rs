@@ -214,6 +214,7 @@ pub fn metadata_to_execution_result(
     let mut exports = Vec::new();
     let mut plot_count = 0usize;
     let mut dataframe_count = 0usize;
+    let mut warnings = metadata.warnings;
 
     for item in metadata.results {
         match item {
@@ -237,23 +238,34 @@ pub fn metadata_to_execution_result(
         }
     }
 
+    // Until outputs are an ordered list, say what is dropped instead of
+    // losing it silently.
+    let mut dropped = |message: String| {
+        warnings.push(RuntimeWarning {
+            message,
+            call: None,
+            line: None,
+        })
+    };
     if plot_count > 1 {
-        log::warn!(
-            "Chunk produced {} plots; only the last one is captured. \
-             Knot currently supports one plot per chunk.",
-            plot_count
-        );
+        dropped(format!(
+            "This chunk produced {plot_count} plots; only the last one is shown. Put each plot in its own chunk."
+        ));
     }
     if dataframe_count > 1 {
-        log::warn!(
-            "Chunk produced {} dataframes; only the last one is captured. \
-             Knot currently supports one dataframe per chunk.",
-            dataframe_count
-        );
+        dropped(format!(
+            "This chunk produced {dataframe_count} tables; only the last one is shown. Put each table in its own chunk."
+        ));
     }
 
     if text_content.is_empty() && !stdout_text.trim().is_empty() {
         text_content = stdout_text.to_string();
+    }
+    if dataframe_path.is_some() && !text_content.trim().is_empty() {
+        dropped(
+            "Printed output is not shown because this chunk also produced a table. Print it in a separate chunk."
+                .to_string(),
+        );
     }
 
     let result = match (text_content.is_empty(), dataframe_path, plot_path) {
@@ -274,7 +286,7 @@ pub fn metadata_to_execution_result(
     Ok(ExecutionOutput {
         result,
         exports,
-        warnings: metadata.warnings,
+        warnings,
     })
 }
 
@@ -300,4 +312,50 @@ pub trait KnotExecutor: LanguageExecutor + Send + Sync {
 
     /// File extension for environment snapshots (.RData, .pkl, .jls)
     fn snapshot_extension(&self) -> &'static str;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn plot(name: &str) -> OutputMetadata {
+        OutputMetadata::Plot {
+            path: name.into(),
+            format: "svg".into(),
+        }
+    }
+
+    #[test]
+    fn dropped_outputs_are_reported_as_warnings() {
+        let metadata = KnotMetadata {
+            results: vec![
+                plot("a.svg"),
+                plot("b.svg"),
+                OutputMetadata::DataFrame {
+                    path: "t.csv".into(),
+                },
+            ],
+            ..Default::default()
+        };
+        let output = metadata_to_execution_result(metadata, "printed\n").unwrap();
+        let messages: Vec<_> = output.warnings.iter().map(|w| w.message.as_str()).collect();
+        assert_eq!(messages.len(), 2, "{messages:?}");
+        assert!(messages[0].starts_with("This chunk produced 2 plots"));
+        assert!(messages[1].starts_with("Printed output is not shown"));
+        assert!(matches!(
+            output.result,
+            ExecutionResult::DataFrameAndPlot { .. }
+        ));
+    }
+
+    #[test]
+    fn single_outputs_produce_no_warning() {
+        let metadata = KnotMetadata {
+            results: vec![plot("a.svg")],
+            ..Default::default()
+        };
+        let output = metadata_to_execution_result(metadata, "printed\n").unwrap();
+        assert!(output.warnings.is_empty());
+        assert!(matches!(output.result, ExecutionResult::TextAndPlot { .. }));
+    }
 }
