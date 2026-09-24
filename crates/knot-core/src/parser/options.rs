@@ -76,8 +76,8 @@ pub fn parse_options(
                         })
                         .map(|(i, _)| i + 1);
 
-                    warnings.push(ChunkError::new(
-                        format!("Unknown chunk option: '{}'", key_str),
+                    warnings.push(ChunkError::warning(
+                        format!("Unknown chunk option: '{}' (ignored)", key_str),
                         line_offset,
                     ));
                 }

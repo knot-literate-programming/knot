@@ -66,18 +66,42 @@ pub struct Range {
     pub end: Position,
 }
 
+/// Severity of a chunk or inline diagnostic, identical in the PDF and the LSP.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum Severity {
+    /// Rendered as an error block (red) and reported as an LSP error.
+    Error,
+    /// The option is ignored: rendered as a warning (yellow), LSP warning.
+    Warning,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ChunkError {
     pub message: String,
     pub line_offset: Option<usize>,
+    pub severity: Severity,
 }
 
 impl ChunkError {
+    /// An error: the chunk or expression cannot be run as written.
     pub fn new(message: impl Into<String>, line_offset: Option<usize>) -> Self {
         Self {
             message: message.into(),
             line_offset,
+            severity: Severity::Error,
         }
+    }
+
+    /// A warning: something is ignored, the rest is unaffected.
+    pub fn warning(message: impl Into<String>, line_offset: Option<usize>) -> Self {
+        Self {
+            severity: Severity::Warning,
+            ..Self::new(message, line_offset)
+        }
+    }
+
+    pub fn is_error(&self) -> bool {
+        self.severity == Severity::Error
     }
 }
 

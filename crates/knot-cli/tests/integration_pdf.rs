@@ -407,3 +407,30 @@ fn document_errors_are_rendered_in_the_pdf() {
         assert!(!typ.contains("Execution Error"), "{typ}");
     }
 }
+
+#[test]
+#[ignore = "requires Typst on PATH"]
+fn option_diagnostics_are_rendered_in_the_pdf() {
+    let (_temp, project_root) = setup_test_project();
+    let source = "= Options\n\n```{r}\n#| eval: false\n#| show: none\n#| colour: red\nx <- 1\n```\n\nInline `{r, eval=false, foo=1} x` and `{r, eval=false, digits=x} y`.\n";
+    fs::write(project_root.join("main.knot"), source).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_knot"))
+        .arg("build")
+        .current_dir(&project_root)
+        .output()
+        .expect("Failed to launch knot");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let typ = fs::read_to_string(project_root.join("main.typ")).unwrap();
+    // A hidden chunk still shows why its option was ignored.
+    assert!(
+        typ.contains(r#"warnings: ([#"Unknown chunk option: 'colour' (ignored)"],)"#),
+        "{typ}"
+    );
+    assert!(typ.contains("error: false);"), "{typ}");
+    assert!(typ.contains("Invalid digits value 'x'"), "{typ}");
+    assert!(typ.contains("error: true);"), "{typ}");
+}
