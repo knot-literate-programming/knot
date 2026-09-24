@@ -148,3 +148,19 @@ mod tests {
         assert_ne!(Defaults::CACHE_DIR_NAME, "");
     }
 }
+
+#[cfg(test)]
+mod startup_tests {
+    use std::time::Duration;
+
+    #[test]
+    fn startup_is_never_limited_by_a_short_chunk_timeout() {
+        let startup = crate::executors::startup_timeout;
+        let long = Duration::from_secs(600);
+        assert_eq!(
+            startup(Duration::from_millis(500)),
+            Duration::from_secs(super::Defaults::INTERPRETER_STARTUP_TIMEOUT_SECS)
+        );
+        assert_eq!(startup(long), long);
+    }
+}

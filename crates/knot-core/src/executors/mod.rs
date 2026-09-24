@@ -309,16 +309,3 @@ pub trait KnotExecutor: LanguageExecutor + Send + Sync {
     /// File extension for environment snapshots (.RData, .pkl, .jls)
     fn snapshot_extension(&self) -> &'static str;
 }
-
-#[cfg(test)]
-mod startup_tests {
-    use super::*;
-
-    #[test]
-    fn startup_is_never_limited_by_a_short_chunk_timeout() {
-        let short = Duration::from_millis(500);
-        let long = Duration::from_secs(600);
-        assert_eq!(startup_timeout(short), Duration::from_secs(60));
-        assert_eq!(startup_timeout(long), long);
-    }
-}
