@@ -314,3 +314,65 @@ Exported values: #knot-data.at("r-values")
 
 #[path = "integration_pdf/anscombe.rs"]
 mod anscombe;
+
+#[test]
+#[ignore = "requires Typst, R and Python on PATH"]
+fn runtime_text_with_typst_syntax_compiles() {
+    let (_temp, project_root) = setup_test_project();
+    // Runtime error blocks use codly's `local` (tracked separately).
+    let source = r#"
+#import "@preview/codly:1.3.0": *
+#show: codly-init
+
+= Escaping
+
+```{r}
+# A comment quoting a fence: ```
+warning("column df$x_1 has *stars*, #hash, <label> and @ref")
+cat("output with a ``` fence and $math\n")
+```
+
+Inline: `{r} "x_1"`, `{r} "y ~ x"`, `{r} -1.5` and `{python} "a*b"`.
+
+```{python}
+raise ValueError("bad ``` fence and $x_1")
+```
+"#;
+    fs::write(project_root.join("main.knot"), source).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_knot"))
+        .args(["build", "--no-snapshots"])
+        .current_dir(&project_root)
+        .output()
+        .expect("Failed to launch knot");
+    assert!(
+        output.status.success(),
+        "Build failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let pdf = fs::read(project_root.join("main.pdf")).expect("PDF should exist");
+    assert!(pdf.starts_with(b"%PDF-"));
+
+    let typ = fs::read_to_string(project_root.join("main.typ")).unwrap();
+    assert!(
+        typ.contains(r#"[#"column df$x_1 has *stars*, #hash, <label> and @ref"]"#),
+        "{typ}"
+    );
+    assert!(
+        typ.contains("````r\n# A comment quoting a fence: ```"),
+        "{typ}"
+    );
+    assert!(
+        typ.contains(r#"#"x_1";"#) && typ.contains(r#"#"y ~ x";"#),
+        "{typ}"
+    );
+    assert!(typ.contains(r#"#"a*b";"#), "{typ}");
+    assert!(
+        typ.contains("````\nValueError: bad ``` fence and $x_1"),
+        "{typ}"
+    );
+    assert!(
+        !typ.contains(r#"\""#),
+        "Error messages must not show escaped quotes"
+    );
+}

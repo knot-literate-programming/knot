@@ -3,6 +3,7 @@
 // Formats Python objects into Typst-compatible strings.
 
 use crate::executors::inline::{INLINE_MAX_CHARS, inline_result_too_complex};
+use crate::typst_syntax::{inline_raw, inline_text};
 use anyhow::Result;
 
 /// Formats a string result for inline display
@@ -19,11 +20,11 @@ pub fn format_inline_output(output: &str) -> Result<String> {
     // Python's print() uses [], (), {} for these.
     // We wrap them in backticks to show them as "code" in the document.
     if is_python_collection(trimmed) {
-        return Ok(format!("`{}`", trimmed));
+        return Ok(inline_raw(trimmed));
     }
 
     // 3. Default: return as plain text (perfect for numbers and simple strings)
-    Ok(trimmed.to_string())
+    Ok(inline_text(trimmed))
 }
 
 /// Simple detection of Python collection strings

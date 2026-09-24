@@ -29,6 +29,7 @@ pub mod parser;
 pub mod path_utils;
 pub mod project;
 pub mod tools;
+mod typst_syntax;
 
 pub use backend::{format_codly_call, format_local_call};
 pub use cleaning::{CleanSummary, clean_project, clean_project_with_summary};

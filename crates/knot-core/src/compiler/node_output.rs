@@ -10,6 +10,7 @@ use crate::config::Config;
 use crate::executors::{ExecutionOutput, ExecutionResult};
 use crate::parser::ResolvedChunkOptions;
 use crate::parser::ast::Chunk;
+use crate::typst_syntax::{inline_raw, inline_text, raw_block, string_literal};
 use std::collections::HashMap;
 
 /// Format the output of a freshly executed node.
@@ -56,10 +57,8 @@ pub(super) fn inert_output(pn: &PlannedNode, backend: &TypstBackend, config: &Co
             )
         }
         PlannedNodeKind::Inline { node: inline } => {
-            format!(
-                "#text(fill: luma(150))[`{{{} {}}}`]",
-                inline.language, inline.code
-            )
+            let source = format!("{{{}}} {}", inline.language, inline.code);
+            format!("#text(fill: luma(150))[{}]", inline_raw(&source))
         }
     }
 }
@@ -96,19 +95,23 @@ pub(super) fn format_error_block_for_node(
     lang: &str,
     error_msg: &str,
 ) -> String {
-    let error_msg = error_msg.replace('"', "\\\"");
     let (node_kind, node_name) = match kind {
         PlannedNodeKind::Chunk { node, .. } => {
             ("chunk", node.label.as_deref().unwrap_or("unnamed"))
         }
         PlannedNodeKind::Inline { .. } => ("inline expression", "inline"),
     };
+    let lang_text = inline_text(lang);
+    let lang_raw = inline_raw(lang);
+    let node_name = inline_raw(node_name);
+    let error_msg = raw_block("", error_msg);
     format!(
         "#code-chunk(
-    lang: \"{lang}\",
+    lang: {lang_literal},
     is-inert: false,
-    errors: ([#local(zebra-fill: none)[\n=== Execution Error ({lang})\nIn {node_kind} `{node_name}`\n\n```\n{error_msg}\n```\n\n_Execution of subsequent `{lang}` blocks has been suspended._]],)
-)\n"
+    errors: ([#local(zebra-fill: none)[\n=== Execution Error ({lang_text})\nIn {node_kind} {node_name}\n\n{error_msg}\n\n_Execution of subsequent {lang_raw} blocks has been suspended._]],)
+)\n",
+        lang_literal = string_literal(lang),
     )
 }
 

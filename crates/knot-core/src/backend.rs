@@ -4,6 +4,7 @@ use crate::compiler::ChunkExecutionState;
 use crate::executors::{ExecutionOutput, ExecutionResult};
 use crate::parser::{Chunk, Layout, ResolvedChunkOptions, Show};
 use crate::path_utils::{escape_typst_path, escape_typst_string};
+use crate::typst_syntax::{raw_block, string_literal, text_content};
 use std::collections::HashMap;
 
 /// Helper function to format a HashMap of options into a Typst function call.
@@ -108,12 +109,12 @@ impl Backend for TypstBackend {
 
 /// Pushes lang, label/caption, is-inert, and parse errors into `args`.
 fn push_base_args(chunk: &Chunk, state: &ChunkExecutionState, args: &mut Vec<String>) {
-    args.push(format!("lang: \"{}\"", chunk.language));
+    args.push(format!("lang: {}", string_literal(&chunk.language)));
 
     if let Some(label) = &chunk.label
         && !label.trim().is_empty()
     {
-        args.push(format!("label: \"{}\"", label));
+        args.push(format!("label: {}", string_literal(label)));
     }
     if let Some(caption) = &chunk.options.caption {
         args.push(format!("caption: [{}]", caption));
@@ -133,7 +134,7 @@ fn push_base_args(chunk: &Chunk, state: &ChunkExecutionState, args: &mut Vec<Str
         let mut error_list = chunk
             .errors
             .iter()
-            .map(|e| format!("[{}]", e.message))
+            .map(|e| text_content(&e.message))
             .collect::<Vec<_>>()
             .join(", ");
         // In Typst, (item,) is a single-element array.
@@ -161,7 +162,7 @@ fn push_warnings_arg(
             let mut warning_list = output
                 .warnings
                 .iter()
-                .map(|w| format!("[{}]", w.message))
+                .map(|w| text_content(&w.message))
                 .collect::<Vec<_>>()
                 .join(", ");
             if output.warnings.len() == 1 {
@@ -189,13 +190,12 @@ fn push_code_arg(
         let code_str = if !codly_options.is_empty() {
             let local_call = format_local_call(codly_options);
             format!(
-                "[{}[```{}\n{}```]]",
+                "[{}[{}]]",
                 local_call,
-                chunk.language,
-                chunk.code.trim()
+                raw_block(&chunk.language, chunk.code.trim())
             )
         } else {
-            format!("[```{}\n{}```]", chunk.language, chunk.code.trim())
+            format!("[{}]", raw_block(&chunk.language, chunk.code.trim()))
         };
         args.push(format!("code: {}", code_str));
     } else {
@@ -219,7 +219,7 @@ fn push_output_arg(
 
     let output_str = match &output.result {
         ExecutionResult::Text(text) if !text.trim().is_empty() => {
-            format!("[```output\n{}```]", text.trim())
+            format!("[{}]", raw_block("output", text.trim()))
         }
         ExecutionResult::Plot(path) => {
             let abs_plot = path.canonicalize().unwrap_or_else(|_| path.clone());
@@ -235,9 +235,9 @@ fn push_output_arg(
         ExecutionResult::TextAndPlot { text, plot } => {
             let abs_plot = plot.canonicalize().unwrap_or_else(|_| plot.clone());
             format!(
-                "[#image(\"{}\")\n```output\n{}```]",
+                "[#image(\"{}\")\n{}]",
                 escape_typst_path(&abs_plot),
-                text.trim()
+                raw_block("output", text.trim())
             )
         }
         ExecutionResult::DataFrameAndPlot { dataframe, plot } => {
@@ -311,10 +311,10 @@ fn push_presentation_args(resolved_options: &ResolvedChunkOptions, args: &mut Ve
     }
 
     if let Some(v) = &resolved_options.width_ratio {
-        args.push(format!("width-ratio: \"{}\"", v));
+        args.push(format!("width-ratio: {}", string_literal(v)));
     }
     if let Some(v) = &resolved_options.align {
-        args.push(format!("align: \"{}\"", v));
+        args.push(format!("align: {}", string_literal(v)));
     }
 }
 

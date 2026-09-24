@@ -5,4 +5,5 @@ expression: "backend.format_chunk(&chunk, &chunk.codly_options, &resolved, &outp
 #code-chunk(lang: "r", code: none, output: [#image("/tmp/plot.svg")
 ```output
 Min: 1
-Max: 10```])
+Max: 10
+```])

@@ -4,5 +4,7 @@ expression: "backend.format_chunk(&chunk, &chunk.codly_options, &resolved, &outp
 ---
 #code-chunk(lang: "r", code: [```r
 x <- 1:10
-mean(x)```], output: [```output
-[1] 5.5```], layout: "horizontal")
+mean(x)
+```], output: [```output
+[1] 5.5
+```], layout: "horizontal")
