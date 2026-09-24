@@ -69,13 +69,26 @@ impl SnapshotManager {
 
     /// When enabled, replace the snapshot after actual execution, including cache:false
     /// and cache repairs. File existence alone does not identify interpreter state.
+    ///
+    /// The live session is at `hash` even if saving fails: the error only means
+    /// that no snapshot is available, so the next compilation re-executes.
     pub fn record_execution(&mut self, lang: &str, hash: &str, cache: &mut Cache) -> Result<()> {
+        let result = self.save_snapshot(lang, hash, cache);
+        if self.exec.is_some() {
+            self.loaded_hash = Some(hash.to_string());
+        }
+        if result.is_err() {
+            cache.metadata.snapshots.remove(hash);
+        }
+        result
+    }
+
+    fn save_snapshot(&mut self, lang: &str, hash: &str, cache: &mut Cache) -> Result<()> {
         let Some(exec) = self.exec.as_deref_mut() else {
             return Ok(());
         };
         if !self.allow_snapshots {
             cache.metadata.snapshots.remove(hash);
-            self.loaded_hash = Some(hash.to_string());
             return Ok(());
         }
         let snapshot = cache.get_snapshot_path(hash, exec.snapshot_extension());
@@ -105,7 +118,6 @@ impl SnapshotManager {
             .metadata
             .snapshots
             .insert(hash.to_string(), SnapshotEntry { reusable, files });
-        self.loaded_hash = Some(hash.to_string());
         Ok(())
     }
 }

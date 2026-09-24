@@ -418,21 +418,17 @@ impl Compiler {
 
         // Step 2: for languages with MustExecute nodes, ensure the executor is
         // initialized (lazy), then take it for exclusive use in its thread.
+        // A language whose interpreter cannot start keeps its reason, rendered on
+        // its first chunk to execute; its chain is suspended, other languages run.
+        // A configured interpreter never falls back to another one.
         let mut chain_executors: HashMap<String, Box<dyn KnotExecutor>> = HashMap::new();
+        let mut startup_errors: HashMap<String, String> = HashMap::new();
         for (lang, nodes) in &groups {
             let needs_exec = nodes
                 .iter()
                 .any(|(_, pn)| matches!(pn.need, ExecutionNeed::MustExecute));
-            if needs_exec {
-                // Explicit interpreter settings must fail visibly, never silently use
-                // a different interpreter or hide an invalid path in a generic block.
-                let result = self.executor_manager.get_executor(lang);
-                if (lang == "r" && self.config.tools.r.is_some())
-                    || (lang == "python" && self.config.tools.python.is_some())
-                {
-                    result?;
-                }
-                // With automatic discovery, preserve the existing error-block behavior.
+            if needs_exec && let Err(error) = self.executor_manager.get_executor(lang) {
+                startup_errors.insert(lang.clone(), format!("{error:#}"));
             }
             if let Some(exec) = self.executor_manager.take(lang) {
                 chain_executors.insert(lang.clone(), exec);
@@ -447,7 +443,8 @@ impl Compiler {
             .into_iter()
             .map(|(lang, nodes)| {
                 let exec = chain_executors.remove(&lang);
-                (lang, nodes, exec)
+                let startup_error = startup_errors.remove(&lang);
+                (lang, nodes, exec, startup_error)
             })
             .collect::<Vec<_>>();
 
@@ -462,7 +459,7 @@ impl Compiler {
             // Start every chain before joining any of them. A lazy spawn/join
             // iterator would accidentally serialize R and Python execution.
             let mut handles = Vec::with_capacity(chain_data.len());
-            for (lang, nodes, exec) in chain_data {
+            for (lang, nodes, exec, startup_error) in chain_data {
                 let cache = Arc::clone(&cache);
                 let chain_progress = progress.clone();
                 handles.push(s.spawn(move || {
@@ -470,6 +467,7 @@ impl Compiler {
                         lang,
                         nodes,
                         exec,
+                        startup_error,
                         cache,
                         backend,
                         config_ref,
