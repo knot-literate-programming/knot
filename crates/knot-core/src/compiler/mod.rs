@@ -740,6 +740,7 @@ pub(super) mod test_helpers {
         crate::parser::Chunk {
             index: 0,
             language: language.to_string(),
+            source_language: language.to_string(),
             code: code.to_string(),
             label: name,
             base_indentation: String::new(),

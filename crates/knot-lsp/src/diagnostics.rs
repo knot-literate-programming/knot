@@ -10,6 +10,7 @@
 use crate::position_mapper::PositionMapper;
 use knot_core::cache::Cache;
 use knot_core::config::Config;
+use knot_core::defaults::unsupported_language_message;
 use knot_core::executors::error_utils::extract_line_from_traceback;
 use knot_core::get_cache_dir;
 use knot_core::parser::parse_document;
@@ -77,6 +78,44 @@ pub fn get_diagnostics(uri: &Url, text: &str, include_runtime: bool) -> Vec<Diag
                 severity: Some(severity),
                 source: Some("knot".to_string()),
                 message: error.message.clone(),
+                ..Diagnostic::default()
+            });
+        }
+
+        if chunk.options.eval != Some(false)
+            && let Some(message) = unsupported_language_message(&chunk.language)
+        {
+            let header = mapper.position_at_offset(chunk.start_byte);
+            let header_len = text.lines().nth(header.line as usize).unwrap_or("");
+            diagnostics.push(Diagnostic {
+                range: Range {
+                    start: header,
+                    end: Position {
+                        line: header.line,
+                        character: header_len.encode_utf16().count() as u32,
+                    },
+                },
+                severity: Some(DiagnosticSeverity::ERROR),
+                source: Some("knot".to_string()),
+                message,
+                ..Diagnostic::default()
+            });
+        }
+    }
+
+    // Unknown languages in inline expressions
+    for inline in &doc.inline_exprs {
+        if inline.options.eval != Some(false)
+            && let Some(message) = unsupported_language_message(&inline.language)
+        {
+            diagnostics.push(Diagnostic {
+                range: Range {
+                    start: mapper.position_at_offset(inline.start),
+                    end: mapper.position_at_offset(inline.end),
+                },
+                severity: Some(DiagnosticSeverity::ERROR),
+                source: Some("knot".to_string()),
+                message,
                 ..Diagnostic::default()
             });
         }
@@ -200,4 +239,35 @@ pub fn get_diagnostics(uri: &Url, text: &str, include_runtime: bool) -> Vec<Diag
     }
 
     diagnostics
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unknown_languages_are_errors_unless_not_evaluated() {
+        let uri = Url::parse("file:///main.knot").unwrap();
+        let text = "```{julia}\nx = 1\n```\n\n```{bash}\n#| eval: false\nls\n```\n\n```{py}\nx = 1\n```\n\nValue `{julia} x`.\n";
+        let errors: Vec<_> = get_diagnostics(&uri, text, false)
+            .into_iter()
+            .filter(|d| d.message.starts_with("Unsupported language"))
+            .collect();
+        assert_eq!(errors.len(), 2, "{errors:?}");
+        assert!(
+            errors
+                .iter()
+                .all(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+        );
+        assert_eq!(
+            errors[0].range.start,
+            Position {
+                line: 0,
+                character: 0
+            }
+        );
+        assert_eq!(errors[0].range.end.character, "```{julia}".len() as u32);
+        assert_eq!(errors[1].range.start.line, 13);
+        assert!(errors[0].message.contains("r and python"));
+    }
 }

@@ -388,7 +388,10 @@ define_options! {
 #[derive(Debug, Clone)]
 pub struct Chunk {
     pub index: usize, // Ordinal position in document (0-based)
+    /// Canonical language name (`r`, `python`), used for execution and rendering.
     pub language: String,
+    /// Language tag as written in the source (`py`, `R`…), kept for formatting.
+    pub source_language: String,
     pub label: Option<String>,
     pub code: String,
     pub base_indentation: String,
@@ -413,7 +416,7 @@ impl Chunk {
 
         // 1. Header: ```{lang label}
         out.push_str("```{");
-        out.push_str(&self.language);
+        out.push_str(&self.source_language);
         if let Some(label) = self.label.as_deref().filter(|n| !n.trim().is_empty()) {
             out.push(' ');
             out.push_str(label);
