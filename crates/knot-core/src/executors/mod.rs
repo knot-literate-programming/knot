@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 
 /// Shared error formatting utilities for executor implementations.
 pub mod error_utils;
+mod inline;
 pub mod manager;
 pub mod path_utils;
 pub mod python;
