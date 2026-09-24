@@ -120,6 +120,14 @@ jobs:
           typst --version
           cargo test -p knot-cli --locked --test integration_pdf -- --ignored
 
+      - name: Install pinned Tinymist
+        run: python scripts/ci/install-tinymist.py 0.15.8 "${{ runner.temp }}/knot-tinymist"
+
+      - name: Run Tinymist integration tests
+        timeout-minutes: 2
+        run: |
+          tinymist --version
+          cargo test -p knot-lsp --locked -- --ignored
 
   vscode-extension:
     name: VS Code Extension

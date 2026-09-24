@@ -149,6 +149,8 @@ impl TinymistProxy {
                     }
                 }
             }
+            // Release outstanding callers immediately when the stream closes.
+            pending_requests_clone.lock().await.clear();
         });
 
         let proxy = Self {
@@ -158,7 +160,12 @@ impl TinymistProxy {
             pending_requests,
         };
 
-        proxy.initialize(root_uri).await?;
+        if let Err(error) = proxy.initialize(root_uri).await {
+            if let Err(cleanup) = proxy.shutdown().await {
+                log::warn!("Failed to clean up Tinymist after initialization failure: {cleanup:#}");
+            }
+            return Err(error);
+        }
 
         Ok((proxy, notification_rx))
     }
@@ -189,16 +196,29 @@ impl TinymistProxy {
         }
     }
 
-    /// Shutdown the tinymist subprocess gracefully
+    /// Shut down gracefully, then kill and reap a server that does not exit.
     pub async fn shutdown(&self) -> Result<()> {
-        let _ = self.send_request("shutdown", Value::Null).await;
-        let _ = self.send_notification("exit", Value::Null).await;
-
+        use std::time::Duration;
+        let _ = self.send_request_timeout("shutdown", Value::Null, 1).await;
+        let _ = tokio::time::timeout(
+            Duration::from_secs(1),
+            self.send_notification("exit", Value::Null),
+        )
+        .await;
         if let Some(mut child) = self.child.lock().await.take() {
-            let _ =
-                tokio::time::timeout(std::time::Duration::from_millis(1000), child.wait()).await;
+            match tokio::time::timeout(Duration::from_secs(1), child.wait()).await {
+                Ok(result) => {
+                    result.context("Failed to reap Tinymist")?;
+                }
+                Err(_) => {
+                    tokio::time::timeout(Duration::from_secs(2), child.kill())
+                        .await
+                        .context("Timed out killing Tinymist")?
+                        .context("Failed to kill Tinymist")?;
+                }
+            }
         }
-
+        self.pending_requests.lock().await.clear();
         Ok(())
     }
 }
@@ -261,24 +281,16 @@ impl TinymistProxy {
             "params": params,
         });
 
-        if let Err(e) = self.write_message(&request).await {
-            let mut map = self.pending_requests.lock().await;
-            map.remove(&id);
-            return Err(e);
-        }
-
-        match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), rx).await {
-            Ok(Ok(result)) => result,
-            Ok(Err(_)) => Err(anyhow::anyhow!("Tinymist connection closed")),
-            Err(_) => {
-                let mut map = self.pending_requests.lock().await;
-                map.remove(&id);
-                Err(anyhow::anyhow!(
-                    "Tinymist request '{}' timed out after {timeout_secs}s",
-                    method
-                ))
-            }
-        }
+        // Include writing in the deadline: a stopped server can fill the pipe.
+        let response = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
+            self.write_message(&request).await?;
+            rx.await.context("Tinymist connection closed")?
+        })
+        .await;
+        self.pending_requests.lock().await.remove(&id);
+        response.with_context(|| {
+            format!("Tinymist request '{method}' timed out after {timeout_secs}s")
+        })?
     }
 
     /// Send a raw JSON-RPC response back to tinymist (e.g. to acknowledge a
@@ -351,46 +363,160 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Only run if tinymist is installed
-    async fn test_spawn_tinymist() {
-        let result = TinymistProxy::spawn(None, None).await;
-        match result {
-            Ok((proxy, _notification_rx)) => {
-                println!("tinymist spawned successfully");
-                let _ = proxy.shutdown().await;
-            }
-            Err(e) => {
-                eprintln!("tinymist not available: {}", e);
-            }
-        }
+    #[ignore = "requires Tinymist 0.15.8 on PATH"]
+    async fn tinymist_initializes_and_shuts_down() {
+        let dir = tempfile::tempdir().unwrap();
+        let (proxy, _notifications) =
+            TinymistProxy::spawn(Some(Url::from_directory_path(dir.path()).unwrap()), None)
+                .await
+                .expect("Tinymist must be installed and initialize successfully");
+        tokio::time::timeout(std::time::Duration::from_secs(6), proxy.shutdown())
+            .await
+            .expect("shutdown exceeded its deadline")
+            .expect("shutdown failed");
+        assert!(proxy.child.lock().await.is_none());
     }
 
     #[tokio::test]
-    #[ignore] // Only run if tinymist is installed
-    async fn test_send_notification() {
-        let (proxy, _notification_rx) = match TinymistProxy::spawn(None, None).await {
-            Ok((p, rx)) => (p, rx),
-            Err(_) => {
-                eprintln!("tinymist not available, skipping test");
-                return;
-            }
-        };
+    #[ignore = "requires Tinymist 0.15.8 on PATH"]
+    async fn tinymist_reports_and_clears_document_diagnostics() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("document with spaces.typ");
+        std::fs::write(&file, "= Hello").unwrap();
+        let uri = Url::from_file_path(&file).unwrap();
+        let (proxy, mut notifications) =
+            TinymistProxy::spawn(Some(Url::from_directory_path(dir.path()).unwrap()), None)
+                .await
+                .expect("Tinymist must be installed and initialize successfully");
+        // Always shut down before reporting a failed exchange.
+        let exchange = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            proxy
+                .send_notification(
+                    lsp::DID_OPEN,
+                    serde_json::json!({
+                        "textDocument": {"uri": uri, "languageId": "typst", "version": 1,
+                            "text": "#knot_undefined_symbol"}
+                    }),
+                )
+                .await?;
+            let first = diagnostics(&proxy, &mut notifications, &uri, 1).await?;
+            anyhow::ensure!(
+                first.iter().any(|d| d["message"]
+                    .as_str()
+                    .is_some_and(|s| s.contains("unknown variable"))),
+                "Expected an unknown-variable diagnostic, got {first:?}"
+            );
+            proxy
+                .send_notification(
+                    lsp::DID_CHANGE,
+                    serde_json::json!({
+                        "textDocument": {"uri": uri, "version": 2},
+                        "contentChanges": [{"text": "= Hello"}]
+                    }),
+                )
+                .await?;
+            let second = diagnostics(&proxy, &mut notifications, &uri, 2).await?;
+            anyhow::ensure!(
+                second.is_empty(),
+                "Diagnostics were not cleared: {second:?}"
+            );
+            proxy
+                .send_notification(
+                    lsp::DID_CLOSE,
+                    serde_json::json!({"textDocument": {"uri": uri}}),
+                )
+                .await
+        })
+        .await;
+        proxy.shutdown().await.expect("shutdown failed");
+        exchange
+            .expect("Tinymist did not complete the document exchange within 30s")
+            .expect("Tinymist document exchange failed");
+    }
 
-        // Send a didOpen notification
+    async fn diagnostics(
+        proxy: &TinymistProxy,
+        rx: &mut mpsc::Receiver<Value>,
+        uri: &Url,
+        version: i64,
+    ) -> Result<Vec<Value>> {
+        while let Some(message) = rx.recv().await {
+            if let Some(id) = message.get("id") {
+                proxy.send_raw_response(id, Value::Null).await?;
+            }
+            // Tinymist 0.15.8 omits the optional diagnostic version. Exchanges
+            // are sequential; still reject obsolete versions if supplied.
+            if message["method"] == lsp::PUBLISH_DIAGNOSTICS
+                && message["params"]["uri"] == uri.as_str()
+                && (message["params"]["version"].is_null()
+                    || message["params"]["version"] == version)
+            {
+                return message["params"]["diagnostics"]
+                    .as_array()
+                    .cloned()
+                    .context("Missing diagnostics array");
+            }
+        }
+        anyhow::bail!("Tinymist closed the notification stream before version {version}")
+    }
+
+    #[tokio::test]
+    async fn unresponsive_server_times_out_and_is_reaped() {
+        let dir = tempfile::tempdir().unwrap();
+        let binary = dir.path().join("silent-server.exe");
+        let build = std::process::Command::new("rustc")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/silent_server.rs"
+            ))
+            .arg("-o")
+            .arg(&binary)
+            .output()
+            .unwrap();
+        assert!(
+            build.status.success(),
+            "{}",
+            String::from_utf8_lossy(&build.stderr)
+        );
+        let mut child = Command::new(binary)
+            .stdin(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let proxy = TinymistProxy {
+            stdin: Arc::new(Mutex::new(child.stdin.take().unwrap())),
+            child: Arc::new(Mutex::new(Some(child))),
+            request_id: Arc::new(AtomicU64::new(1)),
+            pending_requests: Arc::new(Mutex::new(HashMap::new())),
+        };
         let result = proxy
-            .send_notification(
-                lsp::DID_OPEN,
-                serde_json::json!({
-                    "textDocument": {
-                        "uri": "file:///test.typ",
-                        "languageId": "typst",
-                        "version": 1,
-                        "text": "= Hello"
-                    }
-                }),
+            .send_request_timeout("fixture/no-response", Value::Null, 1)
+            .await;
+        let blocked_write = proxy
+            .send_request_timeout(
+                "fixture/blocked-write",
+                Value::String("x".repeat(8 * 1024 * 1024)),
+                1,
             )
             .await;
-
-        assert!(result.is_ok(), "Failed to send notification: {:?}", result);
+        let shutdown =
+            tokio::time::timeout(std::time::Duration::from_secs(6), proxy.shutdown()).await;
+        shutdown
+            .expect("shutdown hung")
+            .expect("forced shutdown failed");
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("fixture/no-response")
+        );
+        assert!(
+            blocked_write
+                .unwrap_err()
+                .to_string()
+                .contains("fixture/blocked-write")
+        );
+        assert!(proxy.pending_requests.lock().await.is_empty());
+        assert!(proxy.child.lock().await.is_none());
     }
 }
