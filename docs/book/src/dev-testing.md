@@ -74,6 +74,33 @@ cargo test -p knot-cli --locked --test integration_pdf -- --ignored
 PDF tests use plain Typst documents and require neither R/Python nor downloads
 of Typst packages. CI installs Typst 0.15.1 explicitly for this step.
 
+## Tinymist integration tests
+
+CI installs the official **Tinymist 0.15.8** binary, verifies its published
+SHA-256 checksum, and runs the LSP integration suite on Linux, macOS and Windows.
+No R/Python, Typst package downloads or editor installation are needed for these tests.
+
+To reproduce locally, install that version and place it first in `PATH`:
+
+```bash
+python3 scripts/ci/install-tinymist.py 0.15.8 /tmp/knot-tinymist
+export PATH="/tmp/knot-tinymist:$PATH"
+tinymist --version
+cargo test -p knot-lsp --locked -- --ignored
+```
+
+On Windows, use `python scripts/ci/install-tinymist.py 0.15.8 "$env:TEMP/knot-tinymist"`
+and prepend that directory to `$env:PATH` before the same Cargo command.
+The installer supports x86-64 and ARM64 release archives.
+
+These tests are ignored only in the default suite. Explicit execution fails if
+Tinymist is missing or cannot initialize. They verify initialization and shutdown,
+then open a temporary document with an undefined symbol, check the diagnostic,
+correct the document through `didChange`, and check that diagnostics are cleared.
+The exchange has a 30-second deadline and shuts down the server before reporting
+an assertion failure. A default-suite test uses a portable fake server to verify
+response/write deadlines, pending-request cleanup and forced process termination.
+
 ## VS Code extension
 
 From `editors/vscode`:
