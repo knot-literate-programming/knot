@@ -1,3 +1,18 @@
+fn project_formatter(
+    uri: &tower_lsp::lsp_types::Url,
+    formatter: knot_core::CodeFormatter,
+) -> tower_lsp::jsonrpc::Result<knot_core::CodeFormatter> {
+    let Ok(path) = uri.to_file_path() else {
+        return Ok(formatter);
+    };
+    let (config, _) = knot_core::Config::find_and_load(&path).map_err(|error| {
+        tower_lsp::jsonrpc::Error::invalid_params(format!(
+            "Cannot load tool configuration: {error:#}"
+        ))
+    })?;
+    Ok(formatter.with_project_tools(&config.tools))
+}
+
 use crate::state::ServerState;
 use knot_core::Document;
 use tower_lsp::jsonrpc::{Error, ErrorCode, Result};
@@ -22,6 +37,7 @@ pub async fn handle_formatting(
         .await
         .clone()
         .unwrap_or_else(|| knot_core::CodeFormatter::new(None, None));
+    let formatter = project_formatter(uri, formatter)?;
     let source = text.clone();
     let formatted = tokio::task::spawn_blocking(move || {
         knot_core::formatting::format_document(&source, &formatter)
@@ -117,6 +133,7 @@ pub async fn handle_format_chunk(
         .await
         .clone()
         .unwrap_or_else(|| knot_core::CodeFormatter::new(None, None));
+    let formatter = project_formatter(uri, formatter)?;
     let formatted = tokio::task::spawn_blocking(move || {
         formatter
             .format_code(&chunk.code, &chunk.language)
@@ -199,6 +216,24 @@ mod tests {
             },
         )
         .await
+    }
+
+    #[test]
+    fn project_formatter_overrides_editor_paths_for_the_document() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("chapters")).unwrap();
+        std::fs::write(
+            dir.path().join("knot.toml"),
+            "[tools]\nruff = './missing-project-ruff'\n",
+        )
+        .unwrap();
+        let uri = Url::from_file_path(dir.path().join("chapters/new.knot")).unwrap();
+        let formatter = project_formatter(&uri, fixture_formatter()).unwrap();
+        let error = formatter.format_code("x=1", "python").unwrap_err();
+        assert!(
+            format!("{error:#}").contains("missing-project-ruff"),
+            "{error:#}"
+        );
     }
 
     #[tokio::test]

@@ -392,6 +392,7 @@ fn spawn_preview(
     project_root: &Path,
     typ_output_path: &Path,
 ) -> Result<std::process::Child> {
+    let (config, _) = knot_core::Config::find_and_load(project_root)?;
     if preview {
         info!("🔍 Launching tinymist preview for live PDF preview...");
         let abs_root = project_root
@@ -400,22 +401,30 @@ fn spawn_preview(
         let abs_typ = typ_output_path
             .canonicalize()
             .unwrap_or(typ_output_path.to_path_buf());
-        std::process::Command::new("tinymist")
-            .arg("preview")
-            .arg("--root")
-            .arg(&abs_root)
-            .arg(&abs_typ)
-            .spawn()
-            .context("Failed to launch 'tinymist preview'. Is Tinymist installed?")
+        std::process::Command::new(knot_core::tools::resolve_binary(
+            "tinymist",
+            config.tools.tinymist.as_deref(),
+            None,
+        )?)
+        .arg("preview")
+        .arg("--root")
+        .arg(&abs_root)
+        .arg(&abs_typ)
+        .spawn()
+        .context("Failed to launch 'tinymist preview'. Is Tinymist installed?")
     } else {
         info!("🔍 Launching typst watch for live PDF preview...");
-        std::process::Command::new("typst")
-            .arg("watch")
-            .arg("--root")
-            .arg(project_root)
-            .arg(typ_output_path)
-            .spawn()
-            .context("Failed to launch 'typst watch'. Is Typst installed?")
+        std::process::Command::new(knot_core::tools::resolve_binary(
+            "typst",
+            config.tools.typst.as_deref(),
+            None,
+        )?)
+        .arg("watch")
+        .arg("--root")
+        .arg(project_root)
+        .arg(typ_output_path)
+        .spawn()
+        .context("Failed to launch 'typst watch'. Is Typst installed?")
     }
 }
 
@@ -486,6 +495,29 @@ fn run_event_loop(
                 eprintln!("❌ Channel error: {}", e);
                 break;
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tool_tests {
+    use super::*;
+
+    #[test]
+    fn preview_respects_explicit_tool_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("knot.toml"),
+            "[tools]\ntypst = './missing-typst'\ntinymist = './missing-tinymist'\n",
+        )
+        .unwrap();
+        for (preview, tool) in [(false, "typst"), (true, "tinymist")] {
+            let error =
+                spawn_preview(preview, dir.path(), &dir.path().join("main.typ")).unwrap_err();
+            assert!(
+                format!("{error:#}").contains(&format!("missing-{tool}")),
+                "{error:#}"
+            );
         }
     }
 }

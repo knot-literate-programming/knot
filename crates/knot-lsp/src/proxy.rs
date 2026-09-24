@@ -103,15 +103,17 @@ impl TinymistProxy {
         root_uri: Option<Url>,
         path_override: Option<PathBuf>,
     ) -> Result<(Self, mpsc::Receiver<Value>)> {
-        let tinymist_path = if let Some(path) = path_override {
-            if path.exists() {
-                path
-            } else {
-                crate::path_resolver::resolve_binary("tinymist")?
-            }
-        } else {
-            crate::path_resolver::resolve_binary("tinymist")?
-        };
+        let config = root_uri
+            .as_ref()
+            .and_then(|uri| uri.to_file_path().ok())
+            .map(|root| knot_core::Config::find_and_load(&root).map(|(config, _)| config))
+            .transpose()?
+            .unwrap_or_default();
+        let tinymist_path = knot_core::tools::resolve_binary(
+            "tinymist",
+            config.tools.tinymist.as_deref(),
+            path_override.as_deref(),
+        )?;
 
         let mut child = Command::new(&tinymist_path)
             .stdin(Stdio::piped())
@@ -325,6 +327,28 @@ impl TinymistProxy {
 mod tests {
     use super::*;
     use crate::lsp_methods::text_document as lsp;
+
+    #[tokio::test]
+    async fn project_path_overrides_client_path_without_silent_fallback() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("knot.toml"),
+            "[tools]\ntinymist = './missing-tinymist'\n",
+        )
+        .unwrap();
+        let result = TinymistProxy::spawn(
+            Some(Url::from_directory_path(dir.path()).unwrap()),
+            Some(std::env::current_exe().unwrap()),
+        )
+        .await;
+        let error = result
+            .err()
+            .expect("invalid project path must fail before starting a process");
+        assert!(
+            format!("{error:#}").contains("missing-tinymist"),
+            "{error:#}"
+        );
+    }
 
     #[tokio::test]
     #[ignore] // Only run if tinymist is installed

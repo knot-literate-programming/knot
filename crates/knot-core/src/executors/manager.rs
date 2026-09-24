@@ -63,6 +63,7 @@ pub struct ExecutorManager {
     cache_dir: PathBuf,
     timeout: Duration,
     working_directory: Option<PathBuf>,
+    tools: crate::tools::ToolsConfig,
 }
 
 impl ExecutorManager {
@@ -81,12 +82,19 @@ impl ExecutorManager {
             cache_dir,
             timeout,
             working_directory: None,
+            tools: Default::default(),
         }
     }
 
     /// Set the working directory for new interpreter sessions.
     pub fn with_working_directory(mut self, root: PathBuf) -> Self {
         self.working_directory = Some(root);
+        self
+    }
+
+    /// Configure interpreter paths for subsequently created sessions.
+    pub fn with_tools(mut self, tools: crate::tools::ToolsConfig) -> Self {
+        self.tools = tools;
         self
     }
 
@@ -102,12 +110,20 @@ impl ExecutorManager {
 
                 let mut executor: Box<dyn KnotExecutor> = match language {
                     crate::defaults::Language::R => {
-                        let mut exec = RExecutor::new(self.cache_dir.clone(), self.timeout)?;
+                        let mut exec = RExecutor::with_executable(
+                            self.cache_dir.clone(),
+                            self.timeout,
+                            self.tools.r.clone(),
+                        )?;
                         exec.initialize()?;
                         Box::new(exec)
                     }
                     crate::defaults::Language::Python => {
-                        let mut exec = PythonExecutor::new(self.cache_dir.clone(), self.timeout)?;
+                        let mut exec = PythonExecutor::with_executable(
+                            self.cache_dir.clone(),
+                            self.timeout,
+                            self.tools.python.clone(),
+                        )?;
                         exec.initialize()?;
                         Box::new(exec)
                     } // Compiler enforces exhaustive matching - adding a new Language

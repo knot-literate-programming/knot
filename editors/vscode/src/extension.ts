@@ -1,9 +1,11 @@
+import { bundledToolPaths } from './toolPaths';
 import { isKnotCompiledTyp, parseNavigationLocation, NavigationLocation } from './navigation';
 import { CompilationStatus, CompilationEvent } from './compilationStatus';
 // Knot VS Code Extension - LSP Client
 import * as path from 'path';
 import {
     workspace,
+    extensions,
     ExtensionContext,
     window,
     commands,
@@ -329,7 +331,13 @@ export async function activate(context: ExtensionContext) {
         }
 
         const serverOptions: ServerOptions = { command: lspPath, args: [], transport: TransportKind.stdio };
+        const toolPaths = bundledToolPaths(id => extensions.getExtension(id)?.extensionPath);
+        for (const name of ['air', 'ruff']) {
+            const configured = config.get<string>(`formatter.${name}.path`);
+            if (configured && configured !== name) toolPaths[`${name}Path`] = configured;
+        }
         const clientOptions: LanguageClientOptions = {
+            initializationOptions: toolPaths,
             documentSelector: [{ scheme: 'file', language: 'knot' }],
             synchronize: { configurationSection: 'knot', fileEvents: workspace.createFileSystemWatcher('**/*.knot') },
             outputChannel: outputChannel,

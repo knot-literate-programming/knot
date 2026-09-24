@@ -13,6 +13,9 @@ use std::path::{Path, PathBuf};
 /// Project configuration loaded from `knot.toml`.
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct Config {
+    /// Explicit executable paths or names for external tools.
+    #[serde(default)]
+    pub tools: crate::tools::ToolsConfig,
     /// `[document]` section — entry point and include list.
     #[serde(default)]
     pub document: DocumentConfig,
@@ -85,10 +88,11 @@ impl Default for ExecutionConfig {
 impl Config {
     /// Find and load configuration by searching for knot.toml in parent directories
     pub fn find_and_load(start_path: &Path) -> Result<(Self, PathBuf)> {
+        let start_path = std::path::absolute(start_path)?;
         let start_dir = if start_path.is_file() {
-            start_path.parent().unwrap_or(start_path)
+            start_path.parent().unwrap_or(&start_path)
         } else {
-            start_path
+            &start_path
         };
 
         let mut current_dir = start_dir.to_path_buf();
@@ -138,6 +142,12 @@ impl Config {
 
         let mut config: Config = toml::from_str(&content)
             .context(format!("Failed to parse config file: {}", path.display()))?;
+
+        let root = std::path::absolute(path)?
+            .parent()
+            .context("Configuration has no parent directory")?
+            .to_path_buf();
+        config.tools.anchor(&root)?;
 
         // Extract codly-* options from language templates
         if let Some(ref mut r_chunks) = config.r_chunks {
