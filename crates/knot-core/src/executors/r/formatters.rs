@@ -6,6 +6,7 @@
 // - Complex output: Reject with descriptive error
 
 use crate::executors::inline::inline_result_too_complex;
+use crate::typst_syntax::{inline_raw, inline_text};
 use anyhow::Result;
 
 /// Format R output for inline display
@@ -19,13 +20,13 @@ pub fn format_inline_output(output: &str) -> Result<String> {
 
     // Check if it's a scalar (single value with [1] prefix)
     if let Some(scalar_value) = extract_scalar_value(trimmed) {
-        // Return just the value without [1] prefix
-        Ok(scalar_value)
+        // Return just the value without [1] prefix, escaped for markup
+        Ok(inline_text(&scalar_value))
     }
     // Check if it's a short vector
     else if is_short_vector_output(trimmed) {
         // Return with backticks (code inline, no coloration)
-        Ok(format!("`{}`", trimmed))
+        Ok(inline_raw(trimmed))
     }
     // Too complex
     else {
@@ -51,6 +52,11 @@ fn extract_scalar_value(s: &str) -> Option<String> {
     // Extract the part after [1]
     let after_prefix = s[3..].trim();
 
+    // A single quoted string may contain spaces: [1] "y ~ x"
+    if let Some(string) = single_r_string(after_prefix) {
+        return Some(string);
+    }
+
     // Check if it's a single token (scalar)
     let tokens: Vec<&str> = after_prefix.split_whitespace().collect();
     if tokens.len() != 1 {
@@ -66,6 +72,26 @@ fn extract_scalar_value(s: &str) -> Option<String> {
     } else {
         Some(value.to_string())
     }
+}
+
+/// Parse `after_prefix` as exactly one printed R string (`"…"` with `\"`,
+/// `\\`, `\n` and `\t` escapes), returning its contents.
+fn single_r_string(after_prefix: &str) -> Option<String> {
+    let body = after_prefix.strip_prefix('"')?;
+    let mut value = String::new();
+    let mut chars = body.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => value.push(match chars.next()? {
+                'n' => '\n',
+                't' => '\t',
+                other => other,
+            }),
+            '"' => return chars.as_str().is_empty().then_some(value),
+            _ => value.push(c),
+        }
+    }
+    None
 }
 
 /// Check if R output is a short vector
@@ -97,6 +123,15 @@ mod tests {
             extract_scalar_value("[1] \"Alice\""),
             Some("Alice".to_string())
         );
+        assert_eq!(
+            extract_scalar_value("[1] \"y ~ x\""),
+            Some("y ~ x".to_string())
+        );
+        assert_eq!(
+            extract_scalar_value(r#"[1] "say \"hi\"""#),
+            Some("say \"hi\"".to_string())
+        );
+        assert_eq!(extract_scalar_value("[1] \"a\" \"b\""), None);
     }
 
     #[test]

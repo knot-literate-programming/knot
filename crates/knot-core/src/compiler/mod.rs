@@ -557,7 +557,8 @@ pub fn assemble_pass(executed: &[ExecutedNode], source: &str, source_file: &str)
         .filter_map(|node| node.snapshot_warning.as_ref())
     {
         output.push_str(&format!(
-            "\n#code-chunk(lang: \"knot\", warnings: ([{warning}],))\n"
+            "\n#code-chunk(lang: \"knot\", warnings: ({},))\n",
+            crate::typst_syntax::text_content(warning)
         ));
     }
     output
