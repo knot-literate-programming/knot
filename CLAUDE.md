@@ -208,6 +208,19 @@ Knot has two separate, intentionally asymmetric styling systems:
 
 **Rule**: do not route state styles through `knot.toml` or the Rust config pipeline — `lib/knot.typ` is the right and only place for them.
 
+## Errors Are Visible in the PDF
+
+**The PDF is the notebook.** Every error must be visible in the PDF — both the live preview and the final build — at the place it concerns, and reported by the LSP with the same message and a matching severity. An error that only reaches a log (`log::warn`), the CLI output or the editor is a bug.
+
+- Render an error block rather than aborting the compilation: a document containing an error still produces a PDF that shows it.
+- Produce the PDF and LSP messages from one shared helper in `knot-core` (e.g. `defaults::unsupported_language_message`).
+- An execution error in the PDF is an error in the LSP, not a warning.
+- Code marked `#| eval: false` is display-only: it is not an error.
+- Runtime text (messages, code, outputs) must be escaped with the helpers in `typst_syntax.rs`, never inserted as raw markup.
+- Generated Typst must not depend on packages the user may not import (e.g. codly's `local()`), except for options the user explicitly configured.
+
+Open gaps are tracked in issue #96.
+
 ## Key Conventions
 
 - Error handling uses `anyhow::Result` everywhere; the `?` operator propagates freely.
