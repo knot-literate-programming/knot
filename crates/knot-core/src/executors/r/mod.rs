@@ -33,9 +33,18 @@ impl RExecutor {
     /// * `cache_dir` - Directory for caching R outputs
     /// * `timeout`   - Maximum allowed duration for a single chunk execution
     pub fn new(cache_dir: PathBuf, timeout: Duration) -> Result<Self> {
+        Self::with_executable(cache_dir, timeout, None)
+    }
+
+    /// Create an executor with an explicit interpreter path or command name.
+    pub fn with_executable(
+        cache_dir: PathBuf,
+        timeout: Duration,
+        executable: Option<PathBuf>,
+    ) -> Result<Self> {
         std::fs::create_dir_all(&cache_dir)?;
         Ok(Self {
-            process: RProcess::uninitialized(timeout),
+            process: RProcess::uninitialized(timeout).with_executable(executable),
             cache_dir,
         })
     }

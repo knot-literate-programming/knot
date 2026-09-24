@@ -53,9 +53,10 @@ fn project_sources(start: &Path) -> Result<Vec<PathBuf>> {
 }
 
 fn format_paths(files: &[PathBuf], check: bool) -> Result<Vec<PathBuf>> {
-    let formatter = CodeFormatter::new(None, None);
     let mut changes = Vec::new();
     for file in files {
+        let (config, _) = Config::find_and_load(file)?;
+        let formatter = CodeFormatter::new(None, None).with_project_tools(&config.tools);
         let original =
             fs::read_to_string(file).with_context(|| format!("Cannot read {}", file.display()))?;
         let formatted = knot_core::formatting::format_document(&original, &formatter)

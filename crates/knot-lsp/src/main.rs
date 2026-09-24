@@ -11,7 +11,6 @@ mod compilation;
 mod diagnostics;
 mod handlers;
 mod lsp_methods;
-mod path_resolver;
 mod position_mapper;
 mod proxy;
 mod server_impl;
@@ -86,6 +85,13 @@ impl LanguageServer for KnotLanguageServer {
             *root = Some(folders[0].uri.clone());
         }
 
+        if self.root_uri.read().await.is_none() {
+            #[allow(deprecated)]
+            {
+                *self.root_uri.write().await = params.root_uri.clone();
+            }
+        }
+
         // Read binary paths sent by the client (VS Code extension).
         if let Some(opts) = params.initialization_options {
             if let Some(air) = opts.get("airPath").and_then(|v| v.as_str())
@@ -140,16 +146,24 @@ impl LanguageServer for KnotLanguageServer {
             .await;
         let air_path = self.state.air_path_override.read().await.clone();
         let ruff_path = self.state.ruff_path_override.read().await.clone();
-        *self.state.formatter.write().await =
-            Some(knot_core::CodeFormatter::new(air_path, ruff_path));
+        *self.state.formatter.write().await = Some(knot_core::CodeFormatter::with_client_paths(
+            air_path, ruff_path,
+        ));
         // Spawn tinymist initialization in background to avoid blocking the LSP message loop
         let this = self.clone_for_task();
         let root_uri = self.root_uri.read().await.clone();
         let tinymist_path = self.state.tinymist_path_override.read().await.clone();
         tokio::spawn(async move {
-            if let Ok((proxy, mut notification_rx)) =
-                TinymistProxy::spawn(root_uri, tinymist_path).await
-            {
+            let result = TinymistProxy::spawn(root_uri, tinymist_path).await;
+            if let Err(error) = &result {
+                this.client
+                    .show_message(
+                        MessageType::ERROR,
+                        format!("Cannot start Tinymist: {error:#}"),
+                    )
+                    .await;
+            }
+            if let Ok((proxy, mut notification_rx)) = result {
                 *this.state.tinymist.write().await = Some(proxy);
 
                 // VS Code may have sent didOpen for documents before Tinymist was

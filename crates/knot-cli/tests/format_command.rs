@@ -119,6 +119,11 @@ fn missing_formatters_fail_explicitly_but_plain_typst_needs_none() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     fs::create_dir(root.join("bin")).unwrap();
+    fs::write(
+        root.join("knot.toml"),
+        "[tools]\nair = './missing-air'\nruff = './missing-ruff'\n",
+    )
+    .unwrap();
     for (lang, binary) in [("r", "air"), ("python", "ruff")] {
         let source = format!("```{{{lang}}}\nx\n```\n");
         fs::write(root.join("main.knot"), &source).unwrap();
@@ -126,7 +131,7 @@ fn missing_formatters_fail_explicitly_but_plain_typst_needs_none() {
         assert_eq!(output.status.code(), Some(1));
         assert!(
             String::from_utf8_lossy(&output.stderr)
-                .contains(&format!("Failed to execute '{binary}'"))
+                .contains(&format!("Configured tool '{binary}'"))
         );
         assert_eq!(fs::read_to_string(root.join("main.knot")).unwrap(), source);
     }
@@ -220,4 +225,29 @@ fn ruff_failure_reports_stderr_and_does_not_write_the_file() {
     let error = String::from_utf8_lossy(&output.stderr);
     assert!(error.contains("Ruff formatting failed") && error.contains("fixture parse error"));
     assert_eq!(fs::read_to_string(root.join("main.knot")).unwrap(), source);
+}
+
+#[test]
+fn project_tool_paths_work_from_nested_sources_without_path_lookup() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    install_formatters(&root.join("tools with spaces"));
+    fs::create_dir(root.join("chapters")).unwrap();
+    let extension = if cfg!(windows) { ".exe" } else { "" };
+    fs::write(root.join("knot.toml"), format!("[tools]\nair = './tools with spaces/air{extension}'\nruff = './tools with spaces/ruff{extension}'\n")).unwrap();
+    fs::write(
+        root.join("chapters/main.knot"),
+        "```{r}\nx<-1\n```\n```{python}\nx=1\n```\n",
+    )
+    .unwrap();
+    success(&run(&root.join("chapters"), &["main.knot"]));
+    let result = fs::read_to_string(root.join("chapters/main.knot")).unwrap();
+    assert!(result.contains("x <- 1") && result.contains("x = 1"));
+    assert_eq!(
+        fs::read_to_string(root.join("chapters/calls.log"))
+            .unwrap()
+            .lines()
+            .count(),
+        2
+    );
 }

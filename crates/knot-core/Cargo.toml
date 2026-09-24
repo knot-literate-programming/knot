@@ -9,6 +9,8 @@ repository = "https://github.com/knot-literate-programming/knot"
 workspace = true
 
 [dependencies]
+which = "8"
+dirs = "5.0"
 anyhow = { workspace = true }
 chrono = { workspace = true }
 regex = { workspace = true }

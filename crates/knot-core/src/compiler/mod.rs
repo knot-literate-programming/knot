@@ -108,7 +108,8 @@ impl Compiler {
             cache_dir.clone(),
             Duration::from_secs(config.execution.timeout_secs),
         )
-        .with_working_directory(project_root.clone());
+        .with_working_directory(project_root.clone())
+        .with_tools(config.tools.clone());
 
         Self {
             executor_manager,
@@ -223,6 +224,22 @@ impl Compiler {
             };
             let previous_hash = last_hash_per_lang.get(&lang).cloned().unwrap_or_default();
 
+            // Keep snapshot links unchanged, but invalidate execution identities
+            // when the project's selected interpreter changes.
+            let interpreter = match lang.as_str() {
+                "r" => self.config.tools.r.as_deref(),
+                "python" => self.config.tools.python.as_deref(),
+                _ => None,
+            };
+            let hash_context = if let Some(path) = interpreter {
+                use sha2::{Digest, Sha256};
+                format!(
+                    "{previous_hash}|tool:{:x}",
+                    Sha256::digest(path.as_os_str().as_encoded_bytes())
+                )
+            } else {
+                previous_hash.clone()
+            };
             let (hash, need, kind) = match node {
                 ExecutableNode::Chunk(chunk) => {
                     let (chunk_options, resolved_options, merged_codly_options) =
@@ -236,7 +253,7 @@ impl Compiler {
                         &lang,
                         &chunk.code,
                         &chunk_options,
-                        &previous_hash,
+                        &hash_context,
                         &self.project_root,
                     )?;
                     let need = if !resolved_options.eval {
@@ -268,7 +285,7 @@ impl Compiler {
                         &lang,
                         &inline.code,
                         &inline.options,
-                        &previous_hash,
+                        &hash_context,
                     );
                     let need = if !resolved.eval {
                         ExecutionNeed::Skip
@@ -393,8 +410,15 @@ impl Compiler {
                 .iter()
                 .any(|(_, pn)| matches!(pn.need, ExecutionNeed::MustExecute));
             if needs_exec {
-                // Initialize if needed; ignore failure — the chain will produce an error block.
-                let _ = self.executor_manager.get_executor(lang);
+                // Explicit interpreter settings must fail visibly, never silently use
+                // a different interpreter or hide an invalid path in a generic block.
+                let result = self.executor_manager.get_executor(lang);
+                if (lang == "r" && self.config.tools.r.is_some())
+                    || (lang == "python" && self.config.tools.python.is_some())
+                {
+                    result?;
+                }
+                // With automatic discovery, preserve the existing error-block behavior.
             }
             if let Some(exec) = self.executor_manager.take(lang) {
                 chain_executors.insert(lang.clone(), exec);

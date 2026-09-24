@@ -21,6 +21,7 @@ pub struct RProcess {
     pub(super) stdout: Option<BufReader<ChildStdout>>,
     pub(super) stderr: Option<BufReader<ChildStderr>>,
     timeout: Duration,
+    executable: Option<std::path::PathBuf>,
     _helper_file: Option<tempfile::NamedTempFile>,
 }
 
@@ -33,13 +34,20 @@ impl RProcess {
             stdout: None,
             stderr: None,
             timeout,
+            executable: None,
             _helper_file: None,
         }
     }
 
     /// Initialize and spawn the R process
+    pub fn with_executable(mut self, executable: Option<std::path::PathBuf>) -> Self {
+        self.executable = executable;
+        self
+    }
+
     pub fn initialize(&mut self) -> Result<()> {
-        let mut child = Command::new("R")
+        let executable = crate::tools::resolve_binary("R", self.executable.as_deref(), None)?;
+        let mut child = Command::new(&executable)
             .arg("--vanilla")
             .arg("--quiet")
             .arg("--no-save")
@@ -47,7 +55,7 @@ impl RProcess {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .context("R not found. Please install R and ensure it's in your PATH.")?;
+            .with_context(|| format!("Failed to start R: {}", executable.display()))?;
 
         // Disable command echoing in the R session
         let mut stdin = child.stdin.take().context("Failed to open R stdin")?;

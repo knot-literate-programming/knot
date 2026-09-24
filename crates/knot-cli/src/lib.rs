@@ -49,7 +49,9 @@ pub fn build_project_with_options(start_path: Option<&Path>, no_snapshots: bool)
     let start_typst = Instant::now();
 
     let pdf_output_path = output.main_typ_path.with_extension("pdf");
-    let typst_result = std::process::Command::new("typst")
+    let (config, _) = knot_core::Config::find_and_load(&output.project_root)?;
+    let typst = knot_core::tools::resolve_binary("typst", config.tools.typst.as_deref(), None)?;
+    let typst_result = std::process::Command::new(&typst)
         .arg("compile")
         .arg("--root")
         .arg(&output.project_root)

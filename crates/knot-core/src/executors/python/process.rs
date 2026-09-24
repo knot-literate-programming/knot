@@ -65,6 +65,7 @@ pub struct PythonProcess {
     pub(super) stdout: Option<BufReader<ChildStdout>>,
     pub(super) stderr: Option<BufReader<ChildStderr>>,
     timeout: Duration,
+    executable: Option<std::path::PathBuf>,
 }
 
 impl PythonProcess {
@@ -76,11 +77,18 @@ impl PythonProcess {
             stdout: None,
             stderr: None,
             timeout,
+            executable: None,
         }
     }
 
+    pub fn with_executable(mut self, executable: Option<std::path::PathBuf>) -> Self {
+        self.executable = executable;
+        self
+    }
+
     pub fn initialize(&mut self) -> Result<()> {
-        let mut child = Command::new("python3")
+        let executable = crate::tools::resolve_binary("python3", self.executable.as_deref(), None)?;
+        let mut child = Command::new(&executable)
             .arg("-u") // Unbuffered
             .arg("-c") // Execute the wrapper passed as string
             .arg(PYTHON_WRAPPER)
@@ -88,7 +96,7 @@ impl PythonProcess {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .context("python3 not found.")?;
+            .with_context(|| format!("Failed to start Python: {}", executable.display()))?;
 
         self.stdin = Some(child.stdin.take().context("Failed to open Python stdin")?);
         self.stdout = child.stdout.take().map(BufReader::new);
