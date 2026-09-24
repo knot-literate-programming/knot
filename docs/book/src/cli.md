@@ -62,7 +62,12 @@ or scripting.
 knot clean
 ```
 
-Removes the `.knot_cache/` directory and all generated `.typ` files. The next
+Removes `.knot_cache/`, `_knot_files/`, the main document's generated `.typ`
+and `.pdf` files, and hidden `.typ`/`.pdf` intermediates at the project root.
+Reports the number of cached chunks invalidated (across all documents) and files
+removed, or `Nothing to clean.` when there are no files to remove. Empty cache
+and helper directories are also removed. If a cache index is unreadable, cleanup
+still proceeds and the chunk count is reported as unavailable. The next
 `knot build` or `knot watch` will re-execute all chunks from scratch.
 
 ## knot format
