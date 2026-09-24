@@ -56,6 +56,9 @@ pub enum ExecutionNeed {
     MustExecute,
     /// Execution not requested (`eval = false`).
     Skip,
+    /// Invalid options: not executed, and the language chain is suspended as
+    /// after a runtime error (the options may have said `eval: false`).
+    Rejected,
 }
 
 /// Chunk-specific data resolved during the planning phase.

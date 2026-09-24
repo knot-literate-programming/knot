@@ -628,3 +628,42 @@ fn inline_snapshot_budget_warning_is_rendered_outside_the_expression() {
     assert_eq!(output.matches("Knot: python snapshots").count(), 1);
     assert_eq!(compile(&mut compiler, source), output);
 }
+
+const INVALID_OPTIONS: &str = "```{python}\n#| eval: false\n#| fig-width: big\nraise Exception('must not run')\n```\n\n```{python}\nprint('after')\n```\n\n`{python, digits=x} 1 + 1`\n\n```{r}\ncat('r still runs')\n```\n";
+
+#[test]
+fn invalid_options_are_rejected_and_suspend_their_chain() {
+    let (_root, _, mut compiler) = fixture();
+    let doc = Document::parse(INVALID_OPTIONS.into());
+    let (planned, _, preview) = compiler
+        .plan_and_partial(&doc, "main.knot", Phase0Mode::Pending)
+        .unwrap();
+    let needs: Vec<_> = planned
+        .iter()
+        .map(|n| matches!(n.need, ExecutionNeed::Rejected))
+        .collect();
+    assert_eq!(needs, [true, false, true, false]);
+    assert!(preview.contains("Invalid chunk options"), "{preview}");
+    // The next Python chunk is suspended; the R chain is independent.
+    assert_eq!(preview.matches("is-inert: true").count(), 1, "{preview}");
+    assert_eq!(preview.matches("is-pending: true").count(), 1, "{preview}");
+}
+
+#[test]
+#[ignore = "requires R and Python"]
+fn invalid_options_never_execute_code() {
+    let (_root, _, mut compiler) = fixture();
+    let output = compile(&mut compiler, INVALID_OPTIONS);
+    assert!(!output.contains("Execution Error"), "{output}");
+    assert!(
+        !output.contains("must not run\n```], output: ["),
+        "{output}"
+    );
+    assert!(!output.contains("```output\nafter"), "{output}");
+    assert!(output.contains("is-inert: true"), "{output}");
+    assert!(
+        output.contains("the expression is not executed"),
+        "{output}"
+    );
+    assert!(output.contains("r still runs"), "{output}");
+}

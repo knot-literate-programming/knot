@@ -6,7 +6,7 @@
 use crate::cache::Cache;
 use crate::config::Config;
 use crate::executors::{ExecutorManager, KnotExecutor};
-use crate::parser::ast::{Chunk, Document, InlineExpr};
+use crate::parser::ast::{Chunk, ChunkError, Document, InlineExpr};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -265,7 +265,9 @@ impl Compiler {
                         &hash_context,
                         &self.project_root,
                     )?;
-                    let need = if !resolved_options.eval {
+                    let need = if chunk.errors.iter().any(ChunkError::is_error) {
+                        ExecutionNeed::Rejected
+                    } else if !resolved_options.eval {
                         ExecutionNeed::Skip
                     } else if resolved_options.cache
                         && !invalidated.contains(&lang)
@@ -296,7 +298,9 @@ impl Compiler {
                         &inline.options,
                         &hash_context,
                     );
-                    let need = if !resolved.eval {
+                    let need = if inline.errors.iter().any(ChunkError::is_error) {
+                        ExecutionNeed::Rejected
+                    } else if !resolved.eval {
                         ExecutionNeed::Skip
                     } else if !invalidated.contains(&lang)
                         && cache.has_cached_inline_result(&hash)
@@ -310,14 +314,15 @@ impl Compiler {
                 }
             };
 
-            if matches!(need, ExecutionNeed::MustExecute) {
+            if matches!(need, ExecutionNeed::MustExecute | ExecutionNeed::Rejected) {
                 invalidated.insert(lang.clone());
             }
-            if !matches!(need, ExecutionNeed::Skip) {
+            if !matches!(need, ExecutionNeed::Skip | ExecutionNeed::Rejected) {
                 last_hash_per_lang.insert(lang.clone(), hash.clone());
             }
             let enabled = !self.no_snapshots && snapshots.get(&lang).copied().unwrap_or(true);
-            let need = if !enabled && !matches!(need, ExecutionNeed::Skip) {
+            let need = if !enabled && !matches!(need, ExecutionNeed::Skip | ExecutionNeed::Rejected)
+            {
                 ExecutionNeed::MustExecute
             } else {
                 need
@@ -698,6 +703,12 @@ pub fn planned_to_partial_nodes(
             ExecutionNeed::Skip => {
                 must_execute_langs.remove(&pn.lang);
                 (skip_output(pn, backend, &ChunkExecutionState::Ready), false)
+            }
+            ExecutionNeed::Rejected => {
+                // Shown with its option errors; downstream chunks become inert.
+                inert_langs.insert(pn.lang.clone());
+                must_execute_langs.remove(&pn.lang);
+                (skip_output(pn, backend, &ChunkExecutionState::Ready), true)
             }
             ExecutionNeed::CacheHit(crate::executors::ExecutionAttempt::Success(output)) => {
                 must_execute_langs.remove(&pn.lang);
