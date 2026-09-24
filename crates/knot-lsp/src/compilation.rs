@@ -412,6 +412,31 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn editor_sessions_use_and_follow_the_project_interpreters() {
+        let root = tempfile::tempdir().unwrap();
+        let toml = root.path().join("knot.toml");
+        let main = root.path().join("main.knot");
+        std::fs::write(&main, "").unwrap();
+        let uri = Url::from_file_path(&main).unwrap();
+        let (service, _socket) = service().await;
+        let server = service.inner();
+        for configured in ["./missing interpreter", "./other interpreter"] {
+            std::fs::write(&toml, format!("[tools]\npython = '{configured}'\n")).unwrap();
+            server.sync_with_cache(&uri).await;
+            let mut executors = server.state.executors.write().await;
+            let error = executors
+                .get_mut(&uri)
+                .unwrap()
+                .get_executor("python")
+                .err()
+                .expect("a missing configured interpreter cannot start");
+            // Never the system interpreter: the configured path is the one tried.
+            let name = configured.trim_start_matches("./");
+            assert!(format!("{error:#}").contains(name), "{error:#}");
+        }
+    }
+
     async fn service() -> (
         tower_lsp::LspService<KnotLanguageServer>,
         tower_lsp::ClientSocket,

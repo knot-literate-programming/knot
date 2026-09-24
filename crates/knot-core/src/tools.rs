@@ -4,7 +4,7 @@ use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
 /// Optional executable names or paths in the `[tools]` section of `knot.toml`.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ToolsConfig {
     /// Python interpreter (defaults to `python3`).

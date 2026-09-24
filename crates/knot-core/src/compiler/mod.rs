@@ -10,7 +10,6 @@ use crate::parser::ast::{Chunk, ChunkError, Document, InlineExpr};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 pub mod formatters;
 pub mod pipeline;
@@ -107,12 +106,8 @@ impl Compiler {
     ) -> Self {
         info!("📦 Cache directory: {}", cache_dir.display());
 
-        let executor_manager = ExecutorManager::with_timeout(
-            cache_dir.clone(),
-            Duration::from_secs(config.execution.timeout_secs),
-        )
-        .with_working_directory(project_root.clone())
-        .with_tools(config.tools.clone());
+        let executor_manager =
+            ExecutorManager::for_project(&config, project_root.clone(), cache_dir.clone());
 
         Self {
             executor_manager,
