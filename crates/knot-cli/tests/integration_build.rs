@@ -39,6 +39,23 @@ fn test_successful_build_with_includes() {
 
     // Verify that content was injected directly (not using #include)
     let main_typ_content = fs::read_to_string(project_root.join("main.typ")).unwrap();
+    assert_eq!(
+        main_typ_content
+            .matches("// BEGIN-FILE chapters/01-intro.knot")
+            .count(),
+        1
+    );
+    assert_eq!(
+        main_typ_content
+            .matches("// BEGIN-FILE chapters/02-results.knot")
+            .count(),
+        1
+    );
+    let intro = main_typ_content.find("= Introduction").unwrap();
+    let results = main_typ_content.find("= Results").unwrap();
+    let conclusion = main_typ_content.find("= Conclusion").unwrap();
+    assert!(intro < results && results < conclusion);
+
     assert!(
         main_typ_content.contains("// BEGIN-FILE chapters/01-intro.knot"),
         "Main .typ should contain injected content from chapter 1"
@@ -93,6 +110,27 @@ This is the end.
     assert!(
         main_typ_content.contains("= Results"),
         "Main .typ should contain injected content"
+    );
+
+    assert_eq!(
+        main_typ_content
+            .matches("// BEGIN-FILE chapters/01-intro.knot")
+            .count(),
+        1
+    );
+    assert_eq!(
+        main_typ_content
+            .matches("// BEGIN-FILE chapters/02-results.knot")
+            .count(),
+        1
+    );
+    assert!(
+        main_typ_content
+            .find("// BEGIN-FILE chapters/01-intro.knot")
+            .unwrap()
+            < main_typ_content
+                .find("// BEGIN-FILE chapters/02-results.knot")
+                .unwrap()
     );
 
     // Check it's after the main content
