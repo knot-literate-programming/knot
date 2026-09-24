@@ -10,7 +10,7 @@ use crate::config::Config;
 use crate::executors::{ExecutionOutput, ExecutionResult};
 use crate::parser::ResolvedChunkOptions;
 use crate::parser::ast::Chunk;
-use crate::typst_syntax::{inline_raw, inline_text, raw_block, string_literal};
+use crate::typst_syntax::{inline_raw, inline_text, string_literal};
 use std::collections::HashMap;
 
 /// Format the output of a freshly executed node.
@@ -104,12 +104,14 @@ pub(super) fn format_error_block_for_node(
     let lang_text = inline_text(lang);
     let lang_raw = inline_raw(lang);
     let node_name = inline_raw(node_name);
-    let error_msg = raw_block("", error_msg);
+    // Inline raw keeps line breaks and indentation, and codly leaves it alone:
+    // the block renders the same whether or not the document imports codly.
+    let error_msg = format!("#block(raw({}, block: false))", string_literal(error_msg));
     format!(
         "#code-chunk(
     lang: {lang_literal},
     is-inert: false,
-    errors: ([#local(zebra-fill: none)[\n=== Execution Error ({lang_text})\nIn {node_kind} {node_name}\n\n{error_msg}\n\n_Execution of subsequent {lang_raw} blocks has been suspended._]],)
+    errors: ([\n=== Execution Error ({lang_text})\nIn {node_kind} {node_name}\n\n{error_msg}\n\n_Execution of subsequent {lang_raw} blocks has been suspended._],)
 )\n",
         lang_literal = string_literal(lang),
     )

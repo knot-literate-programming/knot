@@ -319,11 +319,8 @@ mod anscombe;
 #[ignore = "requires Typst, R and Python on PATH"]
 fn runtime_text_with_typst_syntax_compiles() {
     let (_temp, project_root) = setup_test_project();
-    // Runtime error blocks use codly's `local` (tracked separately).
+    // No codly import: runtime error blocks must not depend on codly.
     let source = r#"
-#import "@preview/codly:1.3.0": *
-#show: codly-init
-
 = Escaping
 
 ```{r}
@@ -367,12 +364,9 @@ raise ValueError("bad ``` fence and $x_1")
         "{typ}"
     );
     assert!(typ.contains(r#"#"a*b";"#), "{typ}");
+    assert!(typ.contains("ValueError: bad ``` fence and $x_1"), "{typ}");
     assert!(
-        typ.contains("````\nValueError: bad ``` fence and $x_1"),
-        "{typ}"
-    );
-    assert!(
-        !typ.contains(r#"\""#),
-        "Error messages must not show escaped quotes"
+        !typ.contains("local("),
+        "Error blocks must not require codly"
     );
 }
