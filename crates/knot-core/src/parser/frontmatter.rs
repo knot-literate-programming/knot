@@ -1,4 +1,6 @@
 //! Document-local execution settings in a leading YAML block.
+use super::ast::DocumentError;
+use crate::defaults::{Language, canonical_language};
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -60,6 +62,9 @@ fn parse_threshold<'de, D: serde::Deserializer<'de>>(
     ))
 }
 
+/// Appended to header errors: execution settings are unknown, so nothing runs.
+const NOT_EXECUTED: &str = "No code is executed until the header is fixed.";
+
 /// Byte offset immediately after a leading YAML header, or zero when absent.
 pub(crate) fn header_end(source: &str) -> usize {
     let mut lines = source.split_inclusive('\n');
@@ -77,7 +82,14 @@ pub(crate) fn header_end(source: &str) -> usize {
     source.len()
 }
 
-pub(super) fn parse(source: &str) -> (usize, HashMap<String, bool>, Option<u64>, Vec<String>) {
+pub(super) fn parse(
+    source: &str,
+) -> (
+    usize,
+    HashMap<String, bool>,
+    Option<u64>,
+    Vec<DocumentError>,
+) {
     let end = header_end(source);
     if end == 0 {
         return (0, HashMap::new(), default_threshold(), Vec::new());
@@ -88,7 +100,10 @@ pub(super) fn parse(source: &str) -> (usize, HashMap<String, bool>, Option<u64>,
             end,
             HashMap::new(),
             default_threshold(),
-            vec!["Unclosed YAML header".into()],
+            vec![DocumentError::new(
+                "Unclosed YAML header: add a closing `---` line. The whole file is read as the header.",
+                0,
+            )],
         );
     }
     let yaml = lines[1..lines.len() - 1].join("\n");
@@ -99,20 +114,45 @@ pub(super) fn parse(source: &str) -> (usize, HashMap<String, bool>, Option<u64>,
     };
     match parsed {
         Ok(settings) => {
-            let errors = settings
-                .snapshots
-                .keys()
-                .filter(|lang| !matches!(lang.as_str(), "r" | "python"))
-                .map(|lang| format!("Unknown snapshots language: '{lang}' (expected r or python)"))
-                .collect();
-            (end, settings.snapshots, settings.threshold, errors)
+            let mut snapshots = HashMap::new();
+            let mut errors = Vec::new();
+            for (tag, enabled) in settings.snapshots {
+                let language = canonical_language(&tag);
+                if language.parse::<Language>().is_ok() {
+                    snapshots.insert(language, enabled);
+                } else {
+                    // Report on the line declaring the key (the header starts at line 0).
+                    let line = lines
+                        .iter()
+                        .position(|l| l.trim_start().starts_with(&format!("{tag}:")))
+                        .unwrap_or(0);
+                    errors.push(DocumentError::new(
+                        format!(
+                            "Unknown snapshots language: '{tag}' (expected r or python). {NOT_EXECUTED}"
+                        ),
+                        line,
+                    ));
+                }
+            }
+            (end, snapshots, settings.threshold, errors)
         }
-        Err(error) => (
-            end,
-            HashMap::new(),
-            default_threshold(),
-            vec![format!("Invalid YAML header: {error}")],
-        ),
+        Err(error) => {
+            // serde_yaml counts lines from the first YAML line, i.e. source line 1.
+            let line = error.location().map_or(0, |location| location.line());
+            let message = error.to_string();
+            let message = message
+                .rfind(" at line ")
+                .map_or(message.as_str(), |index| &message[..index]);
+            (
+                end,
+                HashMap::new(),
+                default_threshold(),
+                vec![DocumentError::new(
+                    format!("Invalid YAML header: {message}. {NOT_EXECUTED}"),
+                    line,
+                )],
+            )
+        }
     }
 }
 
@@ -133,6 +173,24 @@ mod tests {
             doc.format(|_, _, _| None)
                 .starts_with(&source[..doc.header_end])
         );
+    }
+
+    #[test]
+    fn header_errors_are_located_and_aliases_accepted() {
+        let doc = Document::parse("---\nsnapshots:\n  python: nope\n---\nBody".into());
+        assert_eq!(doc.errors.len(), 1);
+        assert_eq!(doc.errors[0].line, 2, "{:?}", doc.errors);
+        assert!(!doc.errors[0].message.contains(" at line "));
+        assert!(doc.blocks_execution());
+
+        let doc = Document::parse("---\nsnapshots:\n  r: true\n  pyhton: false\n---\n".into());
+        assert_eq!(doc.errors[0].line, 3, "{:?}", doc.errors);
+
+        let doc = Document::parse("---\nsnapshots: {py: false, R: true}\n---\n".into());
+        assert!(doc.errors.is_empty(), "{:?}", doc.errors);
+        assert_eq!(doc.snapshots.get("python"), Some(&false));
+        assert_eq!(doc.snapshots.get("r"), Some(&true));
+        assert!(!doc.blocks_execution());
     }
 
     #[test]

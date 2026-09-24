@@ -530,6 +530,43 @@ pub struct InlineExpr {
     pub errors: Vec<ChunkError>,
 }
 
+/// A document-level syntax error (YAML header, unclosed chunk).
+///
+/// These errors are rendered in the generated Typst at the place they concern,
+/// and reported by the LSP on the same line.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DocumentError {
+    pub message: String,
+    /// 0-based source line.
+    pub line: usize,
+}
+
+impl DocumentError {
+    pub fn new(message: impl Into<String>, line: usize) -> Self {
+        Self {
+            message: message.into(),
+            line,
+        }
+    }
+}
+
+impl std::fmt::Display for DocumentError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "line {}: {}", self.line + 1, self.message)
+    }
+}
+
+/// An opening fence without a closing fence. As in CommonMark, the chunk runs
+/// to the end of the file: the rest of the source is shown as code and never
+/// executed.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnclosedChunk {
+    /// Byte offset of the opening fence line.
+    pub start: usize,
+    /// Canonical language of the fence.
+    pub language: String,
+}
+
 pub struct Document {
     pub snapshot_warning_threshold: Option<u64>,
     pub snapshots: HashMap<String, bool>,
@@ -537,10 +574,18 @@ pub struct Document {
     pub source: String,
     pub chunks: Vec<Chunk>,
     pub inline_exprs: Vec<InlineExpr>,
-    pub errors: Vec<String>,
+    pub errors: Vec<DocumentError>,
+    pub unclosed_chunk: Option<UnclosedChunk>,
 }
 
 impl Document {
+    /// Whether the YAML header is invalid. Execution settings are then unknown,
+    /// so no code may run until the header is fixed.
+    pub fn blocks_execution(&self) -> bool {
+        let header_lines = self.source[..self.header_end].lines().count();
+        self.errors.iter().any(|error| error.line < header_lines)
+    }
+
     /// Parse a knot document from source code.
     ///
     /// This function always succeeds. Syntax errors are stored in `doc.errors`

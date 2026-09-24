@@ -370,3 +370,40 @@ raise ValueError("bad ``` fence and $x_1")
         "Error blocks must not require codly"
     );
 }
+
+#[test]
+#[ignore = "requires Typst on PATH"]
+fn document_errors_are_rendered_in_the_pdf() {
+    for (source, message) in [
+        (
+            "---\nsnapshots: {python: maybe}\n---\n= Title\n\n```{python}\nraise ValueError('must not run')\n```\n",
+            "Invalid YAML header",
+        ),
+        (
+            "= Title\n\nText before.\n\n```{r}\n# comment with $ and #hash\nx <- 1\n",
+            "Unclosed chunk",
+        ),
+    ] {
+        let (_temp, project_root) = setup_test_project();
+        fs::write(project_root.join("main.knot"), source).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_knot"))
+            .arg("build")
+            .current_dir(&project_root)
+            .output()
+            .expect("Failed to launch knot");
+        assert!(
+            output.status.success(),
+            "A document error must still produce a PDF: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            fs::read(project_root.join("main.pdf"))
+                .unwrap()
+                .starts_with(b"%PDF-")
+        );
+        let typ = fs::read_to_string(project_root.join("main.typ")).unwrap();
+        assert!(typ.contains(message), "{typ}");
+        assert!(typ.contains("= Title"), "{typ}");
+        assert!(!typ.contains("Execution Error"), "{typ}");
+    }
+}

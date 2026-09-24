@@ -4,7 +4,10 @@
 //! Indentation is handled globally for each chunk to ensure structural integrity.
 #![allow(missing_docs)]
 
-use super::ast::{Chunk, ChunkError, Document, InlineExpr, InlineOptions, Position, Range, Show};
+use super::ast::{
+    Chunk, ChunkError, Document, DocumentError, InlineExpr, InlineOptions, Position, Range, Show,
+    UnclosedChunk,
+};
 use super::indent::dedent;
 use super::options::parse_options;
 use crate::defaults::canonical_language;
@@ -22,6 +25,7 @@ pub fn parse_document(source: &str) -> Document {
 
     let mut current_offset = header_end;
     let mut chunk_index = 0; // Ordinal chunk counter
+    let mut unclosed_chunk = None;
 
     // 1. Extract Chunks line by line
     while current_offset < source.len() {
@@ -151,15 +155,26 @@ pub fn parse_document(source: &str) -> Document {
                     continue;
                 }
             } else {
+                // No closing fence anywhere below: as in CommonMark, the chunk
+                // runs to the end of the file and nothing after it is parsed.
                 let pos = offset_to_position(original_source, start_byte);
-                errors.push(format!("Unclosed chunk starting at line {}", pos.line + 1));
+                errors.push(DocumentError::new(
+                    "Unclosed chunk: add a closing ``` fence. The rest of the file is shown as code and not executed.",
+                    pos.line,
+                ));
+                unclosed_chunk = Some(UnclosedChunk {
+                    start: start_byte,
+                    language: canonical_language(lang),
+                });
+                break;
             }
         }
 
         current_offset += line_full_len;
     }
 
-    let inline_exprs = extract_inline_exprs_manual(source, &chunks, header_end);
+    let body_end = unclosed_chunk.as_ref().map_or(source.len(), |c| c.start);
+    let inline_exprs = extract_inline_exprs_manual(&source[..body_end], &chunks, header_end);
 
     Document {
         snapshot_warning_threshold,
@@ -169,6 +184,7 @@ pub fn parse_document(source: &str) -> Document {
         chunks,
         inline_exprs,
         errors,
+        unclosed_chunk,
     }
 }
 
@@ -414,6 +430,22 @@ mod tests {
             .collect();
         // Unknown languages keep their tag so that they can be reported by name.
         assert_eq!(inline, ["python", "julia"]);
+    }
+
+    #[test]
+    fn test_unclosed_chunk_runs_to_end_of_file() {
+        let content = "Intro `{r} 1`\n\n```{py}\nx = `{r} 2`\n```{r}\ny\n";
+        let doc = Document::parse(content.to_string());
+        assert!(doc.chunks.is_empty());
+        assert_eq!(doc.errors.len(), 1, "{:?}", doc.errors);
+        assert_eq!(doc.errors[0].line, 2);
+        assert!(doc.errors[0].message.starts_with("Unclosed chunk"));
+        let unclosed = doc.unclosed_chunk.unwrap();
+        assert_eq!(unclosed.start, content.find("```{py}").unwrap());
+        assert_eq!(unclosed.language, "python");
+        // Inline expressions inside the unclosed chunk are never executed.
+        assert_eq!(doc.inline_exprs.len(), 1);
+        assert_eq!(doc.inline_exprs[0].code, "1");
     }
 
     #[test]

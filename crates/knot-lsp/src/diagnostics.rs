@@ -26,22 +26,24 @@ pub fn get_diagnostics(uri: &Url, text: &str, include_runtime: bool) -> Vec<Diag
     // 1. Parsing and Structure Diagnostics
     let doc = parse_document(text);
 
-    // Check for global document errors
-    for error in doc.errors {
+    // Document errors (YAML header, unclosed chunk), on the line they concern;
+    // the PDF renders the same messages.
+    for error in &doc.errors {
+        let line_text = text.lines().nth(error.line).unwrap_or("");
         diagnostics.push(Diagnostic {
             range: Range {
                 start: Position {
-                    line: 0,
+                    line: error.line as u32,
                     character: 0,
                 },
                 end: Position {
-                    line: 0,
-                    character: 1,
+                    line: error.line as u32,
+                    character: line_text.encode_utf16().count().max(1) as u32,
                 },
             },
             severity: Some(DiagnosticSeverity::ERROR),
             source: Some("knot".to_string()),
-            message: error,
+            message: error.message.clone(),
             ..Diagnostic::default()
         });
     }
@@ -269,5 +271,19 @@ mod tests {
         assert_eq!(errors[0].range.end.character, "```{julia}".len() as u32);
         assert_eq!(errors[1].range.start.line, 13);
         assert!(errors[0].message.contains("r and python"));
+    }
+
+    #[test]
+    fn document_errors_are_reported_on_their_line() {
+        let uri = Url::parse("file:///main.knot").unwrap();
+        let text = "---\nsnapshots:\n  python: nope\n---\nIntro\n\n```{r}\nx <- 1\n";
+        let errors: Vec<_> = get_diagnostics(&uri, text, false)
+            .into_iter()
+            .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
+            .collect();
+        let lines: Vec<_> = errors.iter().map(|d| d.range.start.line).collect();
+        assert_eq!(lines, [2, 6], "{errors:?}");
+        assert!(errors[0].message.starts_with("Invalid YAML header"));
+        assert!(errors[1].message.starts_with("Unclosed chunk"));
     }
 }
