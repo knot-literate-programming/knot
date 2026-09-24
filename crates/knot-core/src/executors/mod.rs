@@ -26,6 +26,14 @@ pub mod side_channel;
 /// Spawns two threads, one per stream, and waits for both with the given timeout.
 /// Returns `Some((stdout, stderr, reader_out, reader_err))` on success,
 /// or `None` if either stream does not produce a boundary within `timeout`.
+/// Time allowed for an interpreter to start: the chunk timeout, but never
+/// less than [`Defaults::INTERPRETER_STARTUP_TIMEOUT_SECS`](crate::Defaults).
+pub(crate) fn startup_timeout(chunk_timeout: Duration) -> Duration {
+    chunk_timeout.max(Duration::from_secs(
+        crate::Defaults::INTERPRETER_STARTUP_TIMEOUT_SECS,
+    ))
+}
+
 pub(crate) fn read_streams_until_boundary(
     stdout: BufReader<ChildStdout>,
     stderr: BufReader<ChildStderr>,

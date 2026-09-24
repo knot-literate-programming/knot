@@ -108,6 +108,11 @@ impl Defaults {
     /// Default timeout (in seconds) for R/Python chunk execution.
     /// Overridable via `[execution] timeout-secs` in knot.toml.
     pub const DEFAULT_EXECUTION_TIMEOUT_SECS: u64 = 30;
+
+    /// Minimum time allowed for an interpreter to start and load the Knot
+    /// helpers. Startup is not governed by the per-chunk timeout: a short
+    /// `timeout-secs` must not prevent R or Python from starting on a slow machine.
+    pub const INTERPRETER_STARTUP_TIMEOUT_SECS: u64 = 60;
 }
 
 #[cfg(test)]
@@ -141,5 +146,21 @@ mod tests {
         // Verify constants have expected non-empty values
         assert_ne!(Defaults::BOUNDARY_MARKER, "");
         assert_ne!(Defaults::CACHE_DIR_NAME, "");
+    }
+}
+
+#[cfg(test)]
+mod startup_tests {
+    use std::time::Duration;
+
+    #[test]
+    fn startup_is_never_limited_by_a_short_chunk_timeout() {
+        let startup = crate::executors::startup_timeout;
+        let long = Duration::from_secs(600);
+        assert_eq!(
+            startup(Duration::from_millis(500)),
+            Duration::from_secs(super::Defaults::INTERPRETER_STARTUP_TIMEOUT_SECS)
+        );
+        assert_eq!(startup(long), long);
     }
 }
