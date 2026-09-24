@@ -79,3 +79,24 @@ R alias: `{r} r_value`, Python alias: `{py} shared`.
     assert!(result.contains("Python alias: 7"), "{result}");
     assert!(!result.contains("Execution Error"), "{result}");
 }
+
+#[test]
+fn test_unsupported_language_error_is_rendered() {
+    let temp_dir = TempDir::new().unwrap();
+    let main_knot = temp_dir.path().join("main.knot");
+    let source = "```{julia}\nx = 1\n```\n\n```{bash}\n#| eval: false\nls\n```\n";
+    fs::write(&main_knot, source).unwrap();
+
+    let doc = Document::parse(source.to_string());
+    let mut compiler = Compiler::new(&main_knot).expect("Failed to create compiler");
+    let result = compiler.compile(&doc, "main.knot").unwrap();
+
+    // The notebook is the PDF: the error must be rendered, not only reported.
+    assert!(result.contains("Execution Error (julia)"), "{result}");
+    assert_eq!(
+        result.matches("Unsupported language").count(),
+        1,
+        "{result}"
+    );
+    assert!(result.contains("ls"), "{result}");
+}

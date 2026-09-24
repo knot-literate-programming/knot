@@ -68,6 +68,17 @@ pub fn canonical_language(tag: &str) -> String {
         .unwrap_or_else(|_| tag.to_string())
 }
 
+/// Error shown in the PDF and in the editor for a language Knot cannot
+/// execute; `None` when the language is supported.
+pub fn unsupported_language_message(language: &str) -> Option<String> {
+    language.parse::<Language>().err()?;
+    let supported: Vec<_> = Language::all().iter().map(Language::as_str).collect();
+    Some(format!(
+        "Unsupported language '{language}': Knot executes {}. Add `#| eval: false` to display this code without running it.",
+        supported.join(" and ")
+    ))
+}
+
 /// Default values for chunk options, inline options, graphics, and system constants
 pub struct Defaults;
 

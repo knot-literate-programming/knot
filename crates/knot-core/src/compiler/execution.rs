@@ -225,7 +225,8 @@ fn handle_must_execute(
                     format_error_block_for_node(
                         &pn.kind,
                         ctx.lang,
-                        &format!("Unsupported language: '{}'", ctx.lang),
+                        &crate::defaults::unsupported_language_message(ctx.lang)
+                            .unwrap_or_else(|| format!("No executor for '{}'", ctx.lang)),
                     ),
                     true,
                 ));
