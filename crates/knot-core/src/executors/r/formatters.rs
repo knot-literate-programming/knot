@@ -5,6 +5,7 @@
 // - Short vectors: Wrap in backticks (e.g., "`[1] 1 2 3 4 5`")
 // - Complex output: Reject with descriptive error
 
+use crate::executors::inline::inline_result_too_complex;
 use anyhow::Result;
 
 /// Format R output for inline display
@@ -28,16 +29,7 @@ pub fn format_inline_output(output: &str) -> Result<String> {
     }
     // Too complex
     else {
-        anyhow::bail!(
-            "Inline expression result is too complex or long.\n\
-             Result: {}\n\
-             Inline expressions should return simple scalar values or short vectors.",
-            if trimmed.len() > 100 {
-                &trimmed[..100]
-            } else {
-                trimmed
-            }
-        )
+        Err(inline_result_too_complex(trimmed, "short vectors"))
     }
 }
 
@@ -84,7 +76,7 @@ fn extract_scalar_value(s: &str) -> Option<String> {
 /// - More than one value after [1]
 /// - Reasonable length (< 80 chars for inline display)
 fn is_short_vector_output(s: &str) -> bool {
-    if s.contains('\n') || !s.starts_with("[1]") || s.len() >= 80 {
+    if s.contains('\n') || !s.starts_with("[1]") || s.chars().count() >= 80 {
         return false;
     }
 
@@ -105,6 +97,14 @@ mod tests {
             extract_scalar_value("[1] \"Alice\""),
             Some("Alice".to_string())
         );
+    }
+
+    #[test]
+    fn test_format_inline_rejects_long_multibyte_output() {
+        // Byte 100 falls inside a two-byte character: must not panic.
+        let output = format!("[1] a{}\n[2] b", "é".repeat(150));
+        let error = format_inline_output(&output).unwrap_err().to_string();
+        assert!(error.contains("short vectors"));
     }
 
     #[test]
