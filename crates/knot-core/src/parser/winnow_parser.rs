@@ -340,7 +340,7 @@ fn parse_inline_options(options_str: &str) -> (InlineOptions, Vec<ChunkError>) {
                 format!("Invalid inline options '{options_text}': expected key=value pairs"),
                 None,
             ));
-            return (options, errors);
+            return (options, not_executed(errors));
         }
     };
     for (key, value) in pairs {
@@ -386,7 +386,15 @@ fn parse_inline_options(options_str: &str) -> (InlineOptions, Vec<ChunkError>) {
             }
         }
     }
-    (options, errors)
+    (options, not_executed(errors))
+}
+
+/// Inline expressions with option errors do not run (see `ExecutionNeed::Rejected`).
+fn not_executed(mut errors: Vec<ChunkError>) -> Vec<ChunkError> {
+    for error in errors.iter_mut().filter(|e| e.is_error()) {
+        error.message.push_str("; the expression is not executed");
+    }
+    errors
 }
 
 fn parse_kv_pairs<'a>(input: &mut &'a str) -> ModalResult<Vec<(&'a str, &'a str)>> {
@@ -482,7 +490,10 @@ mod tests {
             .iter()
             .map(|e| {
                 let d = &e.errors[0];
-                (d.severity, d.message.split(':').next().unwrap().to_string())
+                (
+                    d.severity,
+                    d.message.split([':', ';']).next().unwrap().to_string(),
+                )
             })
             .collect();
         assert_eq!(

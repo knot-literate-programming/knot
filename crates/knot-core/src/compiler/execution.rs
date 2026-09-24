@@ -189,6 +189,8 @@ fn process_node(
             Ok((result_clone, false))
         }
 
+        ExecutionNeed::Rejected => Ok((skip_output(pn, ctx.backend, state), true)),
+
         ExecutionNeed::Skip => {
             let content = skip_output(pn, ctx.backend, state);
             Ok((content, false))

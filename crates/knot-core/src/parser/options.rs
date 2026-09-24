@@ -108,7 +108,9 @@ pub fn parse_options(
             };
 
             errors.push(ChunkError::new(
-                format!("Option parsing error: {}", e),
+                format!(
+                    "Invalid chunk options: {e}. The chunk is not executed and later chunks in this language are suspended."
+                ),
                 line_offset,
             ));
             (ChunkOptions::default(), codly_options, errors)
@@ -137,7 +139,11 @@ mod tests {
     fn test_parse_invalid_boolean() {
         let options_block = "#| eval: maybe\n";
         let (opts, _codly, errors) = parse_options(options_block);
-        assert!(errors.iter().any(|e| e.message.contains("parsing error")));
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("Invalid chunk options"))
+        );
         assert_eq!(opts.eval, None);
     }
 
