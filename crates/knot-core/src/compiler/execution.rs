@@ -49,6 +49,8 @@ pub(super) type ChainOutput = (
 /// Immutable per-chain context threaded through execution helpers.
 struct ChainContext<'a> {
     lang: &'a str,
+    /// Why the interpreter could not start, if it could not.
+    startup_error: Option<&'a str>,
     cache: &'a Arc<Mutex<Cache>>,
     backend: &'a TypstBackend,
     cancellation: &'a crate::cancellation::Cancellation,
@@ -79,6 +81,7 @@ pub(super) fn run_language_chain(
     lang: String,
     nodes: Vec<(usize, PlannedNode)>,
     exec: Option<Box<dyn KnotExecutor>>,
+    startup_error: Option<String>,
     cache: Arc<Mutex<Cache>>,
     backend: &TypstBackend,
     config: &Config,
@@ -87,6 +90,7 @@ pub(super) fn run_language_chain(
 ) -> Result<ChainOutput> {
     let ctx = ChainContext {
         lang: &lang,
+        startup_error: startup_error.as_deref(),
         cache: &cache,
         backend,
         cancellation,
@@ -211,9 +215,20 @@ fn handle_must_execute(
 ) -> Result<(String, bool)> {
     // Restore session snapshot before executing.
     // Lock only for the read, release before executing.
-    {
+    // A failed restore is shown on the chunk and suspends the chain; it is
+    // not cached, since the next compilation may succeed.
+    let restored = {
         let cache_guard = ctx.cache.lock().unwrap();
-        sm.restore_if_needed(ctx.lang, &pn.previous_hash, &cache_guard)?;
+        sm.restore_if_needed(ctx.lang, &pn.previous_hash, &cache_guard)
+    };
+    if let Err(error) = restored {
+        let message = format!(
+            "{error:#}. Rebuild without snapshots (`knot build --no-snapshots`) or run `knot clean`."
+        );
+        return Ok((
+            format_error_block_for_node(&pn.kind, ctx.lang, &message),
+            true,
+        ));
     }
 
     // All executor interactions are confined to this block so that the borrow
@@ -228,6 +243,11 @@ fn handle_must_execute(
                         &pn.kind,
                         ctx.lang,
                         &crate::defaults::unsupported_language_message(ctx.lang)
+                            .or_else(|| {
+                                ctx.startup_error.map(|error| {
+                                    format!("Cannot start the {} interpreter: {error}", ctx.lang)
+                                })
+                            })
                             .unwrap_or_else(|| format!("No executor for '{}'", ctx.lang)),
                     ),
                     true,
@@ -263,7 +283,7 @@ fn handle_must_execute(
     }; // exec (and its borrow of sm.exec) is released here.
 
     // Successful execution: persist result to cache, advance snapshot pointer.
-    sm.record_execution(ctx.lang, &pn.hash, &mut ctx.cache.lock().unwrap())?;
+    let saved = sm.record_execution(ctx.lang, &pn.hash, &mut ctx.cache.lock().unwrap());
     cache_chunk_result(pn, &output, ctx.cache)?;
     if matches!(pn.kind, PlannedNodeKind::Inline { .. })
         && let ExecutionResult::Text(text) = &output.result
@@ -273,11 +293,41 @@ fn handle_must_execute(
             .unwrap()
             .save_inline_result(pn.hash.clone(), text)?;
     }
+    // Not cached: the warning concerns this compilation's snapshot only.
+    if let Err(error) = saved {
+        attach_warning(
+            pn,
+            &mut output,
+            sm,
+            format!(
+                "Could not save the {} session snapshot: {error:#}. The result is valid; the next compilation re-executes this chain.",
+                ctx.lang
+            ),
+        );
+    }
     append_snapshot_warning(pn, &mut output, sm, ctx.cache)?;
     Ok((
         format_executed_node(pn, &output, ctx.backend, &ChunkExecutionState::Ready),
         false,
     ))
+}
+
+/// Chunks show warnings in their block; inline expressions after the document body.
+fn attach_warning(
+    pn: &PlannedNode,
+    output: &mut ExecutionOutput,
+    sm: &mut SnapshotManager,
+    message: String,
+) {
+    if matches!(pn.kind, PlannedNodeKind::Inline { .. }) {
+        sm.inline_warning = Some(message);
+    } else {
+        output.warnings.push(crate::executors::RuntimeWarning {
+            message,
+            call: None,
+            line: None,
+        });
+    }
 }
 
 fn append_snapshot_warning(
@@ -287,15 +337,7 @@ fn append_snapshot_warning(
     cache: &Arc<Mutex<Cache>>,
 ) -> Result<()> {
     if let Some(message) = sm.warning(pn, &cache.lock().unwrap())? {
-        if matches!(pn.kind, PlannedNodeKind::Inline { .. }) {
-            sm.inline_warning = Some(message);
-        } else {
-            output.warnings.push(crate::executors::RuntimeWarning {
-                message,
-                call: None,
-                line: None,
-            });
-        }
+        attach_warning(pn, output, sm, message);
     }
     Ok(())
 }

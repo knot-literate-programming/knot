@@ -42,17 +42,24 @@ fn invalid_interpreter_setting_fails_without_using_system_interpreter() {
             format!("[tools]\n{key} = './missing interpreter'\n"),
         )
         .unwrap();
-        let error = Compiler::new(&file)
+        // The PDF shows why the configured interpreter cannot start; nothing
+        // runs with another interpreter, and the rest of the chain is suspended.
+        let output = Compiler::new(&file)
             .unwrap()
             .compile(
-                &Document::parse(format!("```{{{lang}}}\nprint(1)\n```")),
+                &Document::parse(format!(
+                    "```{{{lang}}}\nprint(1)\n```\n```{{{lang}}}\nprint(2)\n```"
+                )),
                 "main.knot",
             )
-            .unwrap_err();
+            .unwrap();
         assert!(
-            format!("{error:#}").contains("missing interpreter"),
-            "{error:#}"
+            output.contains(&format!("Cannot start the {lang} interpreter")),
+            "{output}"
         );
+        assert!(output.contains("missing interpreter"), "{output}");
+        assert!(output.contains("is-inert: true"), "{output}");
+        assert!(!output.contains("```output"), "{output}");
     }
 }
 
