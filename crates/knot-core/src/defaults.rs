@@ -93,6 +93,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn language_from_str_accepts_supported_names_and_aliases() {
+        for (input, expected) in [
+            ("r", Language::R),
+            ("R", Language::R),
+            ("python", Language::Python),
+            ("Python", Language::Python),
+            ("PYTHON", Language::Python),
+            ("py", Language::Python),
+            ("Py", Language::Python),
+        ] {
+            assert_eq!(input.parse::<Language>(), Ok(expected), "input: {input:?}");
+        }
+    }
+
+    #[test]
+    fn language_from_str_rejects_unknown_empty_and_padded_names() {
+        for input in ["julia", "", "R ", " python", "py\n"] {
+            assert!(input.parse::<Language>().is_err(), "input: {input:?}");
+        }
+    }
+
+    #[test]
     fn test_system_constants_not_empty() {
         // Verify constants have expected non-empty values
         assert_ne!(Defaults::BOUNDARY_MARKER, "");
