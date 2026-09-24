@@ -24,6 +24,51 @@ fn lsp_severity(severity: knot_core::parser::ast::Severity) -> DiagnosticSeverit
     }
 }
 
+/// Errors for includes listed in `knot.toml` that do not exist, when `uri` is
+/// the project's main file; the PDF renders them at the same place.
+fn missing_include_diagnostics(uri: &Url, text: &str) -> Vec<Diagnostic> {
+    let Ok(path) = uri.to_file_path() else {
+        return Vec::new();
+    };
+    let Ok((config, root)) = Config::find_and_load(&path) else {
+        return Vec::new();
+    };
+    let is_main = config
+        .document
+        .main
+        .as_deref()
+        .is_some_and(|main| root.join(main).canonicalize().ok() == path.canonicalize().ok());
+    if !is_main {
+        return Vec::new();
+    }
+    let lines = text.lines().count().max(1);
+    let line = (knot_core::project::find_placeholder_line(text) - 1).min(lines - 1);
+    let width = text.lines().nth(line).unwrap_or("").encode_utf16().count() as u32;
+    config
+        .document
+        .includes
+        .iter()
+        .flatten()
+        .filter(|name| matches!(knot_core::project::resolve_include(&root, name), Ok(None)))
+        .map(|name| Diagnostic {
+            range: Range {
+                start: Position {
+                    line: line as u32,
+                    character: 0,
+                },
+                end: Position {
+                    line: line as u32,
+                    character: width.max(1),
+                },
+            },
+            severity: Some(DiagnosticSeverity::ERROR),
+            source: Some("knot".to_string()),
+            message: knot_core::project::missing_include_message(name),
+            ..Diagnostic::default()
+        })
+        .collect()
+}
+
 /// Generate diagnostics for a document
 pub fn get_diagnostics(uri: &Url, text: &str, include_runtime: bool) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
@@ -55,6 +100,9 @@ pub fn get_diagnostics(uri: &Url, text: &str, include_runtime: bool) -> Vec<Diag
             ..Diagnostic::default()
         });
     }
+
+    // Missing includes are reported on the main file, where they are injected.
+    diagnostics.extend(missing_include_diagnostics(uri, text));
 
     // Check for errors in chunks (parsing/options)
     for chunk in &doc.chunks {
@@ -303,5 +351,26 @@ mod tests {
                 DiagnosticSeverity::WARNING
             ]
         );
+    }
+
+    #[test]
+    fn missing_includes_are_reported_on_the_placeholder_of_the_main_file() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("knot.toml"),
+            "[document]\nmain = 'main.knot'\nincludes = ['here.knot', 'gone.knot']\n",
+        )
+        .unwrap();
+        std::fs::write(root.path().join("here.knot"), "").unwrap();
+        let text = "= Title\n\n/* KNOT-INJECT-CHAPTERS */\n";
+        let main = root.path().join("main.knot");
+        std::fs::write(&main, text).unwrap();
+        let errors = get_diagnostics(&Url::from_file_path(&main).unwrap(), text, false);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors[0].range.start.line, 2);
+        assert!(errors[0].message.contains("gone.knot"));
+        // Other files of the project do not repeat the error.
+        let here = root.path().join("here.knot");
+        assert!(get_diagnostics(&Url::from_file_path(&here).unwrap(), "", false).is_empty());
     }
 }

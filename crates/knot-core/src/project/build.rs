@@ -17,6 +17,13 @@ struct Source {
     text: String,
 }
 
+/// An include listed in `knot.toml`, in order. A missing file is rendered as
+/// an error at its place; the rest of the project still compiles.
+enum Include {
+    Found(Source),
+    Missing(String),
+}
+
 /// A coherent source snapshot and private cache/artifacts for one compilation.
 /// Callers must serialize preparation and publication against other publishers
 /// of the same project. Rendering itself can run concurrently in separate builds.
@@ -25,7 +32,7 @@ pub struct ProjectBuild {
     root: PathBuf,
     paths: ProjectPaths,
     main: Source,
-    includes: Vec<Source>,
+    includes: Vec<Include>,
     workspace: tempfile::TempDir,
     cancellation: Cancellation,
     no_snapshots: bool,
@@ -61,21 +68,17 @@ impl ProjectBuild {
         let main = read(paths.main_file.clone(), paths.main_file_name.clone())?;
         let mut includes = Vec::new();
         for name in config.document.includes.as_deref().unwrap_or_default() {
-            let path = root
-                .join(name)
-                .canonicalize()
-                .with_context(|| format!("Included file not found: {name}"))?;
-            if !path.starts_with(&root) {
-                anyhow::bail!("Security: included file '{name}' is outside the project root.");
-            }
-            includes.push(read(path, name.clone())?);
+            includes.push(match super::resolve_include(&root, name)? {
+                Some(path) => Include::Found(read(path, name.clone())?),
+                None => Include::Missing(name.clone()),
+            });
         }
         let cache_root = root.join(crate::Defaults::CACHE_DIR_NAME);
         fs::create_dir_all(&cache_root)?;
         let workspace = tempfile::Builder::new()
             .prefix(".build-")
             .tempdir_in(&cache_root)?;
-        for source in std::iter::once(&main).chain(&includes) {
+        for source in std::iter::once(&main).chain(found(&includes)) {
             cancellation.check()?;
             copy_tree(
                 &crate::get_cache_dir(&root, &source.path),
@@ -111,7 +114,7 @@ impl ProjectBuild {
     /// Captured source paths, for refreshing project-wide diagnostics.
     pub fn source_paths(&self) -> Vec<PathBuf> {
         std::iter::once(&self.main)
-            .chain(&self.includes)
+            .chain(found(&self.includes))
             .map(|source| source.path.clone())
             .collect()
     }
@@ -144,8 +147,19 @@ impl ProjectBuild {
     }
     fn includes(&self, full: bool, mode: Phase0Mode) -> Result<String> {
         let mut content = String::new();
-        for source in &self.includes {
+        for include in &self.includes {
             self.cancellation.check()?;
+            let source = match include {
+                Include::Found(source) => source,
+                Include::Missing(name) => {
+                    content.push_str(&crate::compiler::document_error_block(
+                        "knot",
+                        &super::missing_include_message(name),
+                        None,
+                    ));
+                    continue;
+                }
+            };
             let mut compiler = self.compiler(source);
             let doc = Document::parse(source.text.clone());
             let name = &source.name;
@@ -221,7 +235,7 @@ impl ProjectBuild {
         self.cancellation.check()?;
         self.publish_artifacts()?;
         if complete {
-            for source in std::iter::once(&self.main).chain(&self.includes) {
+            for source in std::iter::once(&self.main).chain(found(&self.includes)) {
                 copy_tree(
                     &crate::get_cache_dir(self.workspace.path(), &source.path),
                     &crate::get_cache_dir(&self.root, &source.path),
@@ -239,6 +253,13 @@ impl ProjectBuild {
             &self.root.join(crate::Defaults::LANGUAGE_FILES_DIR),
         )
     }
+}
+
+fn found(includes: &[Include]) -> impl Iterator<Item = &Source> {
+    includes.iter().filter_map(|include| match include {
+        Include::Found(source) => Some(source),
+        Include::Missing(_) => None,
+    })
 }
 
 /// Copy with atomic replacement, publishing metadata last in each cache directory.
