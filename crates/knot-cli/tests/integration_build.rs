@@ -195,34 +195,31 @@ includes = [
 }
 
 #[test]
-fn test_error_when_included_file_not_found() {
+fn missing_included_file_is_rendered_and_the_rest_compiles() {
     let (_temp, project_root) = setup_test_project();
 
-    // Create a knot.toml referencing a non-existent file
+    // One existing chapter and one missing file
     let knot_toml = r#"
 [document]
 main = "main.knot"
 includes = [
+    "chapters/01-intro.knot",
     "chapters/nonexistent.knot"
 ]
 
 "#;
     fs::write(project_root.join("knot.toml"), knot_toml).unwrap();
 
-    // Attempt to build project
-    let result = knot_core::compile_project_full(&project_root, None);
-
-    // Check that build failed with file not found error
+    // The PDF is the notebook: the error is shown where the chapter belongs.
+    let output = knot_core::compile_project_full(&project_root, None)
+        .expect("A missing include must not prevent the build");
+    let typ = output.typ_content;
+    assert!(typ.contains("= Introduction"), "{typ}");
     assert!(
-        result.is_err(),
-        "Build should fail when included file doesn't exist"
+        typ.contains("Included file not found: chapters/nonexistent.knot"),
+        "{typ}"
     );
-    let error_msg = result.err().expect("Expected assembly error").to_string();
-    assert!(
-        error_msg.contains("nonexistent.knot") || error_msg.contains("not found"),
-        "Error should mention the missing file: {}",
-        error_msg
-    );
+    assert!(typ.contains("= Conclusion"), "{typ}");
 }
 
 #[test]

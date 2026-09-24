@@ -191,9 +191,41 @@ fn compile_phase0_inner(
     Ok(output)
 }
 
+/// Resolve an include listed in `knot.toml`: `Ok(None)` when it does not exist.
+///
+/// An include outside the project root is refused, even when missing
+/// (`../x.knot`), so that no build ever reads outside the project.
+pub fn resolve_include(root: &Path, name: &str) -> Result<Option<PathBuf>> {
+    let outside =
+        || anyhow::anyhow!("Security: included file '{name}' is outside the project root.");
+    match root.join(name).canonicalize() {
+        Ok(path) if path.starts_with(root) => Ok(Some(path)),
+        Ok(_) => Err(outside()),
+        Err(_) => {
+            let escapes = Path::new(name).components().any(|c| {
+                matches!(
+                    c,
+                    std::path::Component::ParentDir
+                        | std::path::Component::RootDir
+                        | std::path::Component::Prefix(_)
+                )
+            });
+            if escapes { Err(outside()) } else { Ok(None) }
+        }
+    }
+}
+
+/// Error rendered in the PDF (at the injection point) and reported by the
+/// LSP (on the placeholder line of the main file) for a missing include.
+pub fn missing_include_message(name: &str) -> String {
+    format!(
+        "Included file not found: {name} (listed in knot.toml). The rest of the project is compiled without it."
+    )
+}
+
 /// Return the 1-based line number of the `/* KNOT-INJECT-CHAPTERS */`
 /// placeholder in the main source, or the last line + 1 if not found.
-fn find_placeholder_line(main_source: &str) -> usize {
+pub fn find_placeholder_line(main_source: &str) -> usize {
     main_source
         .lines()
         .position(|l| l.contains("/* KNOT-INJECT-CHAPTERS */"))
@@ -308,4 +340,30 @@ pub fn fix_paths_in_typst(source: &str, typ_file: &Path) -> Result<String> {
     }
     result.push_str(&source[end..]);
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn includes_are_found_missing_or_refused() {
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path().canonicalize().unwrap();
+        fs::write(root.join("here.knot"), "").unwrap();
+        assert_eq!(
+            resolve_include(&root, "here.knot").unwrap(),
+            Some(root.join("here.knot"))
+        );
+        assert_eq!(resolve_include(&root, "gone.knot").unwrap(), None);
+        for outside in ["../gone.knot", "/etc/gone.knot"] {
+            assert!(
+                resolve_include(&root, outside)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("outside the project root"),
+                "{outside}"
+            );
+        }
+    }
 }

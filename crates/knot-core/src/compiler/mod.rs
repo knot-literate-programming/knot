@@ -648,7 +648,7 @@ fn push_replaced_range(
 }
 
 /// A document-level error block, optionally showing the code it concerns.
-fn document_error_block(lang: &str, message: &str, code: Option<&str>) -> String {
+pub(crate) fn document_error_block(lang: &str, message: &str, code: Option<&str>) -> String {
     use crate::typst_syntax::{raw_block, string_literal, text_content};
     let code = code.map_or("none".to_string(), |code| {
         format!("[{}]", raw_block(lang, code))
