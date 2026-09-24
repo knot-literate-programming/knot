@@ -731,19 +731,34 @@ impl KnotLanguageServer {
             Ok(p) => p,
             Err(_) => return,
         };
-        let project_root = match Config::find_project_root(&path) {
-            Ok(root) => root,
-            Err(_) => return,
+        let Ok((config, project_root)) = Config::find_and_load(&path) else {
+            return;
         };
         let cache_dir = get_cache_dir(&project_root, &path);
 
         // Lazy-init: create an ExecutorManager for this URI if one doesn't
-        // exist yet (hover/completion in R/Python chunks require it).
-        {
+        // exist yet (hover/completion in R/Python chunks require it). It uses
+        // the project's interpreters, like compilation, and is replaced when
+        // `knot.toml` changes them.
+        let stale = {
             let mut executors = self.state.executors.write().await;
+            let stale = executors
+                .get(uri)
+                .is_some_and(|manager| !manager.matches_project(&config, &project_root));
+            if stale {
+                executors.remove(uri);
+            }
             executors.entry(uri.clone()).or_insert_with(|| {
-                ExecutorManager::new(cache_dir.clone()).with_working_directory(project_root.clone())
+                ExecutorManager::for_project(&config, project_root.clone(), cache_dir.clone())
             });
+            stale
+        };
+        if stale {
+            // The new sessions must reload their snapshots.
+            let mut loaded = self.state.loaded_snapshot_hash.write().await;
+            for language in ["r", "python"] {
+                loaded.remove(&format!("{uri}::{language}"));
+            }
         }
 
         if let Ok(cache) = Cache::new(cache_dir) {

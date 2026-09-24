@@ -86,6 +86,35 @@ impl ExecutorManager {
         }
     }
 
+    /// The executor pool of a project: its execution timeout, working directory
+    /// and configured interpreters. Every project session uses it, for
+    /// compilation as well as editor hover and completion, so that they all
+    /// run the same interpreter.
+    pub fn for_project(
+        config: &crate::config::Config,
+        project_root: PathBuf,
+        cache_dir: PathBuf,
+    ) -> Self {
+        Self::with_timeout(
+            cache_dir,
+            Duration::from_secs(config.execution.timeout_secs),
+        )
+        .with_working_directory(project_root)
+        .with_tools(config.tools.clone())
+    }
+
+    /// Whether this pool was created for these project settings; a pool kept
+    /// across edits must be replaced when `knot.toml` changes them.
+    pub fn matches_project(
+        &self,
+        config: &crate::config::Config,
+        project_root: &std::path::Path,
+    ) -> bool {
+        self.timeout == Duration::from_secs(config.execution.timeout_secs)
+            && self.working_directory.as_deref() == Some(project_root)
+            && self.tools == config.tools
+    }
+
     /// Set the working directory for new interpreter sessions.
     pub fn with_working_directory(mut self, root: PathBuf) -> Self {
         self.working_directory = Some(root);
