@@ -43,3 +43,39 @@ Python says y is `{python} y`.
     assert!(result.contains("R says x is 42"));
     assert!(result.contains("Python says y is 100"));
 }
+
+#[test]
+#[ignore] // requires R and Python
+fn test_language_aliases_share_one_session() {
+    let temp_dir = TempDir::new().unwrap();
+    let main_knot = temp_dir.path().join("main.knot");
+
+    let source = r#"
+```{py}
+shared = 7
+```
+
+```{Python}
+print(f"python sees {shared}")
+```
+
+```{R}
+r_value <- 3
+```
+
+R alias: `{r} r_value`, Python alias: `{py} shared`.
+"#;
+
+    fs::write(&main_knot, source).unwrap();
+
+    let doc = Document::parse(source.to_string());
+    let mut compiler = Compiler::new(&main_knot).expect("Failed to create compiler");
+    let result = compiler
+        .compile(&doc, "main.knot")
+        .expect("Failed to compile document using language aliases");
+
+    assert!(result.contains("python sees 7"), "{result}");
+    assert!(result.contains("R alias: 3"), "{result}");
+    assert!(result.contains("Python alias: 7"), "{result}");
+    assert!(!result.contains("Execution Error"), "{result}");
+}

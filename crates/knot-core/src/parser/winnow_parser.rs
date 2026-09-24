@@ -7,6 +7,7 @@
 use super::ast::{Chunk, ChunkError, Document, InlineExpr, InlineOptions, Position, Range, Show};
 use super::indent::dedent;
 use super::options::parse_options;
+use crate::defaults::canonical_language;
 use winnow::ModalResult;
 use winnow::Parser;
 use winnow::ascii::{space0, space1};
@@ -123,7 +124,8 @@ pub fn parse_document(source: &str) -> Document {
 
                     chunks.push(Chunk {
                         index: chunk_index,
-                        language: lang.to_string(),
+                        language: canonical_language(lang),
+                        source_language: lang.to_string(),
                         label: extract_name(header, n),
                         code,
                         base_indentation: base_indent,
@@ -290,7 +292,7 @@ fn parse_inline_expr<'a>(
         let (options, errors) = parse_inline_options(options_str);
 
         Ok(InlineExpr {
-            language: lang.to_string(),
+            language: canonical_language(lang),
             code: code_slice.to_string(),
             start,
             end,
@@ -389,6 +391,29 @@ mod tests {
         assert_eq!(chunk.code.trim(), "1 + 1");
         assert_eq!(chunk.options.eval, Some(true));
         assert_eq!(chunk.options.show, Some(Show::Output));
+    }
+
+    #[test]
+    fn test_language_aliases_are_canonical_but_formatting_keeps_source() {
+        let content =
+            "```{py first}\nx = 1\n```\n\n```{R}\ny <- 1\n```\n\n`{Python} x` `{julia} 1`\n";
+        let doc = Document::parse(content.to_string());
+        let languages: Vec<_> = doc.chunks.iter().map(|c| c.language.as_str()).collect();
+        assert_eq!(languages, ["python", "r"]);
+        assert_eq!(doc.chunks[0].source_language, "py");
+        assert!(
+            doc.chunks[0]
+                .format(None, None)
+                .starts_with("```{py first}\n")
+        );
+        assert!(doc.chunks[1].format(None, None).starts_with("```{R}\n"));
+        let inline: Vec<_> = doc
+            .inline_exprs
+            .iter()
+            .map(|e| e.language.as_str())
+            .collect();
+        // Unknown languages keep their tag so that they can be reported by name.
+        assert_eq!(inline, ["python", "julia"]);
     }
 
     #[test]

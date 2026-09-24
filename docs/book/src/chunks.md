@@ -19,6 +19,11 @@ mean(x)
 The braces distinguish executable chunks (`{r}`) from static code blocks (` ```r `),
 which Knot passes through as-is to Typst.
 
+Knot executes `r` and `python`. Language tags are case-insensitive and `py` is
+an alias of `python`: `{py}`, `{Python}` and `{python}` chunks share the same
+Python session. The tag is kept as written when the document is formatted. The
+editor warns about any other language unless the chunk sets `#| eval: false`.
+
 ## Controlling what is shown
 
 The `show` option controls what appears in the compiled document:
