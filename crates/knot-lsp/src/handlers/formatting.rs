@@ -107,7 +107,8 @@ pub async fn handle_format_chunk(
     };
     let doc = Document::parse(text.clone());
     if !doc.errors.is_empty() {
-        return Err(Error::invalid_params(doc.errors.join("\n")));
+        let errors: Vec<_> = doc.errors.iter().map(ToString::to_string).collect();
+        return Err(Error::invalid_params(errors.join("\n")));
     }
     let Some(chunk) = doc.chunks.into_iter().find(|chunk| {
         pos.line as usize >= chunk.range.start.line && pos.line as usize <= chunk.range.end.line

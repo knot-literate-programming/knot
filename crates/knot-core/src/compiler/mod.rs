@@ -40,6 +40,9 @@ pub enum Phase0Mode {
     /// show amber (strong) on the first `MustExecute` per language chain and
     /// amber (muted) on downstream hash-invalidated chunks.
     Modified,
+    /// A document error forbids execution (invalid YAML header): `MustExecute`
+    /// chunks render as inert and the cache is left untouched.
+    Blocked,
 }
 
 use crate::backend::TypstBackend;
@@ -145,7 +148,7 @@ impl Compiler {
         let (planned, cache) = self.prepare(doc)?;
         let backend = TypstBackend::new();
 
-        let phase0_typ = assemble_partial(&planned, &doc.source, source_file, &backend, mode);
+        let phase0_typ = assemble_partial(&planned, doc, source_file, &backend, mode);
         Ok((planned, cache, phase0_typ))
     }
 
@@ -160,14 +163,20 @@ impl Compiler {
         &mut self,
         planned: Vec<PlannedNode>,
         cache: Arc<Mutex<Cache>>,
-        source: &str,
+        doc: &Document,
         source_file: &str,
         progress: Option<std::sync::mpsc::Sender<ProgressEvent>>,
     ) -> Result<String> {
         self.cancellation.check()?;
         let backend = TypstBackend::new();
+        if doc.blocks_execution() {
+            // Neither execute nor rewrite the cache: fixing the header must not
+            // cost a full re-execution.
+            let blocked = planned_to_partial_nodes(&planned, &backend, Phase0Mode::Blocked);
+            return Ok(assemble_pass(&blocked, doc, source_file));
+        }
         let executed = self.execute_pass(planned, Arc::clone(&cache), &backend, progress)?;
-        let typst_output = assemble_pass(&executed, source, source_file);
+        let typst_output = assemble_pass(&executed, doc, source_file);
         self.cancellation.check()?;
         cache.lock().unwrap().save_metadata()?;
         info!("✓ All nodes processed.");
@@ -179,15 +188,15 @@ impl Compiler {
     /// `source_file` is the filename of the `.knot` source (e.g. `"chapter1.knot"`).
     pub fn compile(&mut self, doc: &Document, source_file: &str) -> Result<String> {
         let (planned, cache) = self.prepare(doc)?;
-        self.execute_and_assemble_streaming(planned, cache, &doc.source, source_file, None)
+        self.execute_and_assemble_streaming(planned, cache, doc, source_file, None)
     }
 
     fn prepare(&mut self, doc: &Document) -> Result<(Vec<PlannedNode>, Arc<Mutex<Cache>>)> {
         self.cancellation.check()?;
         let cache = Arc::new(Mutex::new(Cache::new(self.cache_dir.clone())?));
         let nodes = build_executable_nodes(doc);
+        // Document errors are rendered by `assemble_pass`; the rest still compiles.
         info!("🔧 Processing {} executable nodes...", nodes.len());
-        anyhow::ensure!(doc.errors.is_empty(), "{}", doc.errors.join("\n"));
         let planned = self.plan_pass(
             nodes,
             &cache,
@@ -508,9 +517,25 @@ impl Compiler {
 // ---------------------------------------------------------------------------
 
 /// Interleave formatted node outputs with the verbatim source text between nodes.
-pub fn assemble_pass(executed: &[ExecutedNode], source: &str, source_file: &str) -> String {
+pub fn assemble_pass(executed: &[ExecutedNode], doc: &Document, source_file: &str) -> String {
+    let source = doc.source.as_str();
+    let body_end = doc
+        .unclosed_chunk
+        .as_ref()
+        .map_or(source.len(), |c| c.start);
     let mut output = String::new();
-    let mut last_pos = crate::parser::frontmatter::header_end(source);
+
+    // The YAML header is replaced by its errors (usually nothing). Recording
+    // it as a replaced range keeps navigation aligned for the lines below.
+    if doc.header_end > 0 {
+        let header_lines = source[..doc.header_end].lines().count();
+        push_replaced_range(&mut output, source_file, 1, header_lines, |output| {
+            for error in doc.errors.iter().filter(|e| e.line < header_lines) {
+                output.push_str(&document_error_block("knot", &error.message, None));
+            }
+        });
+    }
+    let mut last_pos = doc.header_end;
 
     for node in executed {
         if node.source_start > last_pos {
@@ -518,21 +543,18 @@ pub fn assemble_pass(executed: &[ExecutedNode], source: &str, source_file: &str)
         }
 
         if node.is_chunk {
-            output.push_str(&format!(
-                "// #KNOT-SYNC source={} line={} end={}\n",
+            let end_line = source[..node.source_end]
+                .bytes()
+                .filter(|b| *b == b'\n')
+                .count()
+                + 1;
+            push_replaced_range(
+                &mut output,
                 source_file,
-                node.source_line,
-                source[..node.source_end]
-                    .bytes()
-                    .filter(|b| *b == b'\n')
-                    .count()
-                    + 1,
-            ));
-            output.push_str(&node.typst_content);
-            if !node.typst_content.is_empty() && !node.typst_content.ends_with('\n') {
-                output.push('\n');
-            }
-            output.push_str("// END-KNOT-SYNC\n");
+                node.source_line as usize,
+                end_line,
+                |output| output.push_str(&node.typst_content),
+            );
         } else {
             output.push_str(&node.typst_content);
         }
@@ -548,8 +570,33 @@ pub fn assemble_pass(executed: &[ExecutedNode], source: &str, source_file: &str)
         }
     }
 
-    if last_pos < source.len() {
-        output.push_str(&source[last_pos..]);
+    if last_pos < body_end {
+        output.push_str(&source[last_pos..body_end]);
+    }
+
+    // An unclosed chunk runs to the end of the file: show it as code, with its error.
+    if let Some(unclosed) = &doc.unclosed_chunk {
+        if !output.is_empty() && !output.ends_with('\n') {
+            output.push('\n');
+        }
+        let first_line = source[..unclosed.start].matches('\n').count() + 1;
+        let last_line = source.lines().count();
+        let rest = &source[unclosed.start..];
+        let code = rest.split_once('\n').map_or("", |(_, code)| code);
+        let code = code.replace("\r\n", "\n");
+        let code = code.trim_end();
+        let message = doc
+            .errors
+            .iter()
+            .find(|e| e.line + 1 == first_line)
+            .map_or("Unclosed chunk", |e| e.message.as_str());
+        push_replaced_range(&mut output, source_file, first_line, last_line, |output| {
+            output.push_str(&document_error_block(
+                &unclosed.language,
+                message,
+                Some(code),
+            ));
+        });
     }
 
     for warning in executed
@@ -562,6 +609,39 @@ pub fn assemble_pass(executed: &[ExecutedNode], source: &str, source_file: &str)
         ));
     }
     output
+}
+
+/// Emit generated content that replaces source lines `first..=last` (1-based),
+/// between the markers used for source ↔ PDF navigation.
+fn push_replaced_range(
+    output: &mut String,
+    source_file: &str,
+    first: usize,
+    last: usize,
+    content: impl FnOnce(&mut String),
+) {
+    output.push_str(&format!(
+        "// #KNOT-SYNC source={source_file} line={first} end={last}\n"
+    ));
+    let start = output.len();
+    content(output);
+    if output.len() > start && !output.ends_with('\n') {
+        output.push('\n');
+    }
+    output.push_str("// END-KNOT-SYNC\n");
+}
+
+/// A document-level error block, optionally showing the code it concerns.
+fn document_error_block(lang: &str, message: &str, code: Option<&str>) -> String {
+    use crate::typst_syntax::{raw_block, string_literal, text_content};
+    let code = code.map_or("none".to_string(), |code| {
+        format!("[{}]", raw_block(lang, code))
+    });
+    format!(
+        "#code-chunk(lang: {}, errors: ({},), code: {code})\n",
+        string_literal(lang),
+        text_content(message)
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -636,7 +716,7 @@ pub fn planned_to_partial_nodes(
                 (text.clone(), false)
             }
             ExecutionNeed::MustExecute => {
-                if inert_langs.contains(&pn.lang) {
+                if inert_langs.contains(&pn.lang) || matches!(mode, Phase0Mode::Blocked) {
                     // Upstream error cached for this language → will be Inert.
                     (skip_output(pn, backend, &ChunkExecutionState::Inert), false)
                 } else {
@@ -645,6 +725,7 @@ pub fn planned_to_partial_nodes(
                             skip_output(pn, backend, &ChunkExecutionState::Pending),
                             false,
                         ),
+                        Phase0Mode::Blocked => unreachable!("blocked nodes render as inert"),
                         Phase0Mode::Modified => {
                             if must_execute_langs.contains(&pn.lang) {
                                 // Subsequent MustExecute in the same chain = cascade.
@@ -688,16 +769,16 @@ pub fn planned_to_partial_nodes(
 
 /// Assemble a Phase-0 Typst string from planned nodes (no execution).
 ///
-/// Equivalent to `assemble_pass(&planned_to_partial_nodes(planned, backend, mode), source, source_file)`.
+/// Equivalent to `assemble_pass(&planned_to_partial_nodes(planned, backend, mode), doc, source_file)`.
 pub fn assemble_partial(
     planned: &[PlannedNode],
-    source: &str,
+    doc: &Document,
     source_file: &str,
     backend: &TypstBackend,
     mode: Phase0Mode,
 ) -> String {
     let partial = planned_to_partial_nodes(planned, backend, mode);
-    assemble_pass(&partial, source, source_file)
+    assemble_pass(&partial, doc, source_file)
 }
 
 // ---------------------------------------------------------------------------
@@ -806,7 +887,7 @@ mod tests {
     #[test]
     fn test_assemble_no_nodes_returns_source_unchanged() {
         let source = "Hello, Typst!";
-        let result = assemble_pass(&[], source, "test.knot");
+        let result = assemble_pass(&[], &Document::parse(source.into()), "test.knot");
         assert_eq!(result, source);
     }
 
@@ -816,7 +897,7 @@ mod tests {
         // The inline node occupies bytes 7..13 ("INLINE").
         let source = "prefix INLINE suffix";
         let node = make_executed_node(7, 13, "42", false, 0);
-        let result = assemble_pass(&[node], source, "test.knot");
+        let result = assemble_pass(&[node], &Document::parse(source.into()), "test.knot");
         assert_eq!(result, "prefix 42 suffix");
     }
 
@@ -828,7 +909,7 @@ mod tests {
         // Chunk spans the entire fenced block; trailing newline at byte 18 gets consumed.
         let chunk_end = source.find("```\nafter").unwrap() + 3; // points to the `\n` after closing ```
         let node = make_executed_node(0, chunk_end, "#code-chunk()", true, 1);
-        let result = assemble_pass(&[node], source, "test.knot");
+        let result = assemble_pass(&[node], &Document::parse(source.into()), "test.knot");
         assert!(
             result.contains("// #KNOT-SYNC source=test.knot line=1 end=3\n"),
             "Missing opening sync marker, got:\n{result}"
@@ -849,7 +930,7 @@ mod tests {
         let chunk_end = source.find("```\nrest").unwrap() + 3;
         // typst_content does NOT end with '\n'
         let node = make_executed_node(0, chunk_end, "no-newline", true, 1);
-        let result = assemble_pass(&[node], source, "test.knot");
+        let result = assemble_pass(&[node], &Document::parse(source.into()), "test.knot");
         assert!(
             result.contains("no-newline\n// END-KNOT-SYNC"),
             "Expected newline inserted before END marker, got:\n{result}"
@@ -862,7 +943,7 @@ mod tests {
         let chunk_end = source.find("```\nrest").unwrap() + 3;
         // typst_content ends with '\n' — must NOT add another
         let node = make_executed_node(0, chunk_end, "has-newline\n", true, 1);
-        let result = assemble_pass(&[node], source, "test.knot");
+        let result = assemble_pass(&[node], &Document::parse(source.into()), "test.knot");
         assert!(
             result.contains("has-newline\n// END-KNOT-SYNC"),
             "Newline should not be doubled before END marker, got:\n{result}"
@@ -886,7 +967,11 @@ mod tests {
 
         let chunk = make_executed_node(4, chunk_end, "#chunk()", true, 1);
         let inline = make_executed_node(inline_start, inline_end, "2", false, 0);
-        let result = assemble_pass(&[chunk, inline], source, "test.knot");
+        let result = assemble_pass(
+            &[chunk, inline],
+            &Document::parse(source.into()),
+            "test.knot",
+        );
 
         assert!(result.starts_with("AAA "), "Prefix 'AAA ' missing");
         assert!(
@@ -915,7 +1000,11 @@ mod tests {
             3,
         );
         let inline_node = make_executed_node(inline_start, inline_end, "1", false, 0);
-        let result = assemble_pass(&[chunk_node, inline_node], source, "test.knot");
+        let result = assemble_pass(
+            &[chunk_node, inline_node],
+            &Document::parse(source.into()),
+            "test.knot",
+        );
         assert_snapshot!(result);
     }
 

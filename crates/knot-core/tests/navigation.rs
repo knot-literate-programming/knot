@@ -155,3 +155,40 @@ fn legacy_markers_remain_readable_and_incomplete_blocks_are_ignored() {
     );
     assert!(parse_knot_markers("// BEGIN-FILE missing.knot\nPartial").is_empty());
 }
+
+#[test]
+fn yaml_header_and_unclosed_chunk_keep_navigation_aligned() {
+    let root = tempfile::tempdir().unwrap();
+    fs::write(
+        root.path().join("knot.toml"),
+        "[document]\nmain = 'main.knot'\n",
+    )
+    .unwrap();
+    let main = root.path().join("main.knot");
+    fs::write(&main, "disk").unwrap();
+    let source = "---\nsnapshots: {python: true}\n---\nHello\n\n```{r}\nx <- 1\n";
+    let output =
+        compile_project_phase0_unsaved(root.path(), &main, source, Phase0Mode::Modified).unwrap();
+    let blocks = parse_knot_markers(&output.typ_content);
+    let lines: Vec<_> = output.typ_content.lines().collect();
+
+    // Text after the header maps to its own line in both directions.
+    let hello = lines.iter().position(|line| *line == "Hello").unwrap();
+    assert_eq!(
+        map_typ_line_to_knot(hello, &blocks, root.path()),
+        Some((main.clone(), 3))
+    );
+    assert_eq!(
+        map_knot_line_to_typ("main.knot", 3, &blocks, &main),
+        Some(hello)
+    );
+
+    // Lines of the unclosed chunk map to its rendered error block.
+    let block = map_knot_line_to_typ("main.knot", 6, &blocks, &main).unwrap();
+    assert!(lines[block].starts_with("#code-chunk("), "{}", lines[block]);
+    assert!(lines[block].contains("Unclosed chunk"), "{}", lines[block]);
+    assert_eq!(
+        map_typ_line_to_knot(block, &blocks, root.path()),
+        Some((main, 5))
+    );
+}

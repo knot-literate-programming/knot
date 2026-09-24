@@ -84,7 +84,7 @@ ChunkExecutionState  ::= Ready            -- cache hit or just executed
                        | Pending          -- do_compile Phase 0: orange border
                        | Modified         -- do_phase0_only: first MustExecute in chain (amber strong)
                        | ModifiedCascade  -- do_phase0_only: subsequent MustExecute in chain (amber muted)
-Phase0Mode           ::= Pending | Modified
+Phase0Mode           ::= Pending | Modified | Blocked  -- Blocked: invalid YAML header, nothing runs
 ```
 
 **Cascade Inert**: when a chunk in language L errors, all subsequent L-chunks become `Inert` (state is uncertain).

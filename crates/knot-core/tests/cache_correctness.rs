@@ -44,6 +44,9 @@ fn hits(nodes: &[PlannedNode]) -> Vec<bool> {
         })
         .collect()
 }
+/// Navigation markers replacing a three-line YAML header in `main.knot`.
+const HEADER_MARKERS: &str = "// #KNOT-SYNC source=main.knot line=1 end=3\n// END-KNOT-SYNC\n";
+
 fn cache(root: &Path, path: &Path) -> Cache {
     Cache::new(get_cache_dir(root, path)).unwrap()
 }
@@ -388,7 +391,7 @@ fn batch_and_streaming_compilation_produce_the_same_output_and_cache() {
         let count = planned.len();
         let (tx, rx) = std::sync::mpsc::channel();
         let output = streaming
-            .execute_and_assemble_streaming(planned, cache, &doc.source, "main.knot", Some(tx))
+            .execute_and_assemble_streaming(planned, cache, &doc, "main.knot", Some(tx))
             .unwrap();
         assert_eq!(output, batch_output);
         let events: Vec<_> = rx.into_iter().collect();
@@ -399,7 +402,7 @@ fn batch_and_streaming_compilation_produce_the_same_output_and_cache() {
         );
         let executed: Vec<_> = events.into_iter().map(|event| event.executed).collect();
         assert_eq!(
-            knot_core::assemble_pass(&executed, &source, "main.knot"),
+            knot_core::assemble_pass(&executed, &doc, "main.knot"),
             output
         );
         let mut reloaded = Compiler::new(&path).unwrap();
@@ -497,7 +500,9 @@ fn snapshot_policy_is_scoped_to_language_and_preserves_skipped_nodes() {
 fn yaml_header_is_not_rendered_and_invalid_settings_prevent_execution() {
     let (_root, _, mut compiler) = fixture();
     let source = "---\nsnapshots:\n  python: false\n---\nHello";
-    assert_eq!(compile(&mut compiler, source), "Hello");
+    // The header is replaced by an empty range so that navigation stays aligned.
+    let expected = "// #KNOT-SYNC source=main.knot line=1 end=4\n// END-KNOT-SYNC\nHello";
+    assert_eq!(compile(&mut compiler, source), expected);
     let (_, _, preview) = compiler
         .plan_and_partial(
             &Document::parse(source.into()),
@@ -505,19 +510,45 @@ fn yaml_header_is_not_rendered_and_invalid_settings_prevent_execution() {
             Phase0Mode::Pending,
         )
         .unwrap();
-    assert_eq!(preview, "Hello");
-    for bad in ["snapshots: {python: nope}", "snapshots: {pyhton: false}"] {
-        assert!(
-            compiler
-                .compile(
-                    &Document::parse(format!(
-                        "---\n{bad}\n---\n```{{python}}\nraise Exception('must not run')\n```"
-                    )),
-                    "main.knot"
-                )
-                .is_err()
+    assert_eq!(preview, expected);
+    for (bad, message) in [
+        ("snapshots: {python: nope}", "Invalid YAML header"),
+        (
+            "snapshots: {pyhton: false}",
+            "Unknown snapshots language: 'pyhton'",
+        ),
+    ] {
+        // The error is rendered in the PDF, and the chunk is shown without running.
+        let output = compile(
+            &mut compiler,
+            &format!("---\n{bad}\n---\n```{{python}}\nraise Exception('must not run')\n```"),
         );
+        assert!(output.contains(message), "{output}");
+        assert!(output.contains("No code is executed"), "{output}");
+        assert!(output.contains("is-inert: true"), "{output}");
+        assert!(!output.contains("Execution Error"), "{output}");
     }
+}
+
+#[test]
+#[ignore = "requires Python"]
+fn invalid_header_keeps_cached_results_and_fixing_it_reuses_them() {
+    let (root, path, mut compiler) = fixture();
+    let body = "```{python}\nprint('computed')\n```\n";
+    let valid = format!("---\nsnapshots: {{python: true}}\n---\n{body}");
+    assert!(compile(&mut compiler, &valid).contains("computed"));
+    let entries = cache(root.path(), &path).metadata.chunks.len();
+
+    let broken = format!("---\nsnapshots: {{python: maybe}}\n---\n{body}");
+    let output = compile(&mut compiler, &broken);
+    assert!(output.contains("Invalid YAML header"), "{output}");
+    assert!(
+        output.contains("computed"),
+        "cached output stays visible: {output}"
+    );
+    assert_eq!(cache(root.path(), &path).metadata.chunks.len(), entries);
+
+    assert_eq!(hits(&plan(&mut compiler, &valid)), [true]);
 }
 
 #[test]
@@ -556,7 +587,7 @@ fn inline_only_documents_respect_snapshot_policy() {
     let source = "---\nsnapshots: {python: false}\n---\n`{python} 1 + 1`";
     for _ in 0..2 {
         assert_eq!(hits(&plan(&mut compiler, source)), [false]);
-        assert_eq!(compile(&mut compiler, source), "2");
+        assert_eq!(compile(&mut compiler, source), format!("{HEADER_MARKERS}2"));
         assert!(cache(root.path(), &path).metadata.snapshots.is_empty());
     }
 }
@@ -592,7 +623,8 @@ fn inline_snapshot_budget_warning_is_rendered_outside_the_expression() {
     let (_root, _, mut compiler) = fixture();
     let source = "---\nsnapshot-warning-threshold: 1\n---\n$1 + `{python} 1 + 1`$";
     let output = compile(&mut compiler, source);
-    assert!(output.starts_with("$1 + 2$\n#code-chunk"), "{output}");
+    let expected = format!("{HEADER_MARKERS}$1 + 2$\n#code-chunk");
+    assert!(output.starts_with(&expected), "{output}");
     assert_eq!(output.matches("Knot: python snapshots").count(), 1);
     assert_eq!(compile(&mut compiler, source), output);
 }

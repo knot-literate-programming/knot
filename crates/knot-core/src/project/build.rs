@@ -187,16 +187,16 @@ impl ProjectBuild {
                 planned_to_partial_nodes(&planned, &TypstBackend::new(), Phase0Mode::Pending);
             let (tx, rx) = std::sync::mpsc::channel::<ProgressEvent>();
             std::thread::scope(|scope| -> Result<String> {
-                let source = &doc.source;
+                let doc = &doc;
                 let name = &self.main.name;
                 let handle = scope.spawn(move || {
-                    compiler.execute_and_assemble_streaming(planned, cache, source, name, Some(tx))
+                    compiler.execute_and_assemble_streaming(planned, cache, doc, name, Some(tx))
                 });
                 let updates = (|| -> Result<()> {
                     for event in rx {
                         self.cancellation.check()?;
                         partial[event.doc_idx] = event.executed;
-                        progress(self.output(&assemble_pass(&partial, source, name), &includes)?)?;
+                        progress(self.output(&assemble_pass(&partial, doc, name), &includes)?)?;
                     }
                     Ok(())
                 })();
