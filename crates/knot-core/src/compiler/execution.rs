@@ -269,6 +269,16 @@ fn handle_must_execute(
 
     // Successful execution: persist result to cache, advance snapshot pointer.
     let saved = sm.record_execution(ctx.lang, &pn.hash, &mut ctx.cache.lock().unwrap());
+    // Cached with the result, so the editor reports it too; the chunk replays
+    // at every compilation, so the PDF shows it every time.
+    if matches!(saved, Ok(true)) {
+        attach_warning(
+            pn,
+            &mut output,
+            sm,
+            crate::defaults::non_reusable_snapshot_message(ctx.lang),
+        );
+    }
     cache_chunk_result(pn, &output, ctx.cache)?;
     if matches!(pn.kind, PlannedNodeKind::Inline { .. })
         && let ExecutionResult::Text(text) = &output.result

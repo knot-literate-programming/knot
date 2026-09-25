@@ -373,4 +373,35 @@ mod tests {
         let here = root.path().join("here.knot");
         assert!(get_diagnostics(&Url::from_file_path(&here).unwrap(), "", false).is_empty());
     }
+
+    #[test]
+    fn non_reusable_snapshot_warning_reaches_the_editor_as_a_warning() {
+        use knot_core::executors::{ExecutionOutput, ExecutionResult, RuntimeWarning};
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("knot.toml"), "").unwrap();
+        let text = "```{python}\nx = 1\n```\n\n```{python}\nclass P:\n    pass\n```\n";
+        let main = root.path().join("main.knot");
+        std::fs::write(&main, text).unwrap();
+        let message = knot_core::defaults::non_reusable_snapshot_message("python");
+        let mut cache = Cache::new(get_cache_dir(root.path(), &main)).unwrap();
+        let output = ExecutionOutput {
+            result: ExecutionResult::Text(String::new()),
+            exports: Vec::new(),
+            warnings: vec![RuntimeWarning {
+                message: message.clone(),
+                call: None,
+                line: None,
+            }],
+        };
+        cache
+            .save_result(1, None, "python".into(), "hash".into(), &output, vec![])
+            .unwrap();
+        let diagnostics = get_diagnostics(&Url::from_file_path(&main).unwrap(), text, true);
+        let warning = diagnostics
+            .iter()
+            .find(|d| d.message == message)
+            .expect("the same message as in the PDF");
+        assert_eq!(warning.severity, Some(DiagnosticSeverity::WARNING));
+        assert_eq!(warning.range.start.line, 7, "on the chunk that caused it");
+    }
 }

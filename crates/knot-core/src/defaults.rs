@@ -79,6 +79,14 @@ pub fn unsupported_language_message(language: &str) -> Option<String> {
     ))
 }
 
+/// Warning shown in the PDF and in the editor on the first chunk of a language
+/// chain whose session could not be saved as a reusable snapshot.
+pub fn non_reusable_snapshot_message(language: &str) -> String {
+    format!(
+        "The {language} session after this chunk cannot be saved as a reusable snapshot: it holds objects that cannot be serialized, such as functions, classes or instances defined in the document. This chunk and the following {language} chunks are therefore re-executed at every compilation. Delete such objects once they are no longer needed (with del), or disable {language} snapshots in the document header (snapshots: {{{language}: false}})."
+    )
+}
+
 /// Default values for chunk options, inline options, graphics, and system constants
 pub struct Defaults;
 

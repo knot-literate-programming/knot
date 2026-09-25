@@ -11,6 +11,9 @@ pub struct SnapshotManager {
     exec: Option<Box<dyn KnotExecutor>>,
     budget: super::snapshot_budget::SnapshotBudget,
     pub inline_warning: Option<String>,
+    /// Whether the state before the next execution can be resumed from a
+    /// snapshot; only the first non-reusable one in a chain is reported.
+    resumable: bool,
 }
 
 impl SnapshotManager {
@@ -21,6 +24,7 @@ impl SnapshotManager {
             exec,
             budget: Default::default(),
             inline_warning: None,
+            resumable: true,
         }
     }
 
@@ -64,6 +68,8 @@ impl SnapshotManager {
             .restore_snapshot(previous_hash, exec)
             .with_context(|| format!("Cannot restore {lang} state"))?;
         self.loaded_hash = Some(previous_hash.to_string());
+        // Only reusable snapshots are restored.
+        self.resumable = true;
         Ok(())
     }
 
@@ -72,7 +78,10 @@ impl SnapshotManager {
     ///
     /// The live session is at `hash` even if saving fails: the error only means
     /// that no snapshot is available, so the next compilation re-executes.
-    pub fn record_execution(&mut self, lang: &str, hash: &str, cache: &mut Cache) -> Result<()> {
+    ///
+    /// Returns `true` when this snapshot is the first of the chain that cannot
+    /// be reused: from here on, the chain replays at every compilation.
+    pub fn record_execution(&mut self, lang: &str, hash: &str, cache: &mut Cache) -> Result<bool> {
         let result = self.save_snapshot(lang, hash, cache);
         if self.exec.is_some() {
             self.loaded_hash = Some(hash.to_string());
@@ -80,7 +89,15 @@ impl SnapshotManager {
         if result.is_err() {
             cache.metadata.snapshots.remove(hash);
         }
-        result
+        let reusable = !self.allow_snapshots
+            || cache
+                .metadata
+                .snapshots
+                .get(hash)
+                .is_some_and(|entry| entry.reusable);
+        let first_non_reusable = result.is_ok() && self.resumable && !reusable;
+        self.resumable = reusable;
+        result.map(|()| first_non_reusable)
     }
 
     fn save_snapshot(&mut self, lang: &str, hash: &str, cache: &mut Cache) -> Result<()> {
