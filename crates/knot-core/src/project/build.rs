@@ -73,6 +73,54 @@ impl ProjectBuild {
                 None => Include::Missing(name.clone()),
             });
         }
+        Self::with_sources(config, root, paths, main, includes, cancellation)
+    }
+
+    /// Capture a single source file as a document of its own, without the
+    /// project's includes (`knot compile`). The project configuration still
+    /// applies, and the output is `.<stem>.typ` at the project root, next to
+    /// the published artifacts, so that it never replaces the project output.
+    pub fn prepare_file(file: &Path, cancellation: Cancellation) -> Result<Self> {
+        cancellation.check()?;
+        let (config, root) = Config::find_and_load(file)?;
+        let root = root.canonicalize()?;
+        let path = file
+            .canonicalize()
+            .with_context(|| format!("Source file not found: {}", file.display()))?;
+        anyhow::ensure!(
+            path.starts_with(&root),
+            "{} is outside the project root {}",
+            path.display(),
+            root.display()
+        );
+        let name = path
+            .strip_prefix(&root)?
+            .to_string_lossy()
+            .replace('\\', "/");
+        let stem = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .with_context(|| format!("Invalid source name: {name}"))?;
+        let text =
+            fs::read_to_string(&path).with_context(|| format!("Cannot read source: {name}"))?;
+        let paths = ProjectPaths {
+            main_file: path.clone(),
+            main_file_name: name.clone(),
+            main_typ_path: root.join(format!(".{stem}.typ")),
+        };
+        let main = Source { path, name, text };
+        Self::with_sources(config, root, paths, main, Vec::new(), cancellation)
+    }
+
+    /// Copy the committed caches of `main` and `includes` into a private workspace.
+    fn with_sources(
+        config: Config,
+        root: PathBuf,
+        paths: ProjectPaths,
+        main: Source,
+        includes: Vec<Include>,
+        cancellation: Cancellation,
+    ) -> Result<Self> {
         let cache_root = root.join(crate::Defaults::CACHE_DIR_NAME);
         fs::create_dir_all(&cache_root)?;
         let workspace = tempfile::Builder::new()

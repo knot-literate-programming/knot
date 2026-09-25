@@ -90,7 +90,8 @@ fn main() -> Result<()> {
             init(name)?;
         }
         Commands::Compile { file } => {
-            compile_file(file, None)?;
+            let typ = compile_file(file)?;
+            println!("✅ Typst file generated: {}", typ.display());
         }
         Commands::Watch { preview } => {
             watch(*preview)?;
@@ -277,7 +278,8 @@ fn init(project_name: &PathBuf) -> Result<()> {
     println!("\n✅ Project created successfully!");
     println!("\nNext steps:");
     println!("  cd {:?}", project_name);
-    println!("  knot compile main.knot");
+    println!("  knot build    # compile and generate the PDF");
+    println!("  knot watch    # rebuild on every change");
 
     Ok(())
 }

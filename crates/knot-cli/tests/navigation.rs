@@ -83,7 +83,7 @@ fn standalone_compile_supports_json_navigation_and_keeps_text_output() {
     .unwrap();
     let source = root.path().join("main.knot");
     fs::write(&source, "\nHello\nLast\n").unwrap();
-    let typ = knot_cli::compile_file(&source, None).unwrap();
+    let typ = knot_cli::compile_file(&source).unwrap();
     assert!(
         fs::read_to_string(&typ)
             .unwrap()

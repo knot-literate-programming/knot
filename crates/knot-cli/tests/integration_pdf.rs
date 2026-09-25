@@ -517,3 +517,46 @@ fn failing_chunk_keeps_its_label_caption_diagnostics_and_styles() {
     assert!(typ.contains("ValueError: boom"), "{typ}");
     assert!(typ.contains("raise ValueError"), "{typ}");
 }
+
+#[test]
+#[ignore = "requires Typst and Python with matplotlib on PATH"]
+fn compile_command_output_is_self_contained() {
+    let (_temp, project_root) = setup_test_project();
+    // A file in a subdirectory with a plot: its artifacts must still resolve.
+    let source = "= Part\n\n```{python}\nimport matplotlib\nmatplotlib.use('Agg')\nimport matplotlib.pyplot as plt\nplt.plot([1, 2, 3])\ntypst(current_plot())\n```\n";
+    fs::write(project_root.join("chapters/part.knot"), source).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_knot"))
+        .args(["compile", "chapters/part.knot"])
+        .current_dir(&project_root)
+        .output()
+        .expect("Failed to launch knot");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let typ = project_root.join(".part.typ");
+    let content = fs::read_to_string(&typ).unwrap();
+    assert!(
+        content.contains("#let code-chunk("),
+        "the Knot library is embedded"
+    );
+    assert!(
+        !project_root.join("main.typ").exists(),
+        "the project output is untouched"
+    );
+
+    let typst = Command::new("typst")
+        .arg("compile")
+        .arg("--root")
+        .arg(&project_root)
+        .arg(&typ)
+        .arg(project_root.join("part.pdf"))
+        .output()
+        .expect("Failed to launch Typst");
+    assert!(
+        typst.status.success(),
+        "{}",
+        String::from_utf8_lossy(&typst.stderr)
+    );
+}

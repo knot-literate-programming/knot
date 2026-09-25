@@ -3,9 +3,7 @@
 // This allows integration tests to call CLI functions directly
 
 use anyhow::{Context, Result};
-use knot_core::{Compiler, Document};
 use log::info;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -89,44 +87,18 @@ pub fn build_project_with_options(start_path: Option<&Path>, no_snapshots: bool)
     Ok(())
 }
 
-/// Compile a .knot file to a Typst string (in-memory)
-pub fn compile_to_string(file: &Path, compiler: &mut Compiler) -> Result<(String, PathBuf)> {
-    let source = fs::read_to_string(file).context(format!("Failed to read file: {:?}", file))?;
-    let doc = Document::parse(source);
-
-    let source_file_name = file
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| "unknown.knot".to_string());
-
-    let typst_source = compiler.compile(&doc, &source_file_name)?;
-
-    let typ_output_path = {
-        let parent = file.parent().unwrap_or(std::path::Path::new("."));
-        let stem = file.file_stem().unwrap_or(std::ffi::OsStr::new("main"));
-        parent.join(format!(".{}.typ", stem.to_string_lossy()))
-    };
-
-    let root = knot_core::Config::find_project_root(file)?.canonicalize()?;
-    let file = file.canonicalize()?;
-    let source_name = file.strip_prefix(&root).unwrap_or(&file).to_string_lossy();
-    let wrapped = format!(
-        "{}\n{}",
-        knot_core::sync::GENERATED_MARKER,
-        knot_core::sync::wrap_source(&typst_source, &source_name, doc.source.lines().count())
-    );
-    let fixed_source = knot_core::fix_paths_in_typst(&wrapped, &typ_output_path)?;
-    Ok((fixed_source, typ_output_path))
-}
-
-/// Compile a .knot file to .typ
-pub fn compile_file(file: &Path, output_path: Option<&PathBuf>) -> Result<PathBuf> {
+/// Compile a single `.knot` file to a self-contained `.typ` (no PDF).
+///
+/// The file is compiled as a document of its own (without the project's
+/// includes) through the same isolated build and publication as `knot build`:
+/// the output embeds the Knot Typst library and is written to `.<stem>.typ`
+/// at the project root, next to the published artifacts. Returns its path.
+pub fn compile_file(file: &Path) -> Result<PathBuf> {
     info!("📄 Compiling {:?}...", file);
-    let mut compiler = Compiler::new(file)?;
-    let (fixed_source, typ_default_path) = compile_to_string(file, &mut compiler)?;
-    let typ_output_path = output_path.cloned().unwrap_or(typ_default_path);
-    fs::write(&typ_output_path, fixed_source).context("Failed to write Typst file")?;
-    Ok(typ_output_path)
+    let build = knot_core::project::ProjectBuild::prepare_file(file, Default::default())?;
+    let output = build.compile(None)?;
+    build.publish(&output, true)?;
+    Ok(output.main_typ_path)
 }
 
 mod format;
