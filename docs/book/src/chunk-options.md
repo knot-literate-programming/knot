@@ -70,6 +70,7 @@ See [Labels and cross-references](./chunks.md#labels-and-cross-references).
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `layout` | string | `"vertical"` | How to arrange code and output: `"vertical"` or `"horizontal"`. |
+| `align` | string | `"left"` | Alignment of the chunk's content (code, output, warnings, errors): `"left"`, `"center"` or `"right"`. A chunk with a `label` or `caption` is aligned the same way; only its caption is centred. |
 
 ## Code styling (codly)
 

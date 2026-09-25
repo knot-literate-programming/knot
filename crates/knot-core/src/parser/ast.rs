@@ -37,6 +37,25 @@ pub enum Layout {
     Vertical,
 }
 
+/// Horizontal alignment of a chunk's content (code, output, warnings, errors).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Align {
+    Left,
+    Center,
+    Right,
+}
+
+impl Align {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Align::Left => "left",
+            Align::Center => "center",
+            Align::Right => "right",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum FigFormat {
@@ -407,8 +426,8 @@ define_options! {
     /// Width ratio for horizontal layout (e.g., "1:1", "2:1")
     #[serde(rename = "width-ratio")]
     [opt] width_ratio: String, None,
-    /// Content alignment within containers
-    [opt] align: String, None,
+    /// Alignment of the chunk's content: left, center or right (default: left, also in figures)
+    [opt] align: Align, None,
 }
 
 #[derive(Debug, Clone)]

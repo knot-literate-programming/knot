@@ -367,7 +367,7 @@ fn push_presentation_args(resolved_options: &ResolvedChunkOptions, args: &mut Ve
         args.push(format!("width-ratio: {}", string_literal(v)));
     }
     if let Some(v) = &resolved_options.align {
-        args.push(format!("align: {}", string_literal(v)));
+        args.push(format!("align: {}", string_literal(v.as_str())));
     }
 }
 

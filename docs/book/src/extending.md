@@ -134,7 +134,7 @@ make it shadow the built-in version.
 | `warning-radius` | length | `2pt` | Warning block corner radius |
 | `warning-inset` | length | `0.5em` | Warning block padding |
 | `width-ratio` | string | `"1:1"` | Column ratio for horizontal layout, e.g. `"2:1"` |
-| `align` | alignment / none | `none` | Block alignment |
+| `align` | string / none | `none` | Content alignment: `"left"`, `"center"` or `"right"`; `none` aligns at the start, also inside figures |
 | `is-inert` | bool | `false` | Live preview: upstream error (white overlay) |
 | `is-pending` | bool | `false` | Live preview: execution in progress (orange border) |
 | `is-modified` | bool | `false` | Live preview: directly edited chunk (amber border) |

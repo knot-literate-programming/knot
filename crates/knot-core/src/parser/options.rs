@@ -123,6 +123,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn align_accepts_left_center_right_only() {
+        let (options, _, errors) = parse_options("#| align: center\n");
+        assert_eq!(options.align, Some(crate::parser::Align::Center));
+        assert!(errors.is_empty());
+        let (_, _, errors) = parse_options("#| align: diagonal\n");
+        assert!(errors.iter().any(|e| e.is_error()), "{errors:?}");
+    }
+
+    #[test]
     fn test_parse_unknown_option_warning() {
         let options_block = "#| unknown-opt: 42\n";
         let (_opts, _codly, errors) = parse_options(options_block);

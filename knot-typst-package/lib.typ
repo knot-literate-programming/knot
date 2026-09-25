@@ -204,6 +204,15 @@
     ]),
   )
 
+  // Content is aligned at the start unless `align` is set, with or without a
+  // figure: a figure centres its body, and adding a label to reference a
+  // chunk must not change how its code looks. (`align` names the option
+  // here, hence `std.align`.)
+  let content-align = if align == none { start } else {
+    (left: left, center: center, right: right).at(align)
+  }
+  let body = std.align(content-align, body)
+
   // Wrap in #figure() when a label or caption is provided
   if label != none or caption != none {
     let chunk-figure = figure(

@@ -680,3 +680,40 @@ fn knot_toml_warnings_are_rendered_and_do_not_fail_strict_builds() {
             .starts_with(b"%PDF-")
     );
 }
+
+#[test]
+#[ignore = "requires Typst on PATH"]
+fn aligned_and_labelled_chunks_compile() {
+    let (_temp, project_root) = setup_test_project();
+    let mut source = String::from("See @fig-a.\n\n");
+    for (label, options) in [
+        ("fig-a", "#| caption: Labelled\n"),
+        ("", "#| align: center\n"),
+        ("fig-b", "#| align: right\n#| caption: Right\n"),
+        ("", "#| align: left\n"),
+    ] {
+        let header = if label.is_empty() {
+            String::new()
+        } else {
+            format!(" {label}")
+        };
+        source.push_str(&format!(
+            "```{{python{header}}}\n#| eval: false\n{options}x = 1\n```\n\n"
+        ));
+    }
+    fs::write(project_root.join("main.knot"), &source).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_knot"))
+        .args(["build", "--strict"])
+        .current_dir(&project_root)
+        .output()
+        .expect("Failed to launch knot");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let typ = fs::read_to_string(project_root.join("main.typ")).unwrap();
+    for value in ["center", "right", "left"] {
+        assert!(typ.contains(&format!("align: \"{value}\"")), "{typ}");
+    }
+}

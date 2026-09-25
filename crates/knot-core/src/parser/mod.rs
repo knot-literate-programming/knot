@@ -26,8 +26,8 @@ mod options;
 mod winnow_parser;
 
 pub use ast::{
-    Chunk, ChunkDefaults, ChunkError, ChunkOptions, Document, DocumentError, FigFormat, InlineExpr,
-    InlineOptions, Layout, OptionMetadata, Position, Range, ResolvedChunkOptions,
+    Align, Chunk, ChunkDefaults, ChunkError, ChunkOptions, Document, DocumentError, FigFormat,
+    InlineExpr, InlineOptions, Layout, OptionMetadata, Position, Range, ResolvedChunkOptions,
     ResolvedInlineOptions, Show, UnclosedChunk, WarningsVisibility,
 };
 pub use options::parse_options;

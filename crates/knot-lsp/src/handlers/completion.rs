@@ -60,6 +60,7 @@ pub async fn handle_completion(
                 let values = match option_name {
                     "show" => vec!["both", "code", "output", "none"],
                     "layout" => vec!["horizontal", "vertical"],
+                    "align" => vec!["left", "center", "right"],
                     "fig-format" => vec!["svg", "png"],
                     "warnings-visibility" => vec!["below", "inline", "none"],
                     "eval" | "cache" => vec!["true", "false"],
