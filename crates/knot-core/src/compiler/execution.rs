@@ -225,7 +225,7 @@ fn handle_must_execute(
     };
     if let Err(error) = restored {
         let message = format!(
-            "{error:#}. Rebuild without snapshots (`knot build --no-snapshots`) or run `knot clean`."
+            "{error:#}. Rebuild without snapshots ('knot build --no-snapshots') or run 'knot clean'."
         );
         return Ok(failed(&pn.kind, ctx.lang, message));
     }
@@ -434,7 +434,7 @@ fn execute_for_node(
             info!("  ⚙️ `{{{}}} {}` [executing]", inline.language, inline.code);
 
             let result = exec.execute_inline(&inline.code).context(format!(
-                "Failed to execute inline expression: `{{{}}} {}`",
+                "Failed to execute inline expression '{{{}}} {}'",
                 inline.language, inline.code
             ))?;
 

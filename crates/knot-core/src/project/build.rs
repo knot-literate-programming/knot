@@ -188,6 +188,7 @@ impl ProjectBuild {
         self.cancellation.check()?;
         Ok(ProjectOutput {
             errors,
+            warnings: self.config.warnings.clone(),
             typ_content: assemble_project_typ(
                 &self.fix(main)?,
                 &self.main.name,

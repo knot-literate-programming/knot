@@ -17,11 +17,6 @@ main = "main.knot"
 # These will be injected at the /* KNOT-INJECT-CHAPTERS */ placeholder
 # includes = ["chapter1.knot", "chapter2.knot"]
 
-[helpers]
-# Typst helper functions (required)
-# This file contains utility functions for rendering code chunks
-typst = "lib/knot.typ"
-
 # Global chunk defaults (all options are optional)
 # These can be overridden in individual chunks with #| option: value
 [chunk-defaults]

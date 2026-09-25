@@ -39,6 +39,11 @@ pub struct Config {
     /// Python-specific chunk defaults ([python-chunks] in knot.toml)
     #[serde(default, rename = "python-chunks")]
     pub python_chunks: Option<ChunkDefaults>,
+    /// Warnings found while loading `knot.toml` (unknown keys, deprecated
+    /// sections). They are shown at the end of the PDF, on the CLI and in the
+    /// editor; the ignored keys do not affect the rest of the configuration.
+    #[serde(skip)]
+    pub warnings: Vec<String>,
     /// R-specific error chunk defaults ([r-error] in knot.toml)
     #[serde(default, rename = "r-error")]
     pub r_error: Option<ChunkDefaults>,
@@ -142,6 +147,9 @@ impl Config {
 
         let mut config: Config = toml::from_str(&content)
             .context(format!("Failed to parse config file: {}", path.display()))?;
+        let raw: toml::Table = toml::from_str(&content)
+            .context(format!("Failed to parse config file: {}", path.display()))?;
+        config.warnings = unknown_config_keys(&raw);
 
         let root = std::path::absolute(path)?
             .parent()
@@ -149,21 +157,28 @@ impl Config {
             .to_path_buf();
         config.tools.anchor(&root)?;
 
-        // Extract codly-* options from language templates
-        if let Some(ref mut r_chunks) = config.r_chunks {
-            r_chunks.extract_codly_options();
+        // Extract codly-* options from the chunk sections; report the rest.
+        let known: Vec<String> = crate::parser::ChunkOptions::option_metadata()
+            .iter()
+            .filter(|option| option.kind != "meta")
+            .map(|option| option.serde_name())
+            .collect();
+        let known: Vec<&str> = known.iter().map(String::as_str).collect();
+        let sections = [
+            ("chunk-defaults", Some(&mut config.chunk_defaults)),
+            ("r-chunks", config.r_chunks.as_mut()),
+            ("python-chunks", config.python_chunks.as_mut()),
+            ("r-error", config.r_error.as_mut()),
+            ("python-error", config.python_error.as_mut()),
+        ];
+        for (section, defaults) in sections {
+            let Some(defaults) = defaults else { continue };
+            for key in defaults.extract_codly_options() {
+                config
+                    .warnings
+                    .push(unknown_key_message(&key, &format!("[{section}]"), &known));
+            }
         }
-        if let Some(ref mut python_chunks) = config.python_chunks {
-            python_chunks.extract_codly_options();
-        }
-        if let Some(ref mut r_error) = config.r_error {
-            r_error.extract_codly_options();
-        }
-        if let Some(ref mut python_error) = config.python_error {
-            python_error.extract_codly_options();
-        }
-        // Also extract from global defaults
-        config.chunk_defaults.extract_codly_options();
 
         Ok(config)
     }
@@ -200,10 +215,131 @@ impl Config {
     }
 }
 
+const SECTIONS: &[&str] = &[
+    "tools",
+    "document",
+    "execution",
+    "chunk-defaults",
+    "codly",
+    "r-chunks",
+    "python-chunks",
+    "r-error",
+    "python-error",
+];
+
+/// Warnings for unknown top-level keys and for unknown keys of `[document]`
+/// and `[execution]`. Chunk sections are checked after deserialization, and
+/// `[tools]` rejects unknown keys when loading. `[codly]` is passed to codly.
+fn unknown_config_keys(raw: &toml::Table) -> Vec<String> {
+    let mut warnings = Vec::new();
+    for (key, value) in raw {
+        if key == "helpers" {
+            warnings.push(
+                "knot.toml: the [helpers] section is no longer used (the Knot Typst library is embedded) and is ignored."
+                    .to_string(),
+            );
+        } else if !SECTIONS.contains(&key.as_str()) {
+            warnings.push(if value.is_table() {
+                format!(
+                    "knot.toml: unknown section [{key}] is ignored.{}",
+                    suggestion(key, SECTIONS)
+                        .map_or(String::new(), |s| format!(" Did you mean [{s}]?"))
+                )
+            } else {
+                unknown_key_message(key, "at the top level", SECTIONS)
+            });
+        }
+    }
+    for (section, known) in [
+        ("document", &["main", "includes"][..]),
+        ("execution", &["timeout-secs"][..]),
+    ] {
+        if let Some(table) = raw.get(section).and_then(toml::Value::as_table) {
+            for key in table.keys().filter(|key| !known.contains(&key.as_str())) {
+                warnings.push(unknown_key_message(key, &format!("in [{section}]"), known));
+            }
+        }
+    }
+    warnings
+}
+
+fn unknown_key_message(key: &str, place: &str, known: &[&str]) -> String {
+    let place = if place.starts_with('[') {
+        format!("in {place}")
+    } else {
+        place.to_string()
+    };
+    format!(
+        "knot.toml: unknown key '{key}' {place} is ignored.{}",
+        suggestion(key, known).map_or(String::new(), |s| format!(" Did you mean '{s}'?"))
+    )
+}
+
+/// The closest known name, when it is close enough to be a typo.
+fn suggestion<'a>(key: &str, known: &[&'a str]) -> Option<&'a str> {
+    let key = key.to_lowercase().replace('_', "-");
+    known
+        .iter()
+        .map(|candidate| (edit_distance(&key, candidate), *candidate))
+        .filter(|(distance, candidate)| *distance <= 2.max(candidate.len() / 4))
+        .min()
+        .map(|(_, candidate)| candidate)
+}
+
+fn edit_distance(a: &str, b: &str) -> usize {
+    let b: Vec<char> = b.chars().collect();
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.chars().enumerate() {
+        let mut previous = row[0];
+        row[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let current = row[j + 1];
+            row[j + 1] = (previous + usize::from(ca != *cb))
+                .min(row[j] + 1)
+                .min(current + 1);
+            previous = current;
+        }
+    }
+    row[b.len()]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
+
+    fn warnings(toml: &str) -> Vec<String> {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("knot.toml");
+        fs::write(&path, toml).unwrap();
+        Config::load_from_path(&path).unwrap().warnings
+    }
+
+    #[test]
+    fn unknown_keys_are_warnings_with_suggestions() {
+        let warnings = warnings(
+            "[document]\nmain = 'main.knot'\nincludes_ = []\n\n[execution]\ntimeout_secs = 5\n\n[chunk-defaults]\nfig-widht = 5\ncodly-zebra-fill = 'none'\n\n[r-chunks]\ncolour = 'red'\n\n[chunk-defualts]\neval = true\n\n[helpers]\ntypst = 'lib/knot.typ'\n",
+        );
+        let expected = [
+            "knot.toml: unknown section [chunk-defualts] is ignored. Did you mean [chunk-defaults]?",
+            "knot.toml: the [helpers] section is no longer used (the Knot Typst library is embedded) and is ignored.",
+            "knot.toml: unknown key 'includes_' in [document] is ignored. Did you mean 'includes'?",
+            "knot.toml: unknown key 'timeout_secs' in [execution] is ignored. Did you mean 'timeout-secs'?",
+            "knot.toml: unknown key 'fig-widht' in [chunk-defaults] is ignored. Did you mean 'fig-width'?",
+            "knot.toml: unknown key 'colour' in [r-chunks] is ignored.",
+        ];
+        let mut sorted = warnings.clone();
+        sorted.sort();
+        let mut expected: Vec<_> = expected.iter().map(|w| w.to_string()).collect();
+        expected.sort();
+        assert_eq!(sorted, expected, "{warnings:#?}");
+    }
+
+    #[test]
+    fn a_valid_configuration_has_no_warning() {
+        let toml = "[document]\nmain = 'main.knot'\n\n[execution]\ntimeout-secs = 5\n\n[chunk-defaults]\nfig-width = 5\ncode-stroke = '1pt'\ncodly-zebra-fill = 'none'\n\n[codly]\nanything = 'passed to codly'\n";
+        assert_eq!(warnings(toml), Vec::<String>::new());
+    }
 
     #[test]
     fn test_find_and_load() -> Result<()> {

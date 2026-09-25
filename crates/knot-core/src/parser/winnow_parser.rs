@@ -159,7 +159,7 @@ pub fn parse_document(source: &str) -> Document {
                 // runs to the end of the file and nothing after it is parsed.
                 let pos = offset_to_position(original_source, start_byte);
                 errors.push(DocumentError::new(
-                    "Unclosed chunk: add a closing ``` fence. The rest of the file is shown as code and not executed.",
+                    "Unclosed chunk: add a closing fence ('```'). The rest of the file is shown as code and not executed.",
                     pos.line,
                 ));
                 unclosed_chunk = Some(UnclosedChunk {

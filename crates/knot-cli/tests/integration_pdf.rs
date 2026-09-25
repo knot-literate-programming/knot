@@ -641,3 +641,42 @@ fn non_reusable_snapshot_warning_is_rendered_in_the_pdf() {
             .starts_with(b"%PDF-")
     );
 }
+
+#[test]
+#[ignore = "requires Typst on PATH"]
+fn knot_toml_warnings_are_rendered_and_do_not_fail_strict_builds() {
+    let (_temp, project_root) = setup_test_project();
+    fs::write(
+        project_root.join("knot.toml"),
+        "[document]\nmain = \"main.knot\"\n\n[chunk-defaults]\nfig-widht = 5\n",
+    )
+    .unwrap();
+    // A template that sets the page: the warning must not add a page before it.
+    fs::write(
+        project_root.join("main.knot"),
+        "#set page(paper: \"a5\")\n= Title\n",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_knot"))
+        .args(["build", "--strict"])
+        .current_dir(&project_root)
+        .output()
+        .expect("Failed to launch knot");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let message = "knot.toml: unknown key 'fig-widht' in [chunk-defaults] is ignored. Did you mean 'fig-width'?";
+    assert!(stderr.contains(&format!("warning: {message}")), "{stderr}");
+    let typ = fs::read_to_string(project_root.join("main.typ")).unwrap();
+    let end_of_source = typ.find("// END-FILE main.knot").unwrap();
+    let warning = typ.find(message).expect("the warning is in the document");
+    assert!(warning > end_of_source, "at the end of the document");
+    assert!(
+        fs::read(project_root.join("main.pdf"))
+            .unwrap()
+            .starts_with(b"%PDF-")
+    );
+}

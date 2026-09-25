@@ -24,9 +24,11 @@ fn lsp_severity(severity: knot_core::parser::ast::Severity) -> DiagnosticSeverit
     }
 }
 
-/// Errors for includes listed in `knot.toml` that do not exist, when `uri` is
-/// the project's main file; the PDF renders them at the same place.
-fn missing_include_diagnostics(uri: &Url, text: &str) -> Vec<Diagnostic> {
+/// Diagnostics of the project configuration, when `uri` is the project's main
+/// file: errors for missing includes (on the injection line, where the PDF
+/// renders them) and `knot.toml` warnings (on the first line; the PDF lists
+/// them at the end of the document).
+fn project_diagnostics(uri: &Url, text: &str) -> Vec<Diagnostic> {
     let Ok(path) = uri.to_file_path() else {
         return Vec::new();
     };
@@ -42,15 +44,9 @@ fn missing_include_diagnostics(uri: &Url, text: &str) -> Vec<Diagnostic> {
         return Vec::new();
     }
     let lines = text.lines().count().max(1);
-    let line = (knot_core::project::find_placeholder_line(text) - 1).min(lines - 1);
-    let width = text.lines().nth(line).unwrap_or("").encode_utf16().count() as u32;
-    config
-        .document
-        .includes
-        .iter()
-        .flatten()
-        .filter(|name| matches!(knot_core::project::resolve_include(&root, name), Ok(None)))
-        .map(|name| Diagnostic {
+    let on_line = |line: usize, severity, message| {
+        let width = text.lines().nth(line).unwrap_or("").encode_utf16().count() as u32;
+        Diagnostic {
             range: Range {
                 start: Position {
                     line: line as u32,
@@ -61,12 +57,31 @@ fn missing_include_diagnostics(uri: &Url, text: &str) -> Vec<Diagnostic> {
                     character: width.max(1),
                 },
             },
-            severity: Some(DiagnosticSeverity::ERROR),
+            severity: Some(severity),
             source: Some("knot".to_string()),
-            message: knot_core::project::missing_include_message(name),
+            message,
             ..Diagnostic::default()
-        })
-        .collect()
+        }
+    };
+    let injection = (knot_core::project::find_placeholder_line(text) - 1).min(lines - 1);
+    let missing = config
+        .document
+        .includes
+        .iter()
+        .flatten()
+        .filter(|name| matches!(knot_core::project::resolve_include(&root, name), Ok(None)))
+        .map(|name| {
+            on_line(
+                injection,
+                DiagnosticSeverity::ERROR,
+                knot_core::project::missing_include_message(name),
+            )
+        });
+    let warnings = config
+        .warnings
+        .iter()
+        .map(|warning| on_line(0, DiagnosticSeverity::WARNING, warning.clone()));
+    missing.chain(warnings).collect()
 }
 
 /// Generate diagnostics for a document
@@ -101,8 +116,9 @@ pub fn get_diagnostics(uri: &Url, text: &str, include_runtime: bool) -> Vec<Diag
         });
     }
 
-    // Missing includes are reported on the main file, where they are injected.
-    diagnostics.extend(missing_include_diagnostics(uri, text));
+    // Project diagnostics (missing includes, knot.toml warnings) are reported
+    // on the main file, as the PDF shows them in the main document.
+    diagnostics.extend(project_diagnostics(uri, text));
 
     // Check for errors in chunks (parsing/options)
     for chunk in &doc.chunks {
@@ -403,5 +419,22 @@ mod tests {
             .expect("the same message as in the PDF");
         assert_eq!(warning.severity, Some(DiagnosticSeverity::WARNING));
         assert_eq!(warning.range.start.line, 7, "on the chunk that caused it");
+    }
+
+    #[test]
+    fn knot_toml_warnings_are_reported_on_the_main_file() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("knot.toml"),
+            "[document]\nmain = 'main.knot'\n\n[chunk-defaults]\nfig-widht = 5\n",
+        )
+        .unwrap();
+        let main = root.path().join("main.knot");
+        std::fs::write(&main, "= Title\n").unwrap();
+        let diagnostics = get_diagnostics(&Url::from_file_path(&main).unwrap(), "= Title\n", false);
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].severity, Some(DiagnosticSeverity::WARNING));
+        assert_eq!(diagnostics[0].range.start.line, 0);
+        assert!(diagnostics[0].message.contains("Did you mean 'fig-width'?"));
     }
 }
