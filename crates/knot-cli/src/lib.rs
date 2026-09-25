@@ -12,11 +12,25 @@ use std::time::Instant;
 /// Delegates project assembly (includes, codly, BEGIN-FILE markers) to
 /// [`knot_core::compile_project_full`] and then runs `typst compile`.
 pub fn build_project(start_path: Option<&Path>) -> Result<()> {
-    build_project_with_options(start_path, false)
+    build_project_with_options(start_path, BuildOptions::default())
 }
 
-/// Build the complete project, optionally disabling all snapshots.
-pub fn build_project_with_options(start_path: Option<&Path>, no_snapshots: bool) -> Result<()> {
+/// Options of `knot build`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BuildOptions {
+    /// Re-execute every language chain in fresh interpreters: no snapshot is
+    /// saved or restored, so no cached state replaces an execution.
+    pub no_snapshots: bool,
+    /// Fail (non-zero exit) when the document shows errors, after writing the
+    /// PDF that displays them. Warnings and `eval: false` code do not fail.
+    pub strict: bool,
+}
+
+/// Build the complete project and generate its PDF.
+///
+/// Errors rendered in the document are listed on stderr. They make the build
+/// fail only with [`BuildOptions::strict`]; the PDF showing them is kept.
+pub fn build_project_with_options(start_path: Option<&Path>, options: BuildOptions) -> Result<()> {
     let start_total = Instant::now();
     info!("🔨 Building project...");
 
@@ -34,7 +48,7 @@ pub fn build_project_with_options(start_path: Option<&Path>, no_snapshots: bool)
         &Default::default(),
         Default::default(),
     )?
-    .with_snapshots_disabled(no_snapshots);
+    .with_snapshots_disabled(options.no_snapshots);
     let output = build.compile(None)?;
     build.publish(&output, true)?;
 
@@ -78,12 +92,26 @@ pub fn build_project_with_options(start_path: Option<&Path>, no_snapshots: bool)
     if !typst_result.stderr.is_empty() {
         eprint!("{}", String::from_utf8_lossy(&typst_result.stderr));
     }
-    println!(
-        "✅ PDF generated: {} (Total time: {:?})",
-        pdf_output_path.display(),
-        start_total.elapsed()
-    );
+    if output.errors.is_empty() {
+        println!(
+            "✅ PDF generated: {} (Total time: {:?})",
+            pdf_output_path.display(),
+            start_total.elapsed()
+        );
+        return Ok(());
+    }
 
+    // The PDF is the notebook: it shows these errors in context.
+    for error in &output.errors {
+        eprintln!("error: {error}");
+    }
+    let summary = format!(
+        "{} error(s) in the document; the PDF shows them in context: {}",
+        output.errors.len(),
+        pdf_output_path.display()
+    );
+    anyhow::ensure!(!options.strict, "{summary}");
+    println!("⚠️  PDF generated with {summary}");
     Ok(())
 }
 

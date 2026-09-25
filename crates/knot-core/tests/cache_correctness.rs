@@ -392,7 +392,8 @@ fn batch_and_streaming_compilation_produce_the_same_output_and_cache() {
         let (tx, rx) = std::sync::mpsc::channel();
         let output = streaming
             .execute_and_assemble_streaming(planned, cache, &doc, "main.knot", Some(tx))
-            .unwrap();
+            .unwrap()
+            .typst;
         assert_eq!(output, batch_output);
         let events: Vec<_> = rx.into_iter().collect();
         assert_eq!(events.len(), count);
@@ -713,7 +714,8 @@ fn cached_errors_preserve_source_visibility_in_preview_and_execution() {
             assert!(matches!(planned[0].need, ExecutionNeed::CacheHit(_)));
             let output = compiler
                 .execute_and_assemble_streaming(planned, cache, &doc, "main.knot", None)
-                .unwrap();
+                .unwrap()
+                .typst;
             assert_eq!(preview, output);
             assert!(output.contains("cached failure"), "{output}");
             assert_eq!(

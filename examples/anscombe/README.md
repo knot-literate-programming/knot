@@ -66,9 +66,17 @@ Make a disposable copy of this example and replace its `knot.toml` with
    Python line coordinates become available. Compare with `--no-snapshots`.
 6. Reintroduce the errors: the old downstream results must become unavailable.
 
-A PDF containing runtime diagnostics can still be generated successfully. The
-existence of a PDF or a successful CLI exit alone does **not** certify that all
-scientific calculations succeeded. Check diagnostics and result availability.
+A PDF containing runtime diagnostics can still be generated successfully: the
+existence of a PDF alone does **not** certify that all scientific calculations
+succeeded. `knot build` lists the errors on stderr; to make them fail the
+command, validate the document with a full re-execution:
+
+```sh
+knot build --strict --no-snapshots
+```
+
+This fails for the errors variant (its diagnostic PDF is still written) and
+succeeds for the reference report.
 
 ## Validation
 

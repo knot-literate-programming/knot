@@ -136,8 +136,9 @@ pub struct ExecutedNode {
     pub is_chunk: bool,
     /// 1-based source line (chunk nodes only — for `#KNOT-SYNC` markers).
     pub source_line: u32,
-    /// `true` if this node caused an execution error (triggers Inert cascade).
-    pub errored: bool,
+    /// The error message if this node failed or was rejected (triggers the
+    /// Inert cascade); reported by `knot build --strict`.
+    pub error: Option<String>,
     /// Snapshot warning from an inline expression, rendered after the document body.
     pub snapshot_warning: Option<String>,
 }

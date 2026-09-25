@@ -560,3 +560,54 @@ fn compile_command_output_is_self_contained() {
         String::from_utf8_lossy(&typst.stderr)
     );
 }
+
+#[test]
+#[ignore = "requires Typst and Python on PATH"]
+fn strict_build_fails_on_errors_but_keeps_the_pdf_and_ignores_warnings() {
+    let (_temp, project_root) = setup_test_project();
+    let build = |strict: bool| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_knot"));
+        command.arg("build").current_dir(&project_root);
+        if strict {
+            command.arg("--strict");
+        }
+        command.output().expect("Failed to launch knot")
+    };
+
+    // Warnings (ignored option) and display-only code do not fail.
+    fs::write(
+        project_root.join("main.knot"),
+        "```{python}\n#| unknown-opt: 1\nx = 1\n```\n\n```{bash}\n#| eval: false\nls\n```\n",
+    )
+    .unwrap();
+    let output = build(true);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // A runtime error fails only under --strict; the PDF is written in both cases.
+    fs::write(
+        project_root.join("main.knot"),
+        "```{python}\nraise ValueError('broken')\n```\n",
+    )
+    .unwrap();
+    let output = build(false);
+    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("main.knot:1: ValueError: broken"),
+        "{stderr}"
+    );
+    fs::remove_file(project_root.join("main.pdf")).unwrap();
+    let output = build(true);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("1 error(s) in the document"), "{stderr}");
+    assert!(
+        fs::read(project_root.join("main.pdf"))
+            .unwrap()
+            .starts_with(b"%PDF-")
+    );
+}

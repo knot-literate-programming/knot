@@ -113,8 +113,8 @@ pub(super) fn run_language_chain(
             ChunkExecutionState::Ready
         };
 
-        let (typst_content, errored) = process_node(&pn, &state, &mut sm, &ctx, config)?;
-        if errored {
+        let (typst_content, error) = process_node(&pn, &state, &mut sm, &ctx, config)?;
+        if error.is_some() {
             broken = true;
         }
 
@@ -127,7 +127,7 @@ pub(super) fn run_language_chain(
             typst_content,
             is_chunk,
             source_line,
-            errored,
+            error,
         };
 
         if let Some(tx) = &progress {
@@ -145,7 +145,7 @@ pub(super) fn run_language_chain(
 
 /// Dispatch a single planned node to the appropriate execution path.
 ///
-/// Returns `(typst_content, errored)`. Any `Err` propagated here is an
+/// Returns `(typst_content, error)`. Any `Err` propagated here is an
 /// infrastructure failure (snapshot I/O), not a language-level error.
 fn process_node(
     pn: &PlannedNode,
@@ -153,9 +153,9 @@ fn process_node(
     sm: &mut SnapshotManager,
     ctx: &ChainContext<'_>,
     config: &Config,
-) -> Result<(String, bool)> {
+) -> Result<NodeOutcome> {
     if matches!(state, ChunkExecutionState::Inert) {
-        return Ok((inert_output(pn, ctx.backend, config), false));
+        return Ok((inert_output(pn, ctx.backend, config), None));
     }
 
     match &pn.need {
@@ -166,10 +166,9 @@ fn process_node(
             };
             info!("  ✓ {} [cached]", data.name);
             match attempt {
-                ExecutionAttempt::RuntimeError(error) => Ok((
-                    format_error_block_for_node(&pn.kind, ctx.lang, &error.to_string()),
-                    true,
-                )),
+                ExecutionAttempt::RuntimeError(error) => {
+                    Ok(failed(&pn.kind, ctx.lang, error.to_string()))
+                }
                 ExecutionAttempt::Success(output) => {
                     let mut output = output.clone();
                     append_snapshot_warning(pn, &mut output, sm, ctx.cache)?;
@@ -181,7 +180,7 @@ fn process_node(
                         &output,
                         state,
                     );
-                    Ok((content, false))
+                    Ok((content, None))
                 }
             }
         }
@@ -190,14 +189,17 @@ fn process_node(
             info!("  ✓ [cached inline]");
             sm.inline_warning = sm.warning(pn, &ctx.cache.lock().unwrap())?;
             let result_clone = result.clone();
-            Ok((result_clone, false))
+            Ok((result_clone, None))
         }
 
-        ExecutionNeed::Rejected => Ok((skip_output(pn, ctx.backend, state), true)),
+        ExecutionNeed::Rejected => Ok((
+            skip_output(pn, ctx.backend, state),
+            Some(rejection_message(pn)),
+        )),
 
         ExecutionNeed::Skip => {
             let content = skip_output(pn, ctx.backend, state);
-            Ok((content, false))
+            Ok((content, None))
         }
 
         ExecutionNeed::MustExecute => handle_must_execute(pn, sm, ctx),
@@ -207,12 +209,12 @@ fn process_node(
 /// Execute a node that has no valid cache entry.
 ///
 /// Handles snapshot restoration, execution, and result
-/// caching. Returns `(typst_content, errored)`.
+/// caching. Returns `(typst_content, error)`.
 fn handle_must_execute(
     pn: &PlannedNode,
     sm: &mut SnapshotManager,
     ctx: &ChainContext<'_>,
-) -> Result<(String, bool)> {
+) -> Result<NodeOutcome> {
     // Restore session snapshot before executing.
     // Lock only for the read, release before executing.
     // A failed restore is shown on the chunk and suspends the chain; it is
@@ -225,10 +227,7 @@ fn handle_must_execute(
         let message = format!(
             "{error:#}. Rebuild without snapshots (`knot build --no-snapshots`) or run `knot clean`."
         );
-        return Ok((
-            format_error_block_for_node(&pn.kind, ctx.lang, &message),
-            true,
-        ));
+        return Ok(failed(&pn.kind, ctx.lang, message));
     }
 
     // All executor interactions are confined to this block so that the borrow
@@ -238,20 +237,14 @@ fn handle_must_execute(
         // Not cached — an unsupported language is not a deterministic runtime state.
         let exec = match sm.executor_mut() {
             None => {
-                return Ok((
-                    format_error_block_for_node(
-                        &pn.kind,
-                        ctx.lang,
-                        &crate::defaults::unsupported_language_message(ctx.lang)
-                            .or_else(|| {
-                                ctx.startup_error.map(|error| {
-                                    format!("Cannot start the {} interpreter: {error}", ctx.lang)
-                                })
-                            })
-                            .unwrap_or_else(|| format!("No executor for '{}'", ctx.lang)),
-                    ),
-                    true,
-                ));
+                let message = crate::defaults::unsupported_language_message(ctx.lang)
+                    .or_else(|| {
+                        ctx.startup_error.map(|error| {
+                            format!("Cannot start the {} interpreter: {error}", ctx.lang)
+                        })
+                    })
+                    .unwrap_or_else(|| format!("No executor for '{}'", ctx.lang));
+                return Ok(failed(&pn.kind, ctx.lang, message));
             }
             Some(e) => e,
         };
@@ -259,12 +252,7 @@ fn handle_must_execute(
         // Infrastructure failure (process crash, timeout…): error block, cascade Inert.
         // Not cached — not a deterministic runtime state.
         let attempt = match execute_for_node(pn, exec) {
-            Err(e) => {
-                return Ok((
-                    format_error_block_for_node(&pn.kind, ctx.lang, &e.to_string()),
-                    true,
-                ));
-            }
+            Err(e) => return Ok(failed(&pn.kind, ctx.lang, e.to_string())),
             Ok(a) => a,
         };
 
@@ -273,10 +261,7 @@ fn handle_must_execute(
         match attempt {
             ExecutionAttempt::RuntimeError(error) => {
                 cache_chunk_error(pn, &error, ctx.cache)?;
-                return Ok((
-                    format_error_block_for_node(&pn.kind, ctx.lang, &error.to_string()),
-                    true,
-                ));
+                return Ok(failed(&pn.kind, ctx.lang, error.to_string()));
             }
             ExecutionAttempt::Success(output) => output,
         }
@@ -308,8 +293,34 @@ fn handle_must_execute(
     append_snapshot_warning(pn, &mut output, sm, ctx.cache)?;
     Ok((
         format_executed_node(pn, &output, ctx.backend, &ChunkExecutionState::Ready),
-        false,
+        None,
     ))
+}
+
+/// Rendered Typst of a node, and the error message when the node failed
+/// (reported by `knot build --strict`).
+pub(super) type NodeOutcome = (String, Option<String>);
+
+/// A failed node: its error block, and the same message for the build report.
+pub(super) fn failed(kind: &PlannedNodeKind, lang: &str, message: String) -> NodeOutcome {
+    (
+        format_error_block_for_node(kind, lang, &message),
+        Some(message),
+    )
+}
+
+/// Why a node with invalid options was not executed: its option errors.
+pub(super) fn rejection_message(pn: &PlannedNode) -> String {
+    let errors = match &pn.kind {
+        PlannedNodeKind::Chunk { node, .. } => &node.errors,
+        PlannedNodeKind::Inline { node } => &node.errors,
+    };
+    errors
+        .iter()
+        .filter(|e| e.is_error())
+        .map(|e| e.message.as_str())
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 /// Chunks show warnings in their block; inline expressions after the document body.

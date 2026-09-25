@@ -29,6 +29,62 @@ pub use pipeline::{
     ChunkExecutionState, ExecutedNode, ExecutionNeed, PlannedNode, PlannedNodeKind,
 };
 
+/// An error rendered in a compiled document, at a source location.
+///
+/// Built from the same data as the PDF (never by searching generated Typst):
+/// document errors, rejected options and failed executions. Warnings and
+/// display-only code are not errors. `knot build --strict` fails on them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BuildDiagnostic {
+    /// Project-relative source name.
+    pub file: String,
+    /// 1-based source line.
+    pub line: usize,
+    /// The message shown in the PDF.
+    pub message: String,
+}
+
+impl std::fmt::Display for BuildDiagnostic {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}: {}", self.file, self.line, self.message)
+    }
+}
+
+/// A completely compiled document: its Typst source and the errors it shows.
+pub struct CompiledDocument {
+    /// Assembled Typst source.
+    pub typst: String,
+    /// Errors rendered in the document, in source order.
+    pub errors: Vec<BuildDiagnostic>,
+}
+
+impl CompiledDocument {
+    fn new(nodes: &[ExecutedNode], doc: &Document, source_file: &str) -> Self {
+        let line_of = |offset: usize| doc.source[..offset].matches('\n').count() + 1;
+        let mut errors: Vec<_> = doc
+            .errors
+            .iter()
+            .map(|error| BuildDiagnostic {
+                file: source_file.to_string(),
+                line: error.line + 1,
+                message: error.message.clone(),
+            })
+            .chain(nodes.iter().filter_map(|node| {
+                node.error.as_ref().map(|message| BuildDiagnostic {
+                    file: source_file.to_string(),
+                    line: line_of(node.source_start),
+                    message: message.clone(),
+                })
+            }))
+            .collect();
+        errors.sort_by_key(|error| error.line);
+        Self {
+            typst: assemble_pass(nodes, doc, source_file),
+            errors,
+        }
+    }
+}
+
 /// Controls how `MustExecute` chunks are rendered in Phase 0 (before execution).
 #[derive(Clone, Copy)]
 pub enum Phase0Mode {
@@ -51,7 +107,7 @@ use anyhow::Result;
 use log::info;
 
 use execution::{ChainOutput, group_by_language, run_language_chain};
-use node_output::{format_error_block_for_node, format_executed_node, skip_output};
+use node_output::{format_executed_node, skip_output};
 use options::{compute_hash, resolve_options};
 
 /// Represents a node in the document that can be executed.
@@ -161,27 +217,36 @@ impl Compiler {
         doc: &Document,
         source_file: &str,
         progress: Option<std::sync::mpsc::Sender<ProgressEvent>>,
-    ) -> Result<String> {
+    ) -> Result<CompiledDocument> {
         self.cancellation.check()?;
         let backend = TypstBackend::new();
         if doc.blocks_execution() {
             // Neither execute nor rewrite the cache: fixing the header must not
             // cost a full re-execution.
             let blocked = planned_to_partial_nodes(&planned, &backend, Phase0Mode::Blocked);
-            return Ok(assemble_pass(&blocked, doc, source_file));
+            return Ok(CompiledDocument::new(&blocked, doc, source_file));
         }
         let executed = self.execute_pass(planned, Arc::clone(&cache), &backend, progress)?;
-        let typst_output = assemble_pass(&executed, doc, source_file);
+        let compiled = CompiledDocument::new(&executed, doc, source_file);
         self.cancellation.check()?;
         cache.lock().unwrap().save_metadata()?;
         info!("✓ All nodes processed.");
-        Ok(typst_output)
+        Ok(compiled)
     }
 
     /// Compiles a document by executing its code chunks and generating a Typst source string.
     ///
     /// `source_file` is the filename of the `.knot` source (e.g. `"chapter1.knot"`).
     pub fn compile(&mut self, doc: &Document, source_file: &str) -> Result<String> {
+        Ok(self.compile_document(doc, source_file)?.typst)
+    }
+
+    /// Like [`Compiler::compile`], also returning the errors rendered in the document.
+    pub fn compile_document(
+        &mut self,
+        doc: &Document,
+        source_file: &str,
+    ) -> Result<CompiledDocument> {
         let (planned, cache) = self.prepare(doc)?;
         self.execute_and_assemble_streaming(planned, cache, doc, source_file, None)
     }
@@ -692,16 +757,19 @@ pub fn planned_to_partial_nodes(
             PlannedNodeKind::Inline { .. } => (false, 0),
         };
 
-        let (typst_content, errored) = match &pn.need {
+        let (typst_content, error) = match &pn.need {
             ExecutionNeed::Skip => {
                 must_execute_langs.remove(&pn.lang);
-                (skip_output(pn, backend, &ChunkExecutionState::Ready), false)
+                (skip_output(pn, backend, &ChunkExecutionState::Ready), None)
             }
             ExecutionNeed::Rejected => {
                 // Shown with its option errors; downstream chunks become inert.
                 inert_langs.insert(pn.lang.clone());
                 must_execute_langs.remove(&pn.lang);
-                (skip_output(pn, backend, &ChunkExecutionState::Ready), true)
+                (
+                    skip_output(pn, backend, &ChunkExecutionState::Ready),
+                    Some(execution::rejection_message(pn)),
+                )
             }
             ExecutionNeed::CacheHit(crate::executors::ExecutionAttempt::Success(output)) => {
                 must_execute_langs.remove(&pn.lang);
@@ -715,7 +783,7 @@ pub fn planned_to_partial_nodes(
                 }
                 (
                     format_executed_node(pn, &output, backend, &ChunkExecutionState::Ready),
-                    false,
+                    None,
                 )
             }
             ExecutionNeed::CacheHit(crate::executors::ExecutionAttempt::RuntimeError(e)) => {
@@ -723,24 +791,21 @@ pub fn planned_to_partial_nodes(
                 // in the same chain are shown as Inert in Phase 0.
                 inert_langs.insert(pn.lang.clone());
                 must_execute_langs.remove(&pn.lang);
-                (
-                    format_error_block_for_node(&pn.kind, &pn.lang, &e.to_string()),
-                    true,
-                )
+                execution::failed(&pn.kind, &pn.lang, e.to_string())
             }
             ExecutionNeed::CacheHitInline(text) => {
                 must_execute_langs.remove(&pn.lang);
-                (text.clone(), false)
+                (text.clone(), None)
             }
             ExecutionNeed::MustExecute => {
                 if inert_langs.contains(&pn.lang) || matches!(mode, Phase0Mode::Blocked) {
                     // Upstream error cached for this language → will be Inert.
-                    (skip_output(pn, backend, &ChunkExecutionState::Inert), false)
+                    (skip_output(pn, backend, &ChunkExecutionState::Inert), None)
                 } else {
                     match mode {
                         Phase0Mode::Pending => (
                             skip_output(pn, backend, &ChunkExecutionState::Pending),
-                            false,
+                            None,
                         ),
                         Phase0Mode::Blocked => unreachable!("blocked nodes render as inert"),
                         Phase0Mode::Modified => {
@@ -748,14 +813,14 @@ pub fn planned_to_partial_nodes(
                                 // Subsequent MustExecute in the same chain = cascade.
                                 (
                                     skip_output(pn, backend, &ChunkExecutionState::ModifiedCascade),
-                                    false,
+                                    None,
                                 )
                             } else {
                                 // First MustExecute for this language = direct edit.
                                 must_execute_langs.insert(pn.lang.clone());
                                 (
                                     skip_output(pn, backend, &ChunkExecutionState::Modified),
-                                    false,
+                                    None,
                                 )
                             }
                         }
@@ -777,7 +842,7 @@ pub fn planned_to_partial_nodes(
             typst_content,
             is_chunk,
             source_line,
-            errored,
+            error,
         });
     }
 
@@ -893,7 +958,7 @@ mod tests {
             typst_content: typst_content.to_string(),
             is_chunk,
             source_line,
-            errored: false,
+            error: None,
         }
     }
 

@@ -179,9 +179,15 @@ impl ProjectBuild {
         // Relative artifacts are staged here; publication copies them to the root.
         fix_paths_in_typst(content, &self.workspace.path().join("main.typ"))
     }
-    fn output(&self, main: &str, includes: &str) -> Result<ProjectOutput> {
+    fn output(
+        &self,
+        main: &str,
+        includes: &str,
+        errors: Vec<crate::BuildDiagnostic>,
+    ) -> Result<ProjectOutput> {
         self.cancellation.check()?;
         Ok(ProjectOutput {
+            errors,
             typ_content: assemble_project_typ(
                 &self.fix(main)?,
                 &self.main.name,
@@ -193,18 +199,29 @@ impl ProjectBuild {
             project_root: self.root.clone(),
         })
     }
-    fn includes(&self, full: bool, mode: Phase0Mode) -> Result<String> {
+    /// Assembled includes, and the errors of a full compilation.
+    fn includes(
+        &self,
+        full: bool,
+        mode: Phase0Mode,
+    ) -> Result<(String, Vec<crate::BuildDiagnostic>)> {
         let mut content = String::new();
+        let mut errors = Vec::new();
         for include in &self.includes {
             self.cancellation.check()?;
             let source = match include {
                 Include::Found(source) => source,
                 Include::Missing(name) => {
+                    let message = super::missing_include_message(name);
                     content.push_str(&crate::compiler::document_error_block(
-                        "knot",
-                        &super::missing_include_message(name),
-                        None,
+                        "knot", &message, None,
                     ));
+                    // Reported where the chapter is injected in the main file.
+                    errors.push(crate::BuildDiagnostic {
+                        file: self.main.name.clone(),
+                        line: super::find_placeholder_line(&self.main.text),
+                        message,
+                    });
                     continue;
                 }
             };
@@ -212,7 +229,9 @@ impl ProjectBuild {
             let doc = Document::parse(source.text.clone());
             let name = &source.name;
             let result = if full {
-                compiler.compile(&doc, name)?
+                let compiled = compiler.compile_document(&doc, name)?;
+                errors.extend(compiled.errors);
+                compiled.typst
             } else {
                 compiler.plan_and_partial(&doc, name, mode)?.2
             };
@@ -222,24 +241,24 @@ impl ProjectBuild {
                 source.text.lines().count(),
             ));
         }
-        Ok(content)
+        Ok((content, errors))
     }
     /// Render placeholders/cached results without publishing or executing code.
     pub fn phase0(&self, mode: Phase0Mode) -> Result<ProjectOutput> {
-        let includes = self.includes(false, mode)?;
+        let (includes, _) = self.includes(false, mode)?;
         let doc = Document::parse(self.main.text.clone());
         let main = self
             .compiler(&self.main)
             .plan_and_partial(&doc, &self.main.name, mode)?
             .2;
-        self.output(&main, &includes)
+        self.output(&main, &includes, Vec::new())
     }
     /// Execute in private storage and optionally report assembled partial results.
     pub fn compile(
         &self,
         progress: Option<Box<dyn Fn(ProjectOutput) -> Result<()> + Send>>,
     ) -> Result<ProjectOutput> {
-        let includes = self.includes(true, Phase0Mode::Pending)?;
+        let (includes, include_errors) = self.includes(true, Phase0Mode::Pending)?;
         let doc = Document::parse(self.main.text.clone());
         let mut compiler = self.compiler(&self.main);
         let main = if let Some(progress) = progress {
@@ -248,7 +267,7 @@ impl ProjectBuild {
             let mut partial =
                 planned_to_partial_nodes(&planned, &TypstBackend::new(), Phase0Mode::Pending);
             let (tx, rx) = std::sync::mpsc::channel::<ProgressEvent>();
-            std::thread::scope(|scope| -> Result<String> {
+            std::thread::scope(|scope| -> Result<crate::CompiledDocument> {
                 let doc = &doc;
                 let name = &self.main.name;
                 let handle = scope.spawn(move || {
@@ -258,7 +277,8 @@ impl ProjectBuild {
                     for event in rx {
                         self.cancellation.check()?;
                         partial[event.doc_idx] = event.executed;
-                        progress(self.output(&assemble_pass(&partial, doc, name), &includes)?)?;
+                        let partial = assemble_pass(&partial, doc, name);
+                        progress(self.output(&partial, &includes, Vec::new())?)?;
                     }
                     Ok(())
                 })();
@@ -273,9 +293,10 @@ impl ProjectBuild {
                 result
             })?
         } else {
-            compiler.compile(&doc, &self.main.name)?
+            compiler.compile_document(&doc, &self.main.name)?
         };
-        self.output(&main, &includes)
+        let errors = main.errors.into_iter().chain(include_errors).collect();
+        self.output(&main.typst, &includes, errors)
     }
     /// Publish staged artifacts, then caches (for a completed build), then Typst.
     /// The caller must hold its project publication gate and check the generation.

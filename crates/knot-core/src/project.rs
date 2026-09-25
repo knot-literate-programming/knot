@@ -64,6 +64,11 @@ pub struct ProjectOutput {
     pub main_typ_path: PathBuf,
     /// Absolute path to the project root directory.
     pub project_root: PathBuf,
+    /// Errors rendered in the document: the main file's, then each include's
+    /// in order (a missing include is reported on the main file's injection
+    /// line, at its position). Only complete compilations fill it; Phase 0
+    /// leaves it empty. `knot build --strict` fails when it is not empty.
+    pub errors: Vec<crate::BuildDiagnostic>,
 }
 
 /// Resolved main-source and output paths shared by project consumers.
