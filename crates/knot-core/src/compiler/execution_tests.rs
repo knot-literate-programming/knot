@@ -95,8 +95,8 @@ fn runtime_errors_stop_the_language_chain_without_an_interpreter() {
     )
     .unwrap();
     assert_eq!(calls.load(Ordering::SeqCst), 2);
-    assert!(output[1].1.errored);
-    assert!(!output[2].1.errored);
+    assert!(output[1].1.error.is_some());
+    assert!(output[2].1.error.is_none());
     assert!(output[2].1.typst_content.contains("inert"));
 }
 #[test]
@@ -228,7 +228,7 @@ fn failing_snapshot_save_is_a_warning_and_the_chain_continues() {
     );
     // The live session is still usable: no restore, both chunks run.
     assert_eq!(calls.load(Ordering::SeqCst), 2);
-    assert!(output.iter().all(|(_, node)| !node.errored));
+    assert!(output.iter().all(|(_, node)| node.error.is_none()));
     let first = &output[0].1.typst_content;
     assert!(first.contains("warnings: ("), "{first}");
     assert!(
@@ -265,7 +265,7 @@ fn failing_snapshot_restore_is_rendered_and_suspends_the_chain() {
         2,
         "nothing runs after the failure"
     );
-    assert!(output[1].1.errored);
+    assert!(output[1].1.error.is_some());
     assert!(
         output[1].1.typst_content.contains("incompatible snapshot"),
         "{}",

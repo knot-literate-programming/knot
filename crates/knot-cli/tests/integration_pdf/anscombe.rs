@@ -92,6 +92,26 @@ fn build(root: &Path, main: &str, no_snapshots: bool) -> Value {
     serde_json::from_slice(&query.stdout).unwrap()
 }
 
+/// `knot build --strict --no-snapshots`, the v0.4 final-build validation.
+/// Returns whether it succeeded and its stderr; the PDF must exist either way.
+fn strict_build(root: &Path, main: &str) -> (bool, String) {
+    let pdf = root.join(format!("{main}.pdf"));
+    let _ = fs::remove_file(&pdf);
+    let output = Command::new(env!("CARGO_BIN_EXE_knot"))
+        .args(["build", "--strict", "--no-snapshots"])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(
+        fs::read(&pdf).unwrap().starts_with(b"%PDF-"),
+        "the diagnostic PDF is kept"
+    );
+    (
+        output.status.success(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    )
+}
+
 fn near(actual: &Value, expected: f64, tolerance: f64) {
     let actual = actual.as_f64().unwrap();
     assert!(
@@ -201,6 +221,19 @@ fn anscombe_cache_dependency_changes_and_full_replay_agree() {
             vec!["run"; 3]
         );
     }
+    // The final-build validation succeeds and re-executes both chains again,
+    // although the cache is warm.
+    let (success, stderr) = strict_build(root, "main");
+    assert!(success, "{stderr}");
+    for language in ["r", "python"] {
+        assert_eq!(
+            fs::read_to_string(root.join(format!("{language}-runs")))
+                .unwrap()
+                .lines()
+                .count(),
+            4
+        );
+    }
 }
 
 #[test]
@@ -209,6 +242,13 @@ fn anscombe_errors_repair_and_recurrence_do_not_publish_stale_results() {
     let temp = fixture(true);
     let root = temp.path();
     let failed = build(root, "errors-main", false);
+    let (success, stderr) = strict_build(root, "errors-main");
+    assert!(!success, "the errors variant must fail under --strict");
+    assert!(
+        stderr.contains("DELIBERATE_R_ERROR") && stderr.contains("DELIBERATE_PYTHON_ERROR"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("error(s) in the document"), "{stderr}");
     assert!(failed.get("errors-r-summary").is_none());
     assert!(failed.get("errors-python-lines").is_none());
     assert_eq!(failed["errors-python-summary"].as_array().unwrap().len(), 4);
@@ -254,6 +294,8 @@ fn anscombe_errors_repair_and_recurrence_do_not_publish_stale_results() {
         }
     }
     assert_eq!(build(root, "errors-main", true), repaired);
+    let (success, stderr) = strict_build(root, "errors-main");
+    assert!(success, "the repaired variant passes --strict: {stderr}");
     fs::write(path, original).unwrap();
     assert_eq!(build(root, "errors-main", false), failed);
 }

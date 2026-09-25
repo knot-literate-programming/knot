@@ -29,6 +29,37 @@ be launched, the error identifies the command and suggests checking `PATH`.
 In VS Code, build failures open the Knot output channel with the diagnostics;
 warnings from successful builds are retained in that channel.
 
+Errors in the document itself (a failing chunk, an invalid option, an invalid
+YAML header, an unclosed chunk, a missing include, an interpreter that cannot
+start) do not stop the build: the PDF shows each of them where it occurs, and
+`knot build` lists them on stderr as `file:line: message`. The exit status is
+successful unless `--strict` is given.
+
+### Options
+
+- `--no-snapshots` — re-execute every language chain in fresh interpreters,
+  without saving or restoring session snapshots.
+- `--strict` — exit unsuccessfully when the document shows errors. The PDF is
+  still written, so you can read the errors in context. Warnings (for example
+  an ignored option) and display-only code (`eval: false`) do not fail the build.
+
+### Validating a final document
+
+```bash
+knot build --strict --no-snapshots
+```
+
+This is the recommended check before publishing a document, and in CI. Every
+chunk and inline expression that should run is executed again, in document
+order, in fresh R and Python sessions: no cached result or snapshot replaces
+an execution. The command succeeds only if the whole document executed
+without errors.
+
+It validates one complete execution of your code, not its environment. It does
+not pin package or interpreter versions, freeze input data, fix random seeds
+or reproduce network services. Record those separately (for example with a
+lockfile, versioned data and explicit seeds) when you need them.
+
 ## knot watch
 
 ```bash
