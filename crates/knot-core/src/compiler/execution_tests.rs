@@ -150,6 +150,9 @@ struct SessionExecutor {
     calls: Arc<AtomicUsize>,
     fail_save: bool,
     fail_load: bool,
+    /// From this execution count on, saved sessions need replay (like a
+    /// Python session holding an object that cannot be pickled).
+    non_reusable_from: Option<usize>,
 }
 impl LanguageExecutor for SessionExecutor {
     fn initialize(&mut self) -> Result<()> {
@@ -174,6 +177,15 @@ impl KnotExecutor for SessionExecutor {
     fn save_session(&mut self, path: &Path) -> Result<()> {
         anyhow::ensure!(!self.fail_save, "disk full");
         std::fs::write(path, "session")?;
+        let replay = path.with_extension("replay");
+        if self
+            .non_reusable_from
+            .is_some_and(|from| self.calls.load(Ordering::SeqCst) >= from)
+        {
+            std::fs::write(replay, "replay")?;
+        } else if replay.exists() {
+            std::fs::remove_file(replay)?;
+        }
         Ok(())
     }
     fn load_session(&mut self, _: &Path) -> Result<()> {
@@ -224,6 +236,7 @@ fn failing_snapshot_save_is_a_warning_and_the_chain_continues() {
             calls: Arc::clone(&calls),
             fail_save: true,
             fail_load: true,
+            non_reusable_from: None,
         },
     );
     // The live session is still usable: no restore, both chunks run.
@@ -248,6 +261,7 @@ fn failing_snapshot_restore_is_rendered_and_suspends_the_chain() {
         calls: Arc::clone(&calls),
         fail_save: false,
         fail_load,
+        non_reusable_from: None,
     };
     run_with(
         &mut compiler,
@@ -274,4 +288,36 @@ fn failing_snapshot_restore_is_rendered_and_suspends_the_chain() {
     assert!(output[1].1.typst_content.contains("--no-snapshots"));
     assert!(output[1].1.typst_content.contains("```python\nedited"));
     assert!(output[2].1.typst_content.contains("is-inert: true"));
+}
+
+#[test]
+fn only_the_first_non_reusable_snapshot_of_a_chain_is_reported() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("main.knot");
+    std::fs::write(&path, "").unwrap();
+    let message = crate::defaults::non_reusable_snapshot_message("python");
+    let chain = "```{python}\nfirst\n```\n```{python}\nsecond\n```\n```{python}\nthird\n```";
+    let warned = |source: &str, non_reusable_from| {
+        let mut compiler = Compiler::new(&path).unwrap();
+        run_with(
+            &mut compiler,
+            source,
+            SessionExecutor {
+                calls: Arc::new(AtomicUsize::new(0)),
+                fail_save: false,
+                fail_load: false,
+                non_reusable_from,
+            },
+        )
+        .iter()
+        .map(|(_, node)| node.typst_content.contains(&message[..40]))
+        .collect::<Vec<_>>()
+    };
+    // The second chunk makes the session non-reusable; the third inherits it.
+    assert_eq!(warned(chain, Some(2)), [false, true, false]);
+    // A serializable session produces no warning.
+    assert_eq!(warned(chain, None), [false, false, false]);
+    // Without snapshots nothing is saved, so nothing is reported.
+    let disabled = format!("---\nsnapshots: {{python: false}}\n---\n{chain}");
+    assert_eq!(warned(&disabled, Some(1)), [false, false, false]);
 }

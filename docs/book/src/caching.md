@@ -50,8 +50,16 @@ language**, since their inputs may have changed even when their code has not.
 
 Python's standard `pickle` cannot faithfully restore every object, including
 user-defined functions, classes and open file handles. When such objects are
-present, Knot marks the snapshot as non-reusable and replays the affected prefix
-on subsequent compilations. This favors correct execution over a cache hit.
+present, Knot marks the snapshot as non-reusable: on subsequent compilations it
+resumes from the last reusable snapshot and re-executes the chunk that created
+them and the following chunks of that language. This favors correct execution
+over a cache hit.
+
+The first chunk of a chain whose snapshot is not reusable shows a warning, in
+the PDF and in the editor, so that the cost is visible. Delete such objects once
+they are no longer needed (`del name`), or disable snapshots for the language in
+the document header (see below) if the chain replays anyway. The warning does
+not fail `knot build --strict`.
 
 ## Document snapshot policy
 

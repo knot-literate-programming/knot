@@ -611,3 +611,33 @@ fn strict_build_fails_on_errors_but_keeps_the_pdf_and_ignores_warnings() {
             .starts_with(b"%PDF-")
     );
 }
+
+#[test]
+#[ignore = "requires Typst and Python on PATH"]
+fn non_reusable_snapshot_warning_is_rendered_in_the_pdf() {
+    let (_temp, project_root) = setup_test_project();
+    let source = "```{python}\nclass Point:\n    pass\np = Point()\n```\n\n```{python}\nprint('kept')\n```\n";
+    fs::write(project_root.join("main.knot"), source).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_knot"))
+        .args(["build", "--strict"])
+        .current_dir(&project_root)
+        .output()
+        .expect("Failed to launch knot");
+    // A warning: the build (even strict) succeeds and the results are kept.
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let typ = fs::read_to_string(project_root.join("main.typ")).unwrap();
+    assert!(
+        typ.contains("cannot be saved as a reusable snapshot"),
+        "{typ}"
+    );
+    assert!(typ.contains("kept"), "{typ}");
+    assert!(
+        fs::read(project_root.join("main.pdf"))
+            .unwrap()
+            .starts_with(b"%PDF-")
+    );
+}

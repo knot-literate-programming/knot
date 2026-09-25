@@ -746,3 +746,48 @@ fn fresh_runtime_error_matches_cached_preview() {
     assert_eq!(preview, first);
     assert_eq!(compile(&mut compiler, source), first);
 }
+
+#[test]
+#[ignore = "requires Python"]
+fn non_reusable_python_session_warns_and_replays_from_its_chunk() {
+    let (root, path, mut compiler) = fixture();
+    let message = knot_core::defaults::non_reusable_snapshot_message("python");
+    let counter = |name: &str| {
+        format!("with open('{name}', 'a') as _counter:\n    _counter.write('run\\n')\ndel _counter")
+    };
+    // A class and an instance defined in the document cannot be pickled.
+    let source = format!(
+        "```{{python}}\n{}\nx = 1\n```\n\n```{{python}}\n{}\nclass Point:\n    pass\np = Point()\n```\n\n```{{python}}\nprint('after')\n```\n",
+        counter("first-runs"),
+        counter("second-runs"),
+    );
+    let runs = |name: &str| {
+        fs::read_to_string(root.path().join(name))
+            .unwrap()
+            .lines()
+            .count()
+    };
+    for compilation in 1..=2 {
+        let output = compile(&mut compiler, &source);
+        assert_eq!(
+            output.matches(&message[..60]).count(),
+            1,
+            "reported once, on the chunk that made the session non-reusable: {output}"
+        );
+        assert!(output.contains("after"), "results are kept: {output}");
+        // The first chunk is cached; the chain replays from the second one.
+        assert_eq!(runs("first-runs"), 1);
+        assert_eq!(runs("second-runs"), compilation);
+    }
+    // Cached with the result, where the editor reads runtime diagnostics.
+    let entry = cache(root.path(), &path)
+        .metadata
+        .chunks
+        .into_iter()
+        .find(|chunk| chunk.index == 1)
+        .unwrap();
+    assert!(entry.warnings.iter().any(|w| w.message == message));
+
+    let serializable = "```{python}\nx = [1, 2]\n```\n\n```{python}\nprint(x)\n```\n";
+    assert!(!compile(&mut compiler, serializable).contains(&message[..60]));
+}
