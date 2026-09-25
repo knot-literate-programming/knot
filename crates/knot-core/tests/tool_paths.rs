@@ -58,6 +58,7 @@ fn invalid_interpreter_setting_fails_without_using_system_interpreter() {
             "{output}"
         );
         assert!(output.contains("missing interpreter"), "{output}");
+        assert!(output.contains(&format!("```{lang}\nprint(1)")), "{output}");
         assert!(output.contains("is-inert: true"), "{output}");
         assert!(!output.contains("```output"), "{output}");
     }

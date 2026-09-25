@@ -182,7 +182,7 @@ fn push_warnings_arg(
 }
 
 /// Pushes the `code:` argument (with optional #local() wrapper for per-chunk codly options).
-fn push_code_arg(
+pub(crate) fn push_code_arg(
     chunk: &Chunk,
     codly_options: &HashMap<String, String>,
     resolved_options: &ResolvedChunkOptions,

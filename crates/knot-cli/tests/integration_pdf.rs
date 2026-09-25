@@ -365,6 +365,7 @@ raise ValueError("bad ``` fence and $x_1")
     );
     assert!(typ.contains(r#"#"a*b";"#), "{typ}");
     assert!(typ.contains("ValueError: bad ``` fence and $x_1"), "{typ}");
+    assert!(typ.contains("````python\nraise ValueError"), "{typ}");
     assert!(
         !typ.contains("local("),
         "Error blocks must not require codly"
@@ -433,4 +434,49 @@ fn option_diagnostics_are_rendered_in_the_pdf() {
     assert!(typ.contains("error: false);"), "{typ}");
     assert!(typ.contains("Invalid digits value 'x'"), "{typ}");
     assert!(typ.contains("error: true);"), "{typ}");
+}
+
+#[test]
+#[ignore = "requires Typst on PATH"]
+fn failed_chunk_visibility_compiles_without_codly() {
+    for (show, visible) in [
+        ("both", true),
+        ("code", true),
+        ("replace", true),
+        ("output", false),
+        ("none", false),
+    ] {
+        let (_temp, project_root) = setup_test_project();
+        // A missing interpreter exercises the failure renderer without Python.
+        let config = project_root.join("knot.toml");
+        let mut settings = fs::read_to_string(&config).unwrap();
+        settings.push_str("\n[tools]\npython = './missing interpreter'\n");
+        fs::write(config, settings).unwrap();
+        fs::write(
+            project_root.join("main.knot"),
+            format!(
+                "```{{python}}\n#| show: {show}\nprint('``` $x_1 # @ref <label> *stars*')\n```\n"
+            ),
+        )
+        .unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_knot"))
+            .args(["build", "--no-snapshots"])
+            .current_dir(&project_root)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{show}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            fs::read(project_root.join("main.pdf"))
+                .unwrap()
+                .starts_with(b"%PDF-")
+        );
+        let typ = fs::read_to_string(project_root.join("main.typ")).unwrap();
+        assert!(typ.contains("Cannot start the python interpreter"), "{typ}");
+        assert_eq!(typ.contains("````python\nprint("), visible, "{show}: {typ}");
+        assert!(!typ.contains("local("), "{typ}");
+    }
 }
