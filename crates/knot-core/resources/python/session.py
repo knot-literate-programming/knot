@@ -18,13 +18,40 @@ class _KnotSnapshotPickler(pickle.Pickler):
         return None
 
 
+def _generator_states():
+    """State of the global random generators, which live in modules.
+
+    Modules are re-imported fresh on restore, so without this a chain resumed
+    from a snapshot would draw different numbers than a complete execution.
+    numpy is only inspected when the session imported it.
+    """
+    states = {}
+    if 'random' in sys.modules:
+        states['random'] = sys.modules['random'].getstate()
+    numpy = sys.modules.get('numpy')
+    if numpy is not None:
+        states['numpy'] = numpy.random.get_state()
+    return states
+
+
+def _restore_generator_states(states):
+    if 'random' in states:
+        importlib.import_module('random').setstate(states['random'])
+    if 'numpy' in states:
+        importlib.import_module('numpy').random.set_state(states['numpy'])
+
+
 def save_session(path):
     """Saves the global session (from __main__) including modules."""
     try:
         import __main__
         main_dict = __main__.__dict__
 
-        state = {'__knot_modules__': {}, '__knot_cwd__': os.getcwd()}
+        state = {
+            '__knot_modules__': {},
+            '__knot_cwd__': os.getcwd(),
+            '__knot_generators__': _generator_states(),
+        }
         reusable = True
         initial = main_dict.get('_knot_initial_bindings', {})
         for k, v in list(main_dict.items()):
@@ -73,6 +100,7 @@ def load_session(path):
         modules = state.pop('__knot_modules__', {})
         for alias, name in modules.items():
             main_dict[alias] = importlib.import_module(name)
+        _restore_generator_states(state.pop('__knot_generators__', {}))
 
         main_dict.update(state)
         return True
