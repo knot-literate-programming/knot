@@ -149,6 +149,10 @@ impl KnotLanguageServer {
         request: Request,
         full: bool,
     ) {
+        if !full {
+            self.run_preview(uri, buffers, versions, request).await;
+            return;
+        }
         // Copy committed cache under the same gate used by publishers, then release
         // it before any interpreter work. Different projects never share a gate.
         let Some(guard) = request.publication().await else {
@@ -250,6 +254,43 @@ impl KnotLanguageServer {
                     log::warn!("Compilation failed: {error}");
                 }
                 self.finish_compile(&uri, &versions, &request, false, true)
+                    .await;
+            }
+        }
+    }
+
+    /// Typing: Phase 0 from the committed caches, without copying them, so
+    /// that its cost does not depend on their size. Preparation and rendering
+    /// both run under the publication gate, so no publisher changes the caches
+    /// while they are read; nothing is executed.
+    async fn run_preview(
+        &self,
+        uri: Url,
+        buffers: HashMap<PathBuf, String>,
+        versions: HashMap<String, i32>,
+        request: Request,
+    ) {
+        let Some(guard) = request.publication().await else {
+            return;
+        };
+        let cancel = request.cancellation.clone();
+        let path = request.root.clone();
+        let rendered = tokio::task::spawn_blocking(move || {
+            let build = ProjectBuild::prepare_preview(&path, &buffers, cancel)?;
+            let output = build.phase0(Phase0Mode::Modified)?;
+            Ok::<_, anyhow::Error>((build, output))
+        })
+        .await
+        .map_err(anyhow::Error::from)
+        .and_then(std::convert::identity);
+        drop(guard);
+        match rendered {
+            Ok((build, output)) => {
+                self.publish_build(&request, &build, output, false).await;
+            }
+            Err(error) => {
+                log::warn!("Preview failed: {error}");
+                self.finish_compile(&uri, &versions, &request, false, false)
                     .await;
             }
         }

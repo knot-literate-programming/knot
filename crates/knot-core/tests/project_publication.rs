@@ -235,3 +235,76 @@ fn published_artifact_paths_use_typst_separators_on_every_platform() {
         );
     }
 }
+
+#[test]
+fn preview_builds_render_phase0_without_copying_caches() {
+    let root = fixture();
+    let buffers = HashMap::from([(
+        root.path().join("main.knot"),
+        "typed-main\n/* KNOT-INJECT-CHAPTERS */".to_string(),
+    )]);
+    let isolated = ProjectBuild::prepare(root.path(), &buffers, Cancellation::default())
+        .unwrap()
+        .phase0(Phase0Mode::Modified)
+        .unwrap();
+    let workspaces = || {
+        fs::read_dir(root.path().join(".knot_cache"))
+            .map(|entries| {
+                entries
+                    .filter(|entry| {
+                        entry
+                            .as_ref()
+                            .unwrap()
+                            .file_name()
+                            .to_string_lossy()
+                            .starts_with(".build-")
+                    })
+                    .count()
+            })
+            .unwrap_or(0)
+    };
+    let preview =
+        ProjectBuild::prepare_preview(root.path(), &buffers, Cancellation::default()).unwrap();
+    assert_eq!(workspaces(), 0, "no workspace is created");
+    let output = preview.phase0(Phase0Mode::Modified).unwrap();
+    assert_eq!(output.typ_content, isolated.typ_content);
+    assert!(output.typ_content.contains("typed-main"));
+    preview.publish(&output, false).unwrap();
+    assert_eq!(
+        fs::read_to_string(root.path().join("main.typ")).unwrap(),
+        output.typ_content
+    );
+    // A preview never executes code nor publishes caches.
+    assert!(preview.compile(None).is_err());
+    assert!(preview.publish(&output, true).is_err());
+}
+
+#[test]
+#[ignore = "requires Python with matplotlib"]
+fn preview_builds_show_cached_plots() {
+    let root = tempfile::tempdir().unwrap();
+    fs::write(
+        root.path().join("knot.toml"),
+        "[document]\nmain = 'main.knot'\n",
+    )
+    .unwrap();
+    let source = "```{python}\nimport matplotlib\nmatplotlib.use('Agg')\nimport matplotlib.pyplot as plt\nplt.plot([1, 2])\ntypst(current_plot())\n```\n";
+    fs::write(root.path().join("main.knot"), source).unwrap();
+    let build = prepare(root.path());
+    let output = build.compile(None).unwrap();
+    build.publish(&output, true).unwrap();
+    // Remove published artifacts: the preview must stage them again.
+    fs::remove_dir_all(root.path().join("_knot_files")).unwrap();
+    let buffers = HashMap::from([(root.path().join("main.knot"), format!("Typed.\n\n{source}"))]);
+    let preview =
+        ProjectBuild::prepare_preview(root.path(), &buffers, Cancellation::default()).unwrap();
+    let output = preview.phase0(Phase0Mode::Modified).unwrap();
+    preview.publish(&output, false).unwrap();
+    let image = output
+        .typ_content
+        .split("image(\"")
+        .nth(1)
+        .and_then(|rest| rest.split('"').next())
+        .expect("the cached plot is shown");
+    assert!(root.path().join(image).exists(), "{image}");
+}
