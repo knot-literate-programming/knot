@@ -4,7 +4,7 @@
 //! inert (upstream error), skipped (`eval = false`), or execution error.
 #![allow(missing_docs)]
 
-use crate::backend::{Backend, TypstBackend, push_code_arg};
+use crate::backend::{Backend, TypstBackend};
 use crate::compiler::pipeline::{ChunkExecutionState, PlannedNode, PlannedNodeKind};
 use crate::config::Config;
 use crate::executors::{ExecutionOutput, ExecutionResult};
@@ -95,15 +95,8 @@ pub(super) fn format_error_block_for_node(
     lang: &str,
     error_msg: &str,
 ) -> String {
-    let mut code_args = Vec::new();
     let (node_kind, node_name) = match kind {
-        PlannedNodeKind::Chunk { node, data } => {
-            push_code_arg(
-                node,
-                &data.merged_codly_options,
-                &data.resolved_options,
-                &mut code_args,
-            );
+        PlannedNodeKind::Chunk { node, .. } => {
             ("chunk", node.label.as_deref().unwrap_or("unnamed"))
         }
         PlannedNodeKind::Inline { .. } => ("inline expression", "inline"),
@@ -111,21 +104,29 @@ pub(super) fn format_error_block_for_node(
     let lang_text = inline_text(lang);
     let lang_raw = inline_raw(lang);
     let node_name = inline_raw(node_name);
-    let code_arg = code_args
-        .into_iter()
-        .map(|arg| format!("    {arg},\n"))
-        .collect::<String>();
     // Inline raw keeps line breaks and indentation, and codly leaves it alone:
     // the block renders the same whether or not the document imports codly.
     let error_msg = format!("#block(raw({}, block: false))", string_literal(error_msg));
-    format!(
-        "#code-chunk(
-    lang: {lang_literal},
-    is-inert: false,
-{code_arg}    errors: ([\n=== Execution Error ({lang_text})\nIn {node_kind} {node_name}\n\n{error_msg}\n\n_Execution of subsequent {lang_raw} blocks has been suspended._],)
-)\n",
-        lang_literal = string_literal(lang),
-    )
+    let error = format!(
+        "[\n=== Execution Error ({lang_text})\nIn {node_kind} {node_name}\n\n{error_msg}\n\n_Execution of subsequent {lang_raw} blocks has been suspended._]"
+    );
+    match kind {
+        // A failed chunk is the chunk itself plus its error: label, caption,
+        // code, option diagnostics and styles are kept.
+        PlannedNodeKind::Chunk { node, data } => format!(
+            "{}\n",
+            TypstBackend::new().format_failed_chunk(
+                node,
+                &data.merged_codly_options,
+                &data.resolved_options,
+                &error,
+            )
+        ),
+        PlannedNodeKind::Inline { .. } => format!(
+            "#code-chunk(lang: {}, errors: ({error},))\n",
+            string_literal(lang)
+        ),
+    }
 }
 
 /// Delegates to the backend formatter, passing merged codly options separately.
