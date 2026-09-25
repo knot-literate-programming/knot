@@ -74,7 +74,7 @@ pub fn unsupported_language_message(language: &str) -> Option<String> {
     language.parse::<Language>().err()?;
     let supported: Vec<_> = Language::all().iter().map(Language::as_str).collect();
     Some(format!(
-        "Unsupported language '{language}': Knot executes {}. Add `#| eval: false` to display this code without running it.",
+        "Unsupported language '{language}': Knot executes {}. Add '#| eval: false' to display this code without running it.",
         supported.join(" and ")
     ))
 }

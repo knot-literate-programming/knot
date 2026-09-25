@@ -101,7 +101,7 @@ pub(super) fn parse(
             HashMap::new(),
             default_threshold(),
             vec![DocumentError::new(
-                "Unclosed YAML header: add a closing `---` line. The whole file is read as the header.",
+                "Unclosed YAML header: add a closing '---' line. The whole file is read as the header.",
                 0,
             )],
         );
