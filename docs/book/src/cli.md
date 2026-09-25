@@ -53,8 +53,18 @@ browser preview.
 knot compile <file.knot>
 ```
 
-Compiles a single `.knot` file to a `.typ` file (no PDF). Useful for debugging
-or scripting.
+Compiles a single `.knot` file to a self-contained `.typ` file (no PDF), as a
+document of its own: the project's includes are not injected, but `knot.toml`
+still applies. Useful for debugging or scripting.
+
+The output is written to `.<stem>.typ` at the project root (for example
+`knot compile chapters/intro.knot` writes `.intro.typ`), next to the generated
+`_knot_files/` directory, so it never replaces the output of `knot build`. It
+embeds the Knot Typst library and compiles as is:
+
+```bash
+typst compile --root . .intro.typ
+```
 
 ## knot clean
 
