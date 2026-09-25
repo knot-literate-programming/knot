@@ -791,3 +791,35 @@ fn non_reusable_python_session_warns_and_replays_from_its_chunk() {
     let serializable = "```{python}\nx = [1, 2]\n```\n\n```{python}\nprint(x)\n```\n";
     assert!(!compile(&mut compiler, serializable).contains(&message[..60]));
 }
+
+#[test]
+#[ignore = "requires Python with numpy"]
+fn resuming_from_a_snapshot_keeps_the_global_random_generators() {
+    let (_root, _, mut compiler) = fixture();
+    let source = |comment: &str| {
+        format!(
+            "```{{python}}\nimport random\nimport numpy\nrandom.seed(1)\nnumpy.random.seed(1)\n```\n\n```{{python}}\n# {comment}\nprint(random.random(), numpy.random.random())\n```\n"
+        )
+    };
+    let values = |output: &str| {
+        let start = output.rfind("```output\n").unwrap() + "```output\n".len();
+        output[start..].lines().next().unwrap().to_string()
+    };
+    // The first compilation executes both chunks in one session.
+    let complete = values(&compile(&mut compiler, &source("first")));
+    // Editing the second chunk resumes from the first chunk's snapshot.
+    assert_eq!(hits(&plan(&mut compiler, &source("edited"))), [true, false]);
+    let resumed = values(&compile(&mut compiler, &source("edited")));
+    assert_eq!(resumed, complete);
+
+    // A session that never imported numpy does not get it on restore.
+    let without_numpy = |comment: &str| {
+        format!(
+            "```{{python}}\nimport random\nrandom.seed(2)\n```\n\n```{{python}}\n# {comment}\nimport sys\nprint(random.random(), 'numpy' in sys.modules)\n```\n"
+        )
+    };
+    let complete = values(&compile(&mut compiler, &without_numpy("first")));
+    let resumed = values(&compile(&mut compiler, &without_numpy("edited")));
+    assert_eq!(resumed, complete);
+    assert!(resumed.ends_with("False"), "{resumed}");
+}

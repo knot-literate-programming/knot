@@ -61,6 +61,15 @@ they are no longer needed (`del name`), or disable snapshots for the language in
 the document header (see below) if the chain replays anyway. The warning does
 not fail `knot build --strict`.
 
+A Python snapshot records imported modules by name and imports them again on
+restore. Knot also saves the state of the global random generators of `random`
+and, when the session imported it, `numpy.random`, so that `random.seed(1)` in
+one chunk gives the same numbers in the next whether the chain ran completely
+or resumed from a snapshot. Other state kept inside modules (settings, caches,
+global generators of other libraries) is not preserved: prefer explicit
+generators such as `numpy.random.default_rng(1)` bound to a variable, or disable
+Python snapshots when such state matters.
+
 ## Document snapshot policy
 
 A YAML header at the beginning of a `.knot` file controls snapshots by language:
