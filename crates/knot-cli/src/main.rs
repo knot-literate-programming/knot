@@ -302,16 +302,18 @@ fn init(project_name: &PathBuf) -> Result<()> {
 /// This command:
 /// - Finds project root (knot.toml)
 /// - Does initial build (compiles all includes + main)
-/// - Watches .knot files for changes and rebuilds automatically
+/// - Rebuilds when `knot.toml`, a source or a `depends:` file changes
 /// - Launches 'typst watch' or 'tinymist preview' in parallel for live PDF preview
 fn watch(preview: bool) -> Result<()> {
-    use notify::{Config as NotifyConfig, RecommendedWatcher, RecursiveMode, Watcher};
-    use std::sync::mpsc::channel;
+    use knot_cli::watch::{WatchSet, next_changes, normalize, watch_project};
     use std::time::Duration;
 
     info!("👀 Starting watch mode...");
 
-    let (project_root, watched_files, typ_output_path) = watch_setup()?;
+    let current_dir = std::env::current_dir().context("Failed to get current directory")?;
+    let (config, project_root) = knot_core::Config::find_and_load(&current_dir)?;
+    let typ_output_path = knot_core::ProjectPaths::resolve(&config, &project_root)?.main_typ_path;
+    info!("📁 Project root: {}", project_root.display());
 
     println!("🔨 Initial build...");
     if let Err(e) = build_project(Some(&project_root)) {
@@ -323,82 +325,51 @@ fn watch(preview: bool) -> Result<()> {
 
     let _preview_process = spawn_preview(preview, &project_root, &typ_output_path)?;
 
-    let (tx, rx) = channel();
-    let mut watcher = RecommendedWatcher::new(
-        tx,
-        NotifyConfig::default().with_poll_interval(Duration::from_millis(100)),
-    )
-    .context("Failed to create file watcher")?;
-    watcher
-        .watch(&project_root, RecursiveMode::Recursive)
-        .with_context(|| format!("Failed to watch project directory: {:?}", project_root))?;
+    let (_watcher, rx) = watch_project(&project_root)?;
 
+    let mut watched = WatchSet::for_project(&project_root)?;
     println!("\n👀 Watching for changes. Press Ctrl+C to stop.");
-    println!("💡 Edit any .knot file to trigger rebuild.\n");
+    println!("💡 Edit a source, knot.toml or a depends: file to trigger a rebuild.\n");
 
-    run_event_loop(
-        rx,
-        &watched_files,
-        &project_root,
-        Duration::from_millis(150),
-    );
-
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// Private helpers for watch()
-// ---------------------------------------------------------------------------
-
-/// Resolves the project root, main file, and list of files to watch.
-fn watch_setup() -> Result<(PathBuf, Vec<PathBuf>, PathBuf)> {
-    use knot_core::config::Config;
-
-    let current_dir = std::env::current_dir().context("Failed to get current directory")?;
-    let (config, project_root) = Config::find_and_load(&current_dir)?;
-
-    let knot_core::ProjectPaths {
-        main_file,
-        main_typ_path,
-        ..
-    } = knot_core::ProjectPaths::resolve(&config, &project_root)?;
-
-    info!("📄 Main file: {}", main_file.display());
-    info!("📁 Project root: {}", project_root.display());
-
-    let watched_files = collect_watched_files(&project_root, &config, &main_file);
-
-    info!("👁️  Watching {} file(s)", watched_files.len());
-    for file in &watched_files {
-        info!("   - {}", file.display());
-    }
-
-    Ok((project_root, watched_files, main_typ_path))
-}
-
-/// Collects the list of files that should trigger a rebuild when changed.
-fn collect_watched_files(
-    project_root: &Path,
-    config: &knot_core::config::Config,
-    main_file: &Path,
-) -> Vec<PathBuf> {
-    let mut files = vec![main_file.to_path_buf()];
-
-    let knot_toml = project_root.join("knot.toml");
-    if knot_toml.exists() {
-        files.push(knot_toml);
-    }
-
-    if let Some(includes) = &config.document.includes {
-        for include_name in includes {
-            let include_path = project_root.join(include_name);
-            if include_path.exists() {
-                files.push(include_path);
+    let root = normalize(&project_root);
+    while let Some(changed) = next_changes(&rx, &watched, Duration::from_millis(200)) {
+        let names: Vec<_> = changed
+            .iter()
+            .map(|path| {
+                let path = normalize(path);
+                path.strip_prefix(&root)
+                    .unwrap_or(&path)
+                    .display()
+                    .to_string()
+            })
+            .collect();
+        println!("\n📝 Change detected in: {}", names.join(", "));
+        println!("🔨 Compiling .knot...");
+        let start = std::time::Instant::now();
+        // Compile knot → .typ only. The background `typst watch` or
+        // `tinymist preview` process regenerates the PDF from it.
+        match knot_core::compile_project_full(&project_root, None) {
+            Ok(output) => {
+                knot_cli::print_diagnostics(&output);
+                println!(
+                    "✅ .typ updated ({:.0?}) — PDF regenerating...\n",
+                    start.elapsed()
+                );
             }
+            Err(e) => {
+                eprintln!("❌ Compilation failed: {}\n", e);
+                eprintln!("⚠️  Fix errors and save again to retry.\n");
+            }
+        }
+        // Includes and dependencies may have changed. Keep the previous set
+        // if knot.toml is invalid: fixing it must still trigger a rebuild.
+        match WatchSet::for_project(&project_root) {
+            Ok(set) => watched = set,
+            Err(e) => eprintln!("⚠️  Keeping the previous watched files: {e}"),
         }
     }
 
-    files
+    Ok(())
 }
 
 /// Spawns the background PDF preview process (typst watch or tinymist preview).
@@ -440,77 +411,6 @@ fn spawn_preview(
         .arg(typ_output_path)
         .spawn()
         .context("Failed to launch 'typst watch'. Is Typst installed?")
-    }
-}
-
-/// Runs the file-change event loop until the channel is closed.
-fn run_event_loop(
-    rx: std::sync::mpsc::Receiver<notify::Result<notify::Event>>,
-    watched_files: &[PathBuf],
-    project_root: &Path,
-    debounce: std::time::Duration,
-) {
-    use notify::EventKind;
-
-    let mut last_rebuild = std::time::Instant::now();
-
-    loop {
-        match rx.recv() {
-            Ok(Ok(event)) => {
-                log::debug!("📡 Event: {:?} on {:?}", event.kind, event.paths);
-
-                let is_relevant = matches!(
-                    event.kind,
-                    EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_)
-                );
-                if !is_relevant {
-                    continue;
-                }
-
-                let affects_watched = event
-                    .paths
-                    .iter()
-                    .any(|p| watched_files.iter().any(|w| p.file_name() == w.file_name()));
-                if !affects_watched {
-                    log::debug!("   → Ignoring (not a watched file)");
-                    continue;
-                }
-
-                let now = std::time::Instant::now();
-                if now.duration_since(last_rebuild) < debounce {
-                    log::debug!("   → Debounced");
-                    continue;
-                }
-                last_rebuild = now;
-
-                if let Some(path) = event.paths.first() {
-                    let changed = path
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("unknown");
-                    println!("\n📝 Change detected in: {}", changed);
-                    println!("🔨 Compiling .knot...");
-                    let start = std::time::Instant::now();
-                    // Compile knot → .typ only.  The background `typst watch`
-                    // process picks up the updated .typ and generates the PDF.
-                    match knot_core::compile_project_full(project_root, None) {
-                        Ok(_) => println!(
-                            "✅ .typ updated ({:.0?}) — PDF regenerating...\n",
-                            start.elapsed()
-                        ),
-                        Err(e) => {
-                            eprintln!("❌ Compilation failed: {}\n", e);
-                            eprintln!("⚠️  Fix errors and save again to retry.\n");
-                        }
-                    }
-                }
-            }
-            Ok(Err(e)) => eprintln!("⚠️  Watch error: {}", e),
-            Err(e) => {
-                eprintln!("❌ Channel error: {}", e);
-                break;
-            }
-        }
     }
 }
 

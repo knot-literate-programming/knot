@@ -123,6 +123,14 @@ fn print_warnings(warnings: &[String]) {
     }
 }
 
+/// Print the configuration warnings and the errors shown in the document.
+pub fn print_diagnostics(output: &knot_core::ProjectOutput) {
+    print_warnings(&output.warnings);
+    for error in &output.errors {
+        eprintln!("error: {error}");
+    }
+}
+
 /// Compile a single `.knot` file to a self-contained `.typ` (no PDF).
 ///
 /// The file is compiled as a document of its own (without the project's
@@ -139,4 +147,5 @@ pub fn compile_file(file: &Path) -> Result<PathBuf> {
 }
 
 mod format;
+pub mod watch;
 pub use format::{format_file, format_sources};
