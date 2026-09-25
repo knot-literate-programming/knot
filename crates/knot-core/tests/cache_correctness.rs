@@ -667,3 +667,80 @@ fn invalid_options_never_execute_code() {
     );
     assert!(output.contains("r still runs"), "{output}");
 }
+
+#[test]
+fn cached_errors_preserve_source_visibility_in_preview_and_execution() {
+    use knot_core::executors::side_channel::RuntimeError;
+    for (show, visible) in [
+        ("both", true),
+        ("code", true),
+        ("replace", true),
+        ("output", false),
+        ("none", false),
+    ] {
+        for codly in [false, true] {
+            let (root, path, mut compiler) = fixture();
+            let options = if codly {
+                "#| codly-number-format: none\n"
+            } else {
+                ""
+            };
+            let source = format!(
+                "```{{python}}\n#| show: {show}\n{options}raise ValueError('``` $x_1 # @ref')\n```"
+            );
+            let nodes = plan(&mut compiler, &source);
+            let mut stored = cache(root.path(), &path);
+            stored
+                .save_error(
+                    0,
+                    None,
+                    "python".into(),
+                    nodes[0].hash.clone(),
+                    RuntimeError {
+                        message: Some("cached failure".into()),
+                        call: None,
+                        line: None,
+                        traceback: vec![],
+                    },
+                    vec![],
+                )
+                .unwrap();
+            stored.save_metadata().unwrap();
+            let doc = Document::parse(source);
+            let (planned, cache, preview) = compiler
+                .plan_and_partial(&doc, "main.knot", Phase0Mode::Pending)
+                .unwrap();
+            assert!(matches!(planned[0].need, ExecutionNeed::CacheHit(_)));
+            let output = compiler
+                .execute_and_assemble_streaming(planned, cache, &doc, "main.knot", None)
+                .unwrap();
+            assert_eq!(preview, output);
+            assert!(output.contains("cached failure"), "{output}");
+            assert_eq!(
+                output.contains("````python\nraise ValueError"),
+                visible,
+                "{show}: {output}"
+            );
+            assert_eq!(output.contains("#local("), visible && codly, "{output}");
+        }
+    }
+}
+
+#[test]
+#[ignore = "requires Python"]
+fn fresh_runtime_error_matches_cached_preview() {
+    let (_root, _, mut compiler) = fixture();
+    let source = "```{python}\nraise ValueError('source retained')\n```";
+    let first = compile(&mut compiler, source);
+    assert!(first.contains("```python\nraise ValueError"), "{first}");
+    assert!(first.contains("ValueError: source retained"), "{first}");
+    let (_, _, preview) = compiler
+        .plan_and_partial(
+            &Document::parse(source.into()),
+            "main.knot",
+            Phase0Mode::Pending,
+        )
+        .unwrap();
+    assert_eq!(preview, first);
+    assert_eq!(compile(&mut compiler, source), first);
+}

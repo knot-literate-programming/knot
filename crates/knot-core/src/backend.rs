@@ -87,21 +87,63 @@ impl Backend for TypstBackend {
         if matches!(resolved_options.show, Show::None) && chunk.errors.is_empty() {
             return exports;
         }
-
-        let mut args = vec![];
-        push_base_args(chunk, state, &mut args);
-        push_warnings_arg(chunk, output, resolved_options, &mut args);
-        push_code_arg(chunk, codly_options, resolved_options, &mut args);
-        push_output_arg(output, resolved_options, &mut args);
-        push_presentation_args(resolved_options, &mut args);
-
-        let fn_name = if matches!(resolved_options.show, Show::Replace) {
-            "knot-replace"
-        } else {
-            "code-chunk"
-        };
-        format!("{exports}#{}({})", fn_name, args.join(", "))
+        let call = chunk_call(chunk, codly_options, resolved_options, output, state, None);
+        format!("{exports}{call}")
     }
+}
+
+impl TypstBackend {
+    /// A chunk whose execution failed: rendered exactly like the chunk itself
+    /// (label and caption, code according to `show`, option diagnostics,
+    /// presentation options), with `error` — Typst content — added to its
+    /// errors. It is rendered even with `show: none`, and references to its
+    /// label keep resolving.
+    pub(crate) fn format_failed_chunk(
+        &self,
+        chunk: &Chunk,
+        codly_options: &HashMap<String, String>,
+        resolved_options: &ResolvedChunkOptions,
+        error: &str,
+    ) -> String {
+        let empty = ExecutionOutput {
+            result: ExecutionResult::Text(String::new()),
+            exports: Vec::new(),
+            warnings: vec![],
+        };
+        chunk_call(
+            chunk,
+            codly_options,
+            resolved_options,
+            &empty,
+            &ChunkExecutionState::Ready,
+            Some(error),
+        )
+    }
+}
+
+/// The `#code-chunk(...)` (or `#knot-replace(...)`) call of a chunk; `error`
+/// is extra error content appended after the chunk's option errors.
+fn chunk_call(
+    chunk: &Chunk,
+    codly_options: &HashMap<String, String>,
+    resolved_options: &ResolvedChunkOptions,
+    output: &ExecutionOutput,
+    state: &ChunkExecutionState,
+    error: Option<&str>,
+) -> String {
+    let mut args = vec![];
+    push_base_args(chunk, state, error, &mut args);
+    push_warnings_arg(chunk, output, resolved_options, &mut args);
+    push_code_arg(chunk, codly_options, resolved_options, &mut args);
+    push_output_arg(output, resolved_options, &mut args);
+    push_presentation_args(resolved_options, &mut args);
+
+    let fn_name = if matches!(resolved_options.show, Show::Replace) {
+        "knot-replace"
+    } else {
+        "code-chunk"
+    };
+    format!("#{}({})", fn_name, args.join(", "))
 }
 
 // ---------------------------------------------------------------------------
@@ -109,7 +151,12 @@ impl Backend for TypstBackend {
 // ---------------------------------------------------------------------------
 
 /// Pushes lang, label/caption, is-inert, and parse errors into `args`.
-fn push_base_args(chunk: &Chunk, state: &ChunkExecutionState, args: &mut Vec<String>) {
+fn push_base_args(
+    chunk: &Chunk,
+    state: &ChunkExecutionState,
+    extra_error: Option<&str>,
+    args: &mut Vec<String>,
+) {
     args.push(format!("lang: {}", string_literal(&chunk.language)));
 
     if let Some(label) = &chunk.label
@@ -136,6 +183,7 @@ fn push_base_args(chunk: &Chunk, state: &ChunkExecutionState, args: &mut Vec<Str
         .iter()
         .filter(|e| e.is_error())
         .map(|e| text_content(&e.message))
+        .chain(extra_error.map(String::from))
         .collect();
     if !errors.is_empty() {
         args.push(format!("errors: {}", typst_array(&errors)));

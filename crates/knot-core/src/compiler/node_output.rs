@@ -107,14 +107,26 @@ pub(super) fn format_error_block_for_node(
     // Inline raw keeps line breaks and indentation, and codly leaves it alone:
     // the block renders the same whether or not the document imports codly.
     let error_msg = format!("#block(raw({}, block: false))", string_literal(error_msg));
-    format!(
-        "#code-chunk(
-    lang: {lang_literal},
-    is-inert: false,
-    errors: ([\n=== Execution Error ({lang_text})\nIn {node_kind} {node_name}\n\n{error_msg}\n\n_Execution of subsequent {lang_raw} blocks has been suspended._],)
-)\n",
-        lang_literal = string_literal(lang),
-    )
+    let error = format!(
+        "[\n=== Execution Error ({lang_text})\nIn {node_kind} {node_name}\n\n{error_msg}\n\n_Execution of subsequent {lang_raw} blocks has been suspended._]"
+    );
+    match kind {
+        // A failed chunk is the chunk itself plus its error: label, caption,
+        // code, option diagnostics and styles are kept.
+        PlannedNodeKind::Chunk { node, data } => format!(
+            "{}\n",
+            TypstBackend::new().format_failed_chunk(
+                node,
+                &data.merged_codly_options,
+                &data.resolved_options,
+                &error,
+            )
+        ),
+        PlannedNodeKind::Inline { .. } => format!(
+            "#code-chunk(lang: {}, errors: ({error},))\n",
+            string_literal(lang)
+        ),
+    }
 }
 
 /// Delegates to the backend formatter, passing merged codly options separately.
