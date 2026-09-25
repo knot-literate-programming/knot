@@ -27,7 +27,10 @@ load_session <- function(path) {
     if (file.exists(packages_path)) {
       context <- readRDS(packages_path)
       setwd(context$working_directory)
-      pkgs <- context$packages
+      # .packages() lists the most recently attached package first, and each
+      # library() call goes first on the search path: attach in reverse, i.e.
+      # in the original order, so that masking is the same as before saving.
+      pkgs <- rev(context$packages)
       # Suppress package startup messages
       invisible(lapply(pkgs, function(p) {
         library(p, character.only = TRUE)
