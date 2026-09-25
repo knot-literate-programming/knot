@@ -131,10 +131,16 @@ impl SnapshotManager {
                 Ok((relative, hash_file(&path)?))
             })
             .collect::<Result<_>>()?;
-        cache
-            .metadata
-            .snapshots
-            .insert(hash.to_string(), SnapshotEntry { reusable, files });
+        cache.metadata.snapshots.insert(
+            hash.to_string(),
+            SnapshotEntry {
+                reusable,
+                files,
+                stats: Default::default(),
+            },
+        );
+        // Just hashed: record the cheap identity used by later plans.
+        cache.record_snapshot_stats(hash);
         Ok(())
     }
 }

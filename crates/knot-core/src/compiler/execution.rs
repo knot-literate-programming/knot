@@ -217,15 +217,20 @@ fn handle_must_execute(
 ) -> Result<NodeOutcome> {
     // Restore session snapshot before executing.
     // Lock only for the read, release before executing.
-    // A failed restore is shown on the chunk and suspends the chain; it is
-    // not cached, since the next compilation may succeed.
+    // A failed restore is shown on the chunk and suspends the chain. The
+    // unusable snapshot is discarded, so the next compilation re-executes the
+    // chain instead of failing again (planning only checks size and date).
     let restored = {
-        let cache_guard = ctx.cache.lock().unwrap();
-        sm.restore_if_needed(ctx.lang, &pn.previous_hash, &cache_guard)
+        let mut cache_guard = ctx.cache.lock().unwrap();
+        let restored = sm.restore_if_needed(ctx.lang, &pn.previous_hash, &cache_guard);
+        if restored.is_err() {
+            cache_guard.metadata.snapshots.remove(&pn.previous_hash);
+        }
+        restored
     };
     if let Err(error) = restored {
         let message = format!(
-            "{error:#}. Rebuild without snapshots ('knot build --no-snapshots') or run 'knot clean'."
+            "{error:#}. The snapshot is discarded: the next compilation re-executes this chain."
         );
         return Ok(failed(&pn.kind, ctx.lang, message));
     }

@@ -285,7 +285,7 @@ fn failing_snapshot_restore_is_rendered_and_suspends_the_chain() {
         "{}",
         output[1].1.typst_content
     );
-    assert!(output[1].1.typst_content.contains("--no-snapshots"));
+    assert!(output[1].1.typst_content.contains("re-executes this chain"));
     assert!(output[1].1.typst_content.contains("```python\nedited"));
     assert!(output[2].1.typst_content.contains("is-inert: true"));
 }

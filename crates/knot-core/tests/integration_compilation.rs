@@ -94,6 +94,7 @@ fn persisted_cache_interleaves_chunk_and_inline_results_without_execution() {
                 SnapshotEntry {
                     reusable: true,
                     files: [(name, hash_file(&path).unwrap())].into(),
+                    stats: Default::default(),
                 },
             );
         }
