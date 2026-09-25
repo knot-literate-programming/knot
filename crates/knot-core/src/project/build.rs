@@ -121,6 +121,7 @@ impl ProjectBuild {
         includes: Vec<Include>,
         cancellation: Cancellation,
     ) -> Result<Self> {
+        let _timing = Timing::start("prepare: copy committed caches");
         let cache_root = root.join(crate::Defaults::CACHE_DIR_NAME);
         fs::create_dir_all(&cache_root)?;
         let workspace = tempfile::Builder::new()
@@ -246,6 +247,7 @@ impl ProjectBuild {
     }
     /// Render placeholders/cached results without publishing or executing code.
     pub fn phase0(&self, mode: Phase0Mode) -> Result<ProjectOutput> {
+        let _timing = Timing::start("phase 0");
         let (includes, _) = self.includes(false, mode)?;
         let doc = Document::parse(self.main.text.clone());
         let main = self
@@ -259,6 +261,7 @@ impl ProjectBuild {
         &self,
         progress: Option<Box<dyn Fn(ProjectOutput) -> Result<()> + Send>>,
     ) -> Result<ProjectOutput> {
+        let _timing = Timing::start("compile");
         let (includes, include_errors) = self.includes(true, Phase0Mode::Pending)?;
         let doc = Document::parse(self.main.text.clone());
         let mut compiler = self.compiler(&self.main);
@@ -302,6 +305,11 @@ impl ProjectBuild {
     /// Publish staged artifacts, then caches (for a completed build), then Typst.
     /// The caller must hold its project publication gate and check the generation.
     pub fn publish(&self, output: &ProjectOutput, complete: bool) -> Result<()> {
+        let _timing = Timing::start(if complete {
+            "publish (final)"
+        } else {
+            "publish"
+        });
         self.cancellation.check()?;
         self.publish_artifacts()?;
         if complete {
@@ -322,6 +330,21 @@ impl ProjectBuild {
                 .join(crate::Defaults::LANGUAGE_FILES_DIR),
             &self.root.join(crate::Defaults::LANGUAGE_FILES_DIR),
         )
+    }
+}
+
+/// Logs the duration of a build step at debug level (`RUST_LOG=knot_core=debug`).
+struct Timing(&'static str, std::time::Instant);
+
+impl Timing {
+    fn start(step: &'static str) -> Self {
+        Self(step, std::time::Instant::now())
+    }
+}
+
+impl Drop for Timing {
+    fn drop(&mut self) {
+        log::debug!("⏱️  {} took {:?}", self.0, self.1.elapsed());
     }
 }
 
