@@ -66,11 +66,22 @@ lockfile, versioned data and explicit seeds) when you need them.
 knot watch [--preview]
 ```
 
-Watches all `.knot` files in the project for changes. On every save:
+Watches the files that make up the document: `knot.toml`, the main file, the
+includes (including a listed include that does not exist yet) and the files
+declared with `depends:` in any chunk. Changes to other files, such as the
+generated `.typ` or `_knot_files/`, are ignored. On every change:
 1. Re-compiles changed chunks (using the cache for unchanged ones).
-2. Writes the updated `.typ` file.
+2. Writes the updated `.typ` file and lists the document's errors and
+   configuration warnings, as `knot build` does.
 3. The background `typst watch` process picks up the new `.typ` and regenerates
    the PDF automatically.
+
+Changes are grouped: Knot waits for a short quiet period (200 ms) after the last
+change before compiling, so saving several files, or an editor that saves
+through a temporary file, causes a single rebuild, and a change made during a
+compilation triggers the next one. The watched files are recomputed after each
+build, so adding an include or a `depends:` entry takes effect immediately. If
+`knot.toml` becomes invalid, the previous list is kept until it is fixed.
 
 With `--preview`, uses `tinymist preview` instead of `typst watch`, opening a
 browser preview.
