@@ -69,6 +69,9 @@ pub struct ProjectOutput {
     /// line, at its position). Only complete compilations fill it; Phase 0
     /// leaves it empty. `knot build --strict` fails when it is not empty.
     pub errors: Vec<crate::BuildDiagnostic>,
+    /// Configuration warnings from `knot.toml`, also shown at the end of the
+    /// document. They never fail a build.
+    pub warnings: Vec<String>,
 }
 
 /// Resolved main-source and output paths shared by project consumers.
@@ -282,12 +285,30 @@ fn assemble_project_typ(
     }
 
     // 3. Prepend the inlined lib.typ, then wrap with BEGIN-FILE / END-FILE.
+    // Configuration warnings go last, outside the source blocks: content
+    // placed before a template's page rules would add a page to the document.
     Ok(format!(
-        "{}\n{}\n{}",
+        "{}\n{}\n{}{}",
         crate::sync::GENERATED_MARKER,
         crate::LIB_TYP.trim_end(),
-        crate::sync::wrap_source(&assembled, main_file_name, main_source.lines().count())
+        crate::sync::wrap_source(&assembled, main_file_name, main_source.lines().count()),
+        config_warning_block(&config.warnings)
     ))
+}
+
+/// Warning block listing the configuration warnings, or nothing.
+fn config_warning_block(warnings: &[String]) -> String {
+    if warnings.is_empty() {
+        return String::new();
+    }
+    let items: Vec<_> = warnings
+        .iter()
+        .map(|warning| format!("{},", crate::typst_syntax::text_content(warning)))
+        .collect();
+    format!(
+        "#code-chunk(lang: \"knot\", warnings: ({}))\n",
+        items.join(" ")
+    )
 }
 
 /// Convert absolute cache paths in Typst source to relative `_knot_files/` paths.

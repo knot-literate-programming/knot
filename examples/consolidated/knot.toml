@@ -11,11 +11,6 @@ main = "main.knot"
 # These will be injected at the /* KNOT-INJECT-CHAPTERS */ placeholder
 includes = ["python-analysis.knot", "r-analysis.knot"] #"mixed-analysis.knot"]
 
-[helpers]
-# Typst helper functions (required)
-# This file contains utility functions for rendering code chunks
-typst = "lib/knot.typ"
-
 # Global chunk defaults (all options are optional)
 # These can be overridden in individual chunks with #| option: value
 [chunk-defaults]
@@ -33,7 +28,7 @@ fig-format = "svg"   # Output format: "svg" or "png"
 # Presentation options
 layout = "horizontal"  # Layout when show=both: "horizontal" or "vertical"
 gutter = '1em'
-lang-radius = '100pt'
+codly-lang-radius = '100pt'
 
 # Code options
 code-radius = '4pt'

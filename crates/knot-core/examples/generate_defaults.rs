@@ -34,10 +34,6 @@ fn generate_knot_toml(options: &[OptionMetadata]) -> String {
     output.push_str("main = \"main.knot\"\n");
     output.push_str("# includes = [\"chapter1.knot\", \"chapter2.knot\"]\n\n");
 
-    output.push_str("[helpers]\n");
-    output.push_str("# Typst helper functions (for rendering R/Python output)\n");
-    output.push_str("typst = \"lib/knot.typ\"\n\n");
-
     output.push_str("# ============================================\n");
     output.push_str("# Default values for chunk options\n");
     output.push_str("# ============================================\n");

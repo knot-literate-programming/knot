@@ -217,6 +217,8 @@ Knot has two separate, intentionally asymmetric styling systems:
 - An execution error in the PDF is an error in the LSP, not a warning.
 - Code marked `#| eval: false` is display-only: it is not an error.
 - Runtime text (messages, code, outputs) must be escaped with the helpers in `typst_syntax.rs`, never inserted as raw markup.
+- Messages are plain text in both the PDF and the editor: quote literals with single quotes ('#| eval: false', 'knot clean'), never with Markdown backticks.
+- Document-level warnings (configuration, snapshot budget) go at the end of the document: content placed before a template's page rules would add a page.
 - Generated Typst must not depend on packages the user may not import (e.g. codly's `local()`), except for options the user explicitly configured.
 
 Open gaps are tracked in issue #96.

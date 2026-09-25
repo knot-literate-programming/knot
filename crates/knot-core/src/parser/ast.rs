@@ -257,7 +257,10 @@ macro_rules! define_options {
                 }
             }
 
-            pub fn extract_codly_options(&mut self) {
+            /// Move `codly-*` keys into `codly_options`; return the other
+            /// unknown keys, sorted, for the configuration warnings.
+            pub fn extract_codly_options(&mut self) -> Vec<String> {
+                let mut unknown = Vec::new();
                 for (key, value) in &self.other {
                     if let Some(codly_key) = key.strip_prefix("codly-") {
                         let codly_key = codly_key.to_string();
@@ -270,12 +273,11 @@ macro_rules! define_options {
                         };
                         self.codly_options.insert(codly_key, value_str);
                     } else {
-                        log::warn!(
-                            "Unknown option in knot.toml: '{}' — ignored. Check for typos.",
-                            key
-                        );
+                        unknown.push(key.clone());
                     }
                 }
+                unknown.sort();
+                unknown
             }
         }
 

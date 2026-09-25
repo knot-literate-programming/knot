@@ -51,6 +51,7 @@ pub fn build_project_with_options(start_path: Option<&Path>, options: BuildOptio
     .with_snapshots_disabled(options.no_snapshots);
     let output = build.compile(None)?;
     build.publish(&output, true)?;
+    print_warnings(&output.warnings);
 
     info!(
         "⏱️  Knot compilation & assembly: {:?}",
@@ -115,6 +116,13 @@ pub fn build_project_with_options(start_path: Option<&Path>, options: BuildOptio
     Ok(())
 }
 
+/// Configuration warnings, also shown at the end of the PDF; never fatal.
+fn print_warnings(warnings: &[String]) {
+    for warning in warnings {
+        eprintln!("warning: {warning}");
+    }
+}
+
 /// Compile a single `.knot` file to a self-contained `.typ` (no PDF).
 ///
 /// The file is compiled as a document of its own (without the project's
@@ -126,6 +134,7 @@ pub fn compile_file(file: &Path) -> Result<PathBuf> {
     let build = knot_core::project::ProjectBuild::prepare_file(file, Default::default())?;
     let output = build.compile(None)?;
     build.publish(&output, true)?;
+    print_warnings(&output.warnings);
     Ok(output.main_typ_path)
 }
 

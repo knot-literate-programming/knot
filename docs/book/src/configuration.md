@@ -59,6 +59,22 @@ From lowest to highest priority:
 3. `[r-chunks]` or `[python-chunks]` in `knot.toml`
 4. Per-chunk `#|` options in the `.knot` file
 
+## Unknown keys
+
+Knot warns about keys and sections it does not recognise, which are usually
+typos, and suggests the closest known name:
+
+```text
+warning: knot.toml: unknown key 'fig-widht' in [chunk-defaults] is ignored. Did you mean 'fig-width'?
+```
+
+The warning is printed by `knot build` and `knot compile`, shown in the editor on
+the first line of the main document, and listed at the end of the PDF. The
+ignored key does not affect the rest of the configuration, and warnings never
+fail a build, even with `--strict`. `[codly]` accepts any key (they are passed to
+codly), and chunk sections accept any `codly-*` key. The former `[helpers]`
+section is no longer used: remove it.
+
 ## External tools
 
 An optional `[tools]` section selects the executables used by both the CLI and
