@@ -10,8 +10,9 @@
 //! so that its chunks are streamed.
 //!
 //! Reproduces the paths of the editor integration:
-//! - keystroke: `ProjectBuild::prepare` with the unsaved buffer, Phase 0,
-//!   non-final publication (what the LSP does on every debounced change);
+//! - keystroke: `ProjectBuild::prepare_preview` with the unsaved buffer,
+//!   Phase 0, non-final publication (what the LSP does on every debounced
+//!   change);
 //! - save after a prose edit, and after a Python chunk edit: prepare,
 //!   full compilation, final publication; streamed updates are published as
 //!   the LSP does, and their cost is reported per update.
@@ -105,7 +106,7 @@ fn main() -> Result<()> {
         let buffers: HashMap<PathBuf, String> =
             [(main.clone(), format!("{text}\nTyping {run}.\n"))].into();
         let start = Instant::now();
-        let build = ProjectBuild::prepare(root, &buffers, Default::default())?;
+        let build = ProjectBuild::prepare_preview(root, &buffers, Default::default())?;
         prepare.push(start.elapsed());
         let start = Instant::now();
         let output = build.phase0(Phase0Mode::Modified)?;
@@ -117,7 +118,7 @@ fn main() -> Result<()> {
     println!("\n## Keystroke (Phase 0 with an unsaved buffer)\n");
     println!("| step | median | max |\n|---|---|---|");
     for (name, values) in [
-        ("prepare (workspace copy)", &prepare),
+        ("prepare (sources, no copy)", &prepare),
         ("phase 0 (plan + assemble)", &phase0),
         ("publish (non-final)", &publish),
     ] {

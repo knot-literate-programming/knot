@@ -89,4 +89,19 @@ default snapshot warning threshold is 1 GB per language and file.
   - the final publication copies every cache file back, even unchanged ones;
   - include-based projects are not streamed (see above).
 
-Re-run the benchmark after #72 and #73 and record the new figures here.
+## After #73 and #72
+
+Same machine and benchmark. The keystroke path now uses
+`ProjectBuild::prepare_preview`, like the LSP: no workspace copy, and
+snapshots are validated by size and modification time.
+
+| Snapshots | keystroke before | keystroke after | prose-only save before → after | one Python chunk before → after |
+|---|---|---|---|---|
+| 0.4 MiB | 18 ms | **2 ms** | 31 → 32 ms | 1.1 → 1.1 s |
+| 400 MiB | 1.6 s | **2 ms** | 2.0 → 0.83 s | 4.2 → 3.5 s |
+| 2 000 MiB | 8.0 s | **2 ms** | 10.4 → 4.0 s | 16.6 → 15.8 s |
+
+The keystroke cost no longer depends on the size of the caches. Saves still
+copy the caches into the build workspace and every cache file back on final
+publication (#125); a chunk edit also pays the interpreter start, the restore
+of the previous snapshot and the execution.

@@ -193,7 +193,7 @@ fn compile_phase0_inner(
         .into_iter()
         .map(|(path, text)| (path.to_path_buf(), text.to_string()))
         .collect();
-    let build = ProjectBuild::prepare(start_path, &buffers, Default::default())?;
+    let build = ProjectBuild::prepare_preview(start_path, &buffers, Default::default())?;
     let output = build.phase0(mode)?;
     build.publish(&output, false)?;
     Ok(output)
@@ -349,16 +349,27 @@ pub fn fix_paths_in_typst(source: &str, typ_file: &Path) -> Result<String> {
         let relative = Path::new(Defaults::LANGUAGE_FILES_DIR)
             .join(&namespace)
             .join(filename);
-        if processed.insert(path.to_path_buf()) {
-            let destination = typ_dir.join(&relative);
-            fs::create_dir_all(destination.parent().unwrap())?;
-            fs::copy(path, &destination).with_context(|| {
-                format!(
-                    "Cannot copy cache artifact {} to {}",
-                    path.display(),
-                    destination.display()
-                )
-            })?;
+        let destination = typ_dir.join(&relative);
+        // The directory is named after the content's hash: an existing file
+        // already has this content. Copies are atomic, so it is complete.
+        if processed.insert(path.to_path_buf()) && !destination.exists() {
+            let parent = destination.parent().context("Artifact has no directory")?;
+            fs::create_dir_all(parent)?;
+            let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+            std::io::copy(&mut fs::File::open(path)?, temporary.as_file_mut())
+                .and_then(|_| {
+                    temporary
+                        .persist(&destination)
+                        .map(drop)
+                        .map_err(|e| e.error)
+                })
+                .with_context(|| {
+                    format!(
+                        "Cannot copy cache artifact {} to {}",
+                        path.display(),
+                        destination.display()
+                    )
+                })?;
         }
         result.push('"');
         result.push_str(&crate::path_utils::published_typst_path(&relative)?);

@@ -33,7 +33,9 @@ pub struct ProjectBuild {
     paths: ProjectPaths,
     main: Source,
     includes: Vec<Include>,
-    workspace: tempfile::TempDir,
+    /// Private copy of the caches; `None` for a preview build, which reads
+    /// the committed caches directly and never executes code.
+    workspace: Option<tempfile::TempDir>,
     cancellation: Cancellation,
     no_snapshots: bool,
 }
@@ -45,6 +47,16 @@ impl ProjectBuild {
         start: &Path,
         buffers: &HashMap<PathBuf, String>,
         cancellation: Cancellation,
+    ) -> Result<Self> {
+        Self::prepare_sources(start, buffers, cancellation, true)
+    }
+
+    /// Read the configuration and every source, applying the open buffers.
+    fn prepare_sources(
+        start: &Path,
+        buffers: &HashMap<PathBuf, String>,
+        cancellation: Cancellation,
+        workspace: bool,
     ) -> Result<Self> {
         cancellation.check()?;
         let (config, root) = Config::find_and_load(start)?;
@@ -73,7 +85,21 @@ impl ProjectBuild {
                 None => Include::Missing(name.clone()),
             });
         }
-        Self::with_sources(config, root, paths, main, includes, cancellation)
+        Self::with_sources(config, root, paths, main, includes, cancellation, workspace)
+    }
+
+    /// Capture the sources like [`ProjectBuild::prepare`], for Phase 0 only:
+    /// no workspace is created and nothing is copied, so the cost of a
+    /// preview does not depend on the size of the caches. Phase 0 reads the
+    /// committed caches, which it never writes; callers hold the project
+    /// publication gate while preparing and rendering, as for `prepare`.
+    /// Such a build cannot compile nor publish caches.
+    pub fn prepare_preview(
+        start: &Path,
+        buffers: &HashMap<PathBuf, String>,
+        cancellation: Cancellation,
+    ) -> Result<Self> {
+        Self::prepare_sources(start, buffers, cancellation, false)
     }
 
     /// Capture a single source file as a document of its own, without the
@@ -109,10 +135,11 @@ impl ProjectBuild {
             main_typ_path: root.join(format!(".{stem}.typ")),
         };
         let main = Source { path, name, text };
-        Self::with_sources(config, root, paths, main, Vec::new(), cancellation)
+        Self::with_sources(config, root, paths, main, Vec::new(), cancellation, true)
     }
 
-    /// Copy the committed caches of `main` and `includes` into a private workspace.
+    /// With `workspace`, copy the committed caches of `main` and `includes`
+    /// into a private workspace; otherwise read them in place (preview).
     fn with_sources(
         config: Config,
         root: PathBuf,
@@ -120,7 +147,20 @@ impl ProjectBuild {
         main: Source,
         includes: Vec<Include>,
         cancellation: Cancellation,
+        workspace: bool,
     ) -> Result<Self> {
+        if !workspace {
+            return Ok(Self {
+                config,
+                root,
+                paths,
+                main,
+                includes,
+                workspace: None,
+                cancellation,
+                no_snapshots: false,
+            });
+        }
         let _timing = Timing::start("prepare: copy committed caches");
         let cache_root = root.join(crate::Defaults::CACHE_DIR_NAME);
         fs::create_dir_all(&cache_root)?;
@@ -140,7 +180,7 @@ impl ProjectBuild {
             paths,
             main,
             includes,
-            workspace,
+            workspace: Some(workspace),
             cancellation,
             no_snapshots: false,
         })
@@ -167,18 +207,27 @@ impl ProjectBuild {
             .map(|source| source.path.clone())
             .collect()
     }
+    /// Where this build reads and writes caches: its workspace, or the
+    /// committed caches for a preview build.
+    fn cache_root(&self) -> &Path {
+        self.workspace
+            .as_ref()
+            .map_or(&self.root, |workspace| workspace.path())
+    }
     fn compiler(&self, source: &Source) -> Compiler {
         Compiler::with_context(
             self.config.clone(),
             self.root.clone(),
-            crate::get_cache_dir(self.workspace.path(), &source.path),
+            crate::get_cache_dir(self.cache_root(), &source.path),
             self.cancellation.clone(),
         )
         .with_snapshots_disabled(self.no_snapshots)
     }
     fn fix(&self, content: &str) -> Result<String> {
-        // Relative artifacts are staged here; publication copies them to the root.
-        fix_paths_in_typst(content, &self.workspace.path().join("main.typ"))
+        // Relative artifacts are staged here; publication copies them to the
+        // root. A preview build stages them at the root directly: artifacts
+        // are content-addressed, so a published one is never rewritten.
+        fix_paths_in_typst(content, &self.cache_root().join("main.typ"))
     }
     fn output(
         &self,
@@ -261,6 +310,10 @@ impl ProjectBuild {
         &self,
         progress: Option<Box<dyn Fn(ProjectOutput) -> Result<()> + Send>>,
     ) -> Result<ProjectOutput> {
+        anyhow::ensure!(
+            self.workspace.is_some(),
+            "A preview build cannot execute code"
+        );
         let _timing = Timing::start("compile");
         let (includes, include_errors) = self.includes(true, Phase0Mode::Pending)?;
         let doc = Document::parse(self.main.text.clone());
@@ -311,25 +364,24 @@ impl ProjectBuild {
             "publish"
         });
         self.cancellation.check()?;
-        self.publish_artifacts()?;
+        let Some(workspace) = &self.workspace else {
+            // Preview: artifacts are already at the root; there are no caches.
+            anyhow::ensure!(!complete, "A preview build has no caches to publish");
+            return atomic_write(&output.main_typ_path, output.typ_content.as_bytes());
+        };
+        copy_tree(
+            &workspace.path().join(crate::Defaults::LANGUAGE_FILES_DIR),
+            &self.root.join(crate::Defaults::LANGUAGE_FILES_DIR),
+        )?;
         if complete {
             for source in std::iter::once(&self.main).chain(found(&self.includes)) {
                 copy_tree(
-                    &crate::get_cache_dir(self.workspace.path(), &source.path),
+                    &crate::get_cache_dir(workspace.path(), &source.path),
                     &crate::get_cache_dir(&self.root, &source.path),
                 )?;
             }
         }
         atomic_write(&output.main_typ_path, output.typ_content.as_bytes())
-    }
-    fn publish_artifacts(&self) -> Result<()> {
-        copy_tree(
-            &self
-                .workspace
-                .path()
-                .join(crate::Defaults::LANGUAGE_FILES_DIR),
-            &self.root.join(crate::Defaults::LANGUAGE_FILES_DIR),
-        )
     }
 }
 
