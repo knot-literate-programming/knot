@@ -345,8 +345,14 @@ fn copy_tree(source: &Path, destination: &Path) -> Result<()> {
         if entry.file_type()?.is_dir() {
             copy_tree(&entry.path(), &target)?;
         } else if entry.file_type()?.is_file() {
+            let mut source = fs::File::open(entry.path())?;
             let mut temporary = tempfile::NamedTempFile::new_in(destination)?;
-            std::io::copy(&mut fs::File::open(entry.path())?, temporary.as_file_mut())?;
+            std::io::copy(&mut source, temporary.as_file_mut())?;
+            // Keep the modification time: snapshot validation compares it
+            // (with the size) instead of hashing the file again.
+            temporary
+                .as_file()
+                .set_modified(source.metadata()?.modified()?)?;
             temporary.persist(target).map_err(|error| error.error)?;
         }
     }

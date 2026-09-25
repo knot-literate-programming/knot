@@ -51,7 +51,30 @@ pub struct InlineCacheEntry {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SnapshotEntry {
     pub reusable: bool,
+    /// SHA-256 of each snapshot file, checked when the snapshot is restored.
     pub files: HashMap<String, String>,
+    /// Size and modification time of each file when its hash was recorded or
+    /// last verified: planning compares these instead of re-hashing the files
+    /// on every compilation. Absent in older caches, which are then hashed.
+    #[serde(default)]
+    pub stats: HashMap<String, FileStat>,
+}
+
+/// Cheap identity of a file: a change of content normally changes one of these.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct FileStat {
+    pub len: u64,
+    pub modified: std::time::SystemTime,
+}
+
+impl FileStat {
+    pub fn of(path: &std::path::Path) -> Option<Self> {
+        let metadata = std::fs::metadata(path).ok()?;
+        Some(Self {
+            len: metadata.len(),
+            modified: metadata.modified().ok()?,
+        })
+    }
 }
 
 pub const CACHE_FORMAT_VERSION: u32 = 5;

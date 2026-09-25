@@ -72,6 +72,7 @@ mod tests {
                 SnapshotEntry {
                     reusable: true,
                     files: [(file.into(), "unused".into())].into(),
+                    stats: Default::default(),
                 },
             );
         }

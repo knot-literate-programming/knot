@@ -14,7 +14,7 @@ mod metadata;
 mod storage;
 
 pub use hashing::hash_dependencies;
-pub use metadata::{CacheMetadata, ChunkCacheEntry, InlineCacheEntry, SnapshotEntry};
+pub use metadata::{CacheMetadata, ChunkCacheEntry, FileStat, InlineCacheEntry, SnapshotEntry};
 
 use crate::executors::{ExecutionAttempt, ExecutionOutput};
 use anyhow::{Context, Result, anyhow, bail};
@@ -202,8 +202,27 @@ impl Cache {
             .join(format!("snapshot_{}.{}", node_hash, extension))
     }
 
-    /// Whether every file required to restore a snapshot is intact.
+    /// Whether a snapshot can be reused, as checked while planning: files whose
+    /// size and modification time are unchanged since their hash was verified
+    /// are not read again. The content is verified in full at restore time
+    /// ([`Cache::snapshot_is_intact`]).
     pub fn snapshot_is_valid(&self, hash: &str) -> bool {
+        self.metadata.snapshots.get(hash).is_some_and(|entry| {
+            entry.reusable
+                && !entry.files.is_empty()
+                && entry.files.iter().all(|(path, expected)| {
+                    let file = self.cache_dir.join(path);
+                    let unchanged = entry
+                        .stats
+                        .get(path)
+                        .is_some_and(|stat| FileStat::of(&file).as_ref() == Some(stat));
+                    unchanged || hashing::hash_file(&file).is_ok_and(|actual| actual == *expected)
+                })
+        })
+    }
+
+    /// Whether every snapshot file still has its recorded hash (reads them all).
+    pub fn snapshot_is_intact(&self, hash: &str) -> bool {
         self.metadata.snapshots.get(hash).is_some_and(|entry| {
             entry.reusable
                 && !entry.files.is_empty()
@@ -214,6 +233,20 @@ impl Cache {
         })
     }
 
+    /// Record the size and modification time of a snapshot's files after its
+    /// content was verified, so that later plans do not hash them again.
+    /// Used for entries created before these were recorded.
+    pub fn record_snapshot_stats(&mut self, hash: &str) {
+        let cache_dir = self.cache_dir.clone();
+        if let Some(entry) = self.metadata.snapshots.get_mut(hash) {
+            entry.stats = entry
+                .files
+                .keys()
+                .filter_map(|path| Some((path.clone(), FileStat::of(&cache_dir.join(path))?)))
+                .collect();
+        }
+    }
+
     /// Validate and restore a complete session; incomplete or damaged snapshots are rejected.
     /// Callers choose the snapshot and manage the interpreter lifetime.
     pub fn restore_snapshot(
@@ -221,10 +254,8 @@ impl Cache {
         hash: &str,
         executor: &mut dyn crate::executors::KnotExecutor,
     ) -> Result<()> {
-        if !self.snapshot_is_valid(hash) {
-            bail!(
-                "Cannot restore snapshot {hash}: missing, changed or non-reusable; rebuild the document"
-            );
+        if !self.snapshot_is_intact(hash) {
+            bail!("Cannot restore snapshot {hash}: missing, changed or non-reusable");
         }
         let path = self.get_snapshot_path(hash, executor.snapshot_extension());
         executor
@@ -246,6 +277,61 @@ mod tests {
     use crate::get_cache_dir;
     use crate::parser::ChunkOptions;
     use tempfile::tempdir;
+
+    fn snapshot_cache(content: &[u8]) -> (tempfile::TempDir, Cache, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cache = Cache::new(dir.path().to_path_buf()).unwrap();
+        let file = dir.path().join("snapshot_h.pkl");
+        std::fs::write(&file, content).unwrap();
+        cache.metadata.snapshots.insert(
+            "h".into(),
+            SnapshotEntry {
+                reusable: true,
+                files: [("snapshot_h.pkl".into(), hashing::hash_file(&file).unwrap())].into(),
+                stats: Default::default(),
+            },
+        );
+        (dir, cache, file)
+    }
+
+    #[test]
+    fn planning_trusts_size_and_date_but_restore_checks_the_content() {
+        let (_dir, mut cache, file) = snapshot_cache(b"session-A");
+        cache.record_snapshot_stats("h");
+        assert!(cache.snapshot_is_valid("h") && cache.snapshot_is_intact("h"));
+
+        // Same size, content changed, modification time restored: planning
+        // does not read the file; restore verifies it.
+        let modified = std::fs::metadata(&file).unwrap().modified().unwrap();
+        std::fs::write(&file, b"session-B").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&file)
+            .unwrap()
+            .set_modified(modified)
+            .unwrap();
+        assert!(cache.snapshot_is_valid("h"));
+        assert!(!cache.snapshot_is_intact("h"));
+
+        // A size change is noticed while planning, then the hash decides.
+        std::fs::write(&file, b"longer session").unwrap();
+        assert!(!cache.snapshot_is_valid("h"));
+    }
+
+    #[test]
+    fn entries_without_stats_are_hashed_until_they_are_recorded() {
+        let (_dir, mut cache, file) = snapshot_cache(b"session");
+        assert!(cache.metadata.snapshots["h"].stats.is_empty());
+        assert!(cache.snapshot_is_valid("h"));
+        std::fs::write(&file, b"changed").unwrap();
+        assert!(!cache.snapshot_is_valid("h"), "hashed: the change is seen");
+        std::fs::write(&file, b"session").unwrap();
+        cache.record_snapshot_stats("h");
+        assert_eq!(
+            cache.metadata.snapshots["h"].stats["snapshot_h.pkl"].len,
+            b"session".len() as u64
+        );
+    }
 
     #[test]
     fn test_hash_chaining_basic() {

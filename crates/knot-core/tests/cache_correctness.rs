@@ -323,6 +323,7 @@ fn planning_classifies_hits_misses_skips_and_cascade_without_interpreters() {
             SnapshotEntry {
                 reusable: true,
                 files: [(filename, hash_file(&file).unwrap())].into(),
+                stats: Default::default(),
             },
         );
     }
@@ -822,4 +823,40 @@ fn resuming_from_a_snapshot_keeps_the_global_random_generators() {
     let resumed = values(&compile(&mut compiler, &without_numpy("edited")));
     assert_eq!(resumed, complete);
     assert!(resumed.ends_with("False"), "{resumed}");
+}
+
+#[test]
+#[ignore = "requires Python"]
+fn a_corrupted_snapshot_is_caught_at_restore_and_then_re_executed() {
+    let (root, path, mut compiler) = fixture();
+    let source = |comment: &str| {
+        format!("```{{python}}\nx = 41\n```\n\n```{{python}}\n# {comment}\nprint(x + 1)\n```\n")
+    };
+    assert!(compile(&mut compiler, &source("first")).contains("42"));
+
+    // Corrupt the first chunk's snapshot without changing its size or date,
+    // which planning trusts: only the restore can notice.
+    let dir = get_cache_dir(root.path(), &path);
+    let snapshot = fs::read_dir(&dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|file| file.extension().is_some_and(|ext| ext == "pkl"))
+        .min_by_key(|file| fs::metadata(file).unwrap().modified().unwrap())
+        .unwrap();
+    let modified = fs::metadata(&snapshot).unwrap().modified().unwrap();
+    let length = fs::metadata(&snapshot).unwrap().len() as usize;
+    fs::write(&snapshot, vec![b'x'; length]).unwrap();
+    fs::File::options()
+        .write(true)
+        .open(&snapshot)
+        .unwrap()
+        .set_modified(modified)
+        .unwrap();
+
+    let failed = compile(&mut compiler, &source("edited"));
+    assert!(failed.contains("re-executes this chain"), "{failed}");
+    // The unusable snapshot was discarded: the chain now re-executes cleanly.
+    let repaired = compile(&mut compiler, &source("edited"));
+    assert!(!repaired.contains("Execution Error"), "{repaired}");
+    assert!(repaired.contains("42"), "{repaired}");
 }

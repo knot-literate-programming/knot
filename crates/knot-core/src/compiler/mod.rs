@@ -280,7 +280,7 @@ impl Compiler {
         warning_threshold: Option<u64>,
     ) -> Result<Vec<PlannedNode>> {
         // Lock once for the entire planning pass (synchronous, no contention).
-        let cache = cache.lock().unwrap();
+        let mut cache = cache.lock().unwrap();
 
         let mut planned = Vec::with_capacity(nodes.len());
         let mut last_hash_per_lang: HashMap<String, String> = HashMap::new();
@@ -374,6 +374,14 @@ impl Compiler {
                 }
             };
 
+            // Refresh the cheap identity of reused snapshots (older caches lack
+            // it); saved with the metadata by complete compilations.
+            if matches!(
+                need,
+                ExecutionNeed::CacheHit(_) | ExecutionNeed::CacheHitInline(_)
+            ) {
+                cache.record_snapshot_stats(&hash);
+            }
             if matches!(need, ExecutionNeed::MustExecute | ExecutionNeed::Rejected) {
                 invalidated.insert(lang.clone());
             }
