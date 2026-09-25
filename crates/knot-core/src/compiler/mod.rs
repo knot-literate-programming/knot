@@ -88,10 +88,10 @@ impl CompiledDocument {
 /// Controls how `MustExecute` chunks are rendered in Phase 0 (before execution).
 #[derive(Clone, Copy)]
 pub enum Phase0Mode {
-    /// A full compile is in progress (`do_compile`): show orange border on all
+    /// A full compile is in progress (save or Run): show orange border on all
     /// `MustExecute` chunks to signal that execution is underway.
     Pending,
-    /// The user edited the file without triggering a compile (`do_phase0_only`):
+    /// The user edited the file without triggering a compile (typing):
     /// show amber (strong) on the first `MustExecute` per language chain and
     /// amber (muted) on downstream hash-invalidated chunks.
     Modified,

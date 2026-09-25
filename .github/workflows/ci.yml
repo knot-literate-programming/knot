@@ -37,6 +37,22 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets --all-features --locked -- -D warnings
 
+  msrv:
+    name: Minimum Rust version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Keep in sync with `rust-version` in crates/*/Cargo.toml.
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.92
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check
+        run: cargo check --workspace --all-targets --locked
+
   test:
     name: Tests
     runs-on: ${{ matrix.os }}

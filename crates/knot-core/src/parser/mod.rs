@@ -25,6 +25,7 @@ pub mod indent;
 mod options;
 mod winnow_parser;
 
+pub use ast::chunk_options_reference;
 pub use ast::{
     Align, Chunk, ChunkDefaults, ChunkError, ChunkOptions, Document, DocumentError, FigFormat,
     InlineExpr, InlineOptions, Layout, OptionMetadata, Position, Range, ResolvedChunkOptions,

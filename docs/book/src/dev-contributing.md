@@ -6,7 +6,7 @@
 
 | Tool | Version | Purpose |
 |---|---|---|
-| Rust | 1.80+ | Build all crates |
+| Rust | 1.92+ | Build all crates |
 | Node.js | 20+ | Build the VS Code extension |
 | Typst | latest | Document rendering in tests |
 | Tinymist | latest | Needed by the LSP |
@@ -125,9 +125,9 @@ editors/
     src/
       extension.ts     # Activation, preview lifecycle
       projectExplorer.ts
-resources/
-  typst.R              # Embedded R helper (typst(), current_plot())
-  typst.py             # Embedded Python helper
+crates/knot-core/resources/
+  r/                   # Embedded R helpers (typst(), base_plot(), export_data(), sessions)
+  python/              # Embedded Python helpers (typst(), current_plot(), sessions)
 ```
 
 ---

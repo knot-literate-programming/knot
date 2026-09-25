@@ -13,9 +13,11 @@ This creates:
 my-report/
 ├── knot.toml       ← project configuration
 ├── main.knot       ← your document
-└── lib/
-    └── knot.typ    ← Typst helpers (imported by main.knot)
+└── .gitignore      ← ignores the generated files
 ```
+
+No Typst import is needed for Knot itself: its Typst library is embedded in
+every compiled `.typ` file.
 
 ## Open in VS Code
 
@@ -24,17 +26,15 @@ code .
 ```
 
 Open `main.knot`. The Knot extension activates automatically. Click
-**Start Preview** in the status bar (or press the Knot button in the editor
-toolbar) to open the live PDF preview.
+**Open Preview** in the editor title bar (or run **Knot: Open Preview** from the
+command palette) to open the live preview.
 
 ## Write your first document
 
-Replace the contents of `main.knot` with:
+The template starts with a codly configuration (syntax highlighting), which the
+styles in `knot.toml` rely on: keep it. Replace the rest of `main.knot` with:
 
 ~~~typst
-#import "lib/knot.typ": *
-#show: knot-init
-
 = My First Report
 
 ```{r}
@@ -51,18 +51,18 @@ print(f"Sum of squares: {sum(values)}")
 ```
 ~~~
 
-Save the file. The preview updates within a second.
+Save the file. The preview shows each chunk's result as soon as it has run.
 
 ## Compile to PDF
 
 ```bash
-knot build      # writes my-report.pdf
+knot build      # writes main.pdf
 ```
 
 Or use watch mode, which rebuilds automatically on every save:
 
 ```bash
-knot watch      # rebuilds on save + opens typst watch for PDF
+knot watch      # rebuilds main.pdf on every save
 ```
 
 ## What just happened

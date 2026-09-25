@@ -30,7 +30,7 @@ Define this method anywhere in your chunk — no import or registration step req
 ### Example: a custom S3 class
 
 ```r
-#| echo: true
+#| show: both
 new_greeting <- function(text) structure(list(text = text), class = "greeting")
 
 typst.greeting <- function(obj, ...) {
@@ -67,7 +67,7 @@ so missing libraries are silently skipped.
 ### Example: a custom class
 
 ```python
-#| echo: true
+#| show: both
 class Greeting:
     def __init__(self, text):
         self.text = text

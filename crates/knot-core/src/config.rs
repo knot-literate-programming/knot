@@ -19,9 +19,6 @@ pub struct Config {
     /// `[document]` section — entry point and include list.
     #[serde(default)]
     pub document: DocumentConfig,
-    /// `[helpers]` section — optional custom Typst helper path.
-    #[serde(default)]
-    pub helpers: HelpersConfig,
     /// `[execution]` section — timeout and other execution parameters.
     #[serde(default)]
     pub execution: ExecutionConfig,
@@ -59,13 +56,6 @@ pub struct DocumentConfig {
     pub main: Option<String>,
     /// Additional `.knot` files to compile as includes.
     pub includes: Option<Vec<String>>,
-}
-
-/// `[helpers]` section of `knot.toml`.
-#[derive(Debug, Clone, Default, Deserialize)]
-pub struct HelpersConfig {
-    /// Path to a custom Typst helper file (relative to project root).
-    pub typst: Option<String>,
 }
 
 /// `[execution]` section of `knot.toml`.
@@ -181,11 +171,6 @@ impl Config {
         }
 
         Ok(config)
-    }
-
-    /// Get the Typst helper path, resolving it relative to the project root
-    pub fn typst_helper_path(&self, project_root: &Path) -> Option<PathBuf> {
-        self.helpers.typst.as_ref().map(|t| project_root.join(t))
     }
 
     /// Get language-specific chunk defaults for a given language

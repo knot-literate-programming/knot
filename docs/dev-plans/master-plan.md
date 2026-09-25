@@ -4,6 +4,12 @@ This document tracks the high-level goals and roadmap for the Knot project.
 Detailed designs for specific features are located in their respective files
 within this directory; completed plans are in `archives/`.
 
+The active roadmap lives on GitHub: the
+[milestones](https://github.com/knot-literate-programming/knot/milestones)
+(fixes and onboarding, live loop performance, structural refactorings, linear
+notebook, reproducible composition, launch) and the v0.4 release plan
+(knot-literate-programming/knot#110). This file keeps the overview.
+
 ## Project Overview
 
 - **`knot-core`**: The engine (parser, compiler, cache, language executors).
@@ -13,10 +19,11 @@ within this directory; completed plans are in `archives/`.
 
 ---
 
-## Current Status (March 2026)
+## Current Status (September 2026)
 
-**Maturity:** Feature-complete for v1.0 scope. Focus is now on documentation,
-contributor experience, and polish before public launch.
+**Maturity:** preparing v0.4 (release plan: knot-literate-programming/knot#110).
+The features below are in place; the milestones track the remaining fixes,
+documentation and polish before the public launch.
 
 ### knot-core — Complete
 
@@ -28,7 +35,11 @@ contributor experience, and polish before public launch.
 - Intelligent SHA-256 chained cache (editing chunk N invalidates N+1, N+2, …)
 - Rich output: text, plots (SVG/PNG), DataFrames → Typst tables, mixed types
 - Multi-language: R and Python in the same document
-- Freeze feature: hash contracts on named objects across chunks
+- Snapshots: interpreter state saved per chunk (opt-in per document) so that a
+  cache miss restarts from the previous chunk; `knot build --no-snapshots`
+  re-executes everything
+- Errors visible in the PDF: document, option, runtime and infrastructure errors
+  are rendered where they occur and reported by the LSP with the same message
 - Full chunk options system (YAML `#|` frontmatter, per-language defaults, global defaults)
 - Sync mapping: bidirectional source ↔ PDF navigation via `#KNOT-SYNC` markers
 - Rust best practices: workspace lints, `#[expect]`, public API docs, snapshot tests,
@@ -38,15 +49,18 @@ contributor experience, and polish before public launch.
 
 - Proxy to Tinymist with `.knot` ↔ virtual `.typ` coordinate translation
 - Chunk-option completion and hover docs
-- Hybrid formatting: Air (R) + Ruff (Python) + Tinymist (Typst)
+- Hybrid formatting: Air (R) + Ruff (Python) + embedded Typstyle (Typst)
 - Diagnostics: parse errors, unknown options, runtime errors from cache
 - Document symbols
 - Streaming preview: Phase 0 (instant) + per-chunk updates via `TinymistOverlay`
 - Forward sync: cursor in `.knot` → scroll PDF preview
 - Backward sync: click in PDF → open `.knot` at matching line
-- Generation guard (`compile_generation`) discards stale in-flight compiles
-- `do_phase0_only` on `didChange` (amber borders for modified chunks)
-- `do_compile` on `didSave` / Run button (orange borders, then real output)
+- Per-project publication gate: each request cancels the previous one, stale
+  compiles never publish (`compilation.rs`)
+- Typing: debounced Phase 0 without copying the caches (amber borders for
+  modified chunks), a few ms per keystroke (`perf-baseline.md`)
+- Save / Run button: isolated `ProjectBuild`, orange borders, then streamed
+  real output and atomic publication
 
   **Pending:**
   - Go to Definition (Typst symbols) — see `lsp-navigation.md`
@@ -54,10 +68,12 @@ contributor experience, and polish before public launch.
 
 ### knot-cli — Complete
 
-- `knot build`: one-shot compilation to PDF via `typst compile`
+- `knot build`: one-shot compilation to PDF via `typst compile`; `--strict`
+  fails on any error, `--no-snapshots` re-executes everything
 - `knot watch`: file-change watch + `typst watch` subprocess
 - `knot watch --preview`: watch + Tinymist preview
-- `knot init`: project scaffolding with `knot.toml`, `lib/`, `main.knot`
+- `knot init`: project scaffolding with `knot.toml`, `main.knot`, `.gitignore`
+  (Knot's Typst library is embedded in the compiled `.typ`)
 - `knot clean`: wipe cache
 - `knot jump-to-source <typ_file> <line>`: `.typ` line → `.knot` file + line
 - `knot jump-to-typ <typ_file> <knot_file> <line>`: `.knot` line → `.typ` line
@@ -100,11 +116,10 @@ via `cargo-dist` (configured for macOS, Linux, Windows), review for sensitive in
 
 These are known weaknesses to address after v1.0, in priority order.
 
-### A. Integration test coverage (high priority)
+### A. Integration test coverage — resolved
 
-All R/Python integration tests are `#[ignore]` — the most critical execution
-logic is not verified in CI. The fix requires mock executors or a CI environment
-with R and Python installed.
+The CI installs R and Python and runs the `#[ignore]` integration tests
+(`cargo test -- --ignored`) of knot-core, knot-cli and knot-lsp.
 
 ### B. Typed errors in the public API (medium priority)
 
@@ -122,16 +137,16 @@ library this is suboptimal: callers cannot pattern-match on specific error types
 Deferred until callers (LSP, CLI) actually need to branch on error variants.
 See the TODO comment in `crates/knot-core/src/project.rs`.
 
-### C. compile_project_full complexity (low priority)
+### C. compile_project_full complexity — resolved
 
-The streaming branch of `compile_project_full` in `project.rs` has high
-cyclomatic complexity. Could be split into named helpers without changing
-the external API.
+`compile_project_full` is now a thin wrapper over `ProjectBuild`
+(`project/build.rs`).
 
 ### D. Box<dyn Fn> callback (low priority)
 
 The `on_progress` parameter of `compile_project_full` is
-`Option<Box<dyn Fn(String) + Send>>`. An `impl Fn(String) + Send` generic
+`Option<Box<dyn Fn(String) + Send>>` (and `ProjectBuild::compile` takes a boxed
+`Fn(ProjectOutput)`). An `impl Fn(String) + Send` generic
 parameter would avoid the heap allocation and be more idiomatic, but requires
 a type parameter on the function which may complicate call sites.
 

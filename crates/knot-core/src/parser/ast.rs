@@ -349,16 +349,16 @@ macro_rules! define_options {
 }
 
 define_options! {
-    /// Whether to evaluate the chunk
+    /// Whether to run the chunk; with false, its code is only displayed
     [val] eval: bool, true,
-    /// What to display in the output (both, code, or output)
+    /// What to display: both, code, output, none (nothing, but diagnostics) or replace (slides)
     [val] show: Show, Show::Both,
-    /// Whether to cache the results
+    /// Whether to reuse cached results; with false, the chunk and the following ones in its language re-execute
     [val] cache: bool, true,
 
-    /// Optional caption for figures (metadata, not configurable in knot.toml)
+    /// Figure caption (Typst content); a caption or a label makes the chunk a figure
     [meta] caption: String, None,
-    /// File dependencies
+    /// Files, relative to the project root, whose changes re-execute the chunk
     [col] depends: Vec<PathBuf>, Vec::new(),
 
     /// Figure width in inches
@@ -367,18 +367,18 @@ define_options! {
     /// Figure height in inches
     #[serde(rename = "fig-height")]
     [val] fig_height: f64, 5.0,
-    /// DPI for raster graphics
+    /// Resolution of raster (png) figures, in dots per inch
     [val] dpi: u32, 300,
-    /// Format of plots (svg or png)
+    /// Figure file format: svg or png
     #[serde(rename = "fig-format")]
     [val] fig_format: FigFormat, FigFormat::Svg,
 
 
     // === Presentation Options ===
 
-    /// How to layout code and output when both are displayed (horizontal or vertical)
+    /// Arrangement of code and output when both are shown: horizontal or vertical
     [val] layout: Layout, Layout::Horizontal,
-    /// Where to display warnings: below the block, inline within the layout, or none
+    /// Where R/Python warnings appear: below the chunk, inline next to the output, or none
     #[serde(rename = "warnings-visibility")]
     [val] warnings_visibility: WarningsVisibility, WarningsVisibility::Below,
     /// Space between code and output blocks (Typst length)
@@ -428,6 +428,39 @@ define_options! {
     [opt] width_ratio: String, None,
     /// Alignment of the chunk's content: left, center or right (default: left, also in figures)
     [opt] align: Align, None,
+}
+
+/// Markdown reference table of the chunk options, generated from their
+/// metadata: `docs/book/src/chunk-options.md` embeds it, and a test keeps it
+/// up to date (`cargo run -p knot-core --example chunk_options_reference`).
+pub fn chunk_options_reference() -> String {
+    let mut table = String::from(
+        "| Option | Type | Default | In `knot.toml` | Description |\n|---|---|---|---|---|\n",
+    );
+    for option in ChunkOptions::option_metadata() {
+        let kind = match option.type_name {
+            "bool" => "bool",
+            "f64" => "number",
+            "u32" => "integer",
+            "Vec<PathBuf>" => "list of paths",
+            _ => "string",
+        };
+        let default = match option.default_value {
+            "None" => "—".to_string(),
+            "Vec::new()" => "`[]`".to_string(),
+            value => match value.rsplit_once("::") {
+                Some((_, variant)) => format!("`\"{}\"`", variant.to_lowercase()),
+                None => format!("`{}`", value.trim_end_matches(".0")),
+            },
+        };
+        let configurable = if option.kind == "meta" { "no" } else { "yes" };
+        table.push_str(&format!(
+            "| `{}` | {kind} | {default} | {configurable} | {}. |\n",
+            option.serde_name(),
+            option.doc.trim().trim_end_matches('.'),
+        ));
+    }
+    table
 }
 
 #[derive(Debug, Clone)]

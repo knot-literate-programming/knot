@@ -167,7 +167,7 @@ impl LanguageExecutor for SessionExecutor {
         }))
     }
     fn execute_inline(&mut self, _: &str) -> Result<String> {
-        unreachable!()
+        anyhow::bail!("result too complex")
     }
     fn query(&mut self, _: &str) -> Result<String> {
         unreachable!()
@@ -320,4 +320,28 @@ fn only_the_first_non_reusable_snapshot_of_a_chain_is_reported() {
     // Without snapshots nothing is saved, so nothing is reported.
     let disabled = format!("---\nsnapshots: {{python: false}}\n---\n{chain}");
     assert_eq!(warned(&disabled, Some(1)), [false, false, false]);
+}
+
+#[test]
+fn a_failed_inline_expression_shows_its_cause() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("main.knot");
+    std::fs::write(&path, "").unwrap();
+    let mut compiler = Compiler::new(&path).unwrap();
+    let output = run_with(
+        &mut compiler,
+        "Value: `{python} x`.",
+        SessionExecutor {
+            calls: Arc::new(AtomicUsize::new(0)),
+            fail_save: false,
+            fail_load: false,
+            non_reusable_from: None,
+        },
+    );
+    let error = output[0].1.error.as_deref().unwrap();
+    assert!(
+        error.contains("Failed to execute inline expression")
+            && error.contains("result too complex"),
+        "{error}"
+    );
 }

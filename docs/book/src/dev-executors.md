@@ -9,9 +9,10 @@ new language.
 ## How an executor works
 
 1. **Spawn a subprocess** running a persistent interpreter (R or Python).
-   The interpreter loads an embedded helper script on startup
-   (`resources/typst.R` or `resources/typst.py`), which defines the `typst()`
-   and `current_plot()` functions.
+   The interpreter loads the embedded helper scripts on startup
+   (`crates/knot-core/resources/r/` or `crates/knot-core/resources/python/`),
+   which define `typst()`, `export_data()` and the plot helpers
+   (`base_plot()` in R, `current_plot()` in Python).
 
 2. **Before each execution**, set environment variables in the child process:
 
@@ -46,8 +47,8 @@ The side-channel (`executors/side_channel.rs`) is a temporary JSON file that
 lets the language runtime pass structured metadata back to Rust without
 shell-escaping issues. After each chunk:
 
-- The helper script writes to the JSON file if `typst()` or `current_plot()`
-  was called.
+- The helper script writes to the JSON file if `typst()` (or another output
+  helper) was called.
 - The Rust executor reads and clears the file.
 - The result becomes part of `ExecutionOutput.outputs`.
 
@@ -74,7 +75,8 @@ Here is the checklist. All steps are in `crates/knot-core/`.
 
 ### 1. Add a helper script
 
-Create `resources/<lang>/typst.<ext>` with at least a `typst()` function.
+Create `resources/<lang>/` with the helper scripts (see `resources/python/`),
+including an `output.<ext>` that defines at least a `typst()` function.
 The function should:
 1. Check if `KNOT_METADATA_FILE` is set.
 2. Serialise its argument (text, DataFrame, or plot) to the side-channel.

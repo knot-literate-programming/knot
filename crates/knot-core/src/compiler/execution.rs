@@ -257,7 +257,8 @@ fn handle_must_execute(
         // Infrastructure failure (process crash, timeout…): error block, cascade Inert.
         // Not cached — not a deterministic runtime state.
         let attempt = match execute_for_node(pn, exec) {
-            Err(e) => return Ok(failed(&pn.kind, ctx.lang, e.to_string())),
+            // `{:#}`: the whole context chain, so the cause stays visible.
+            Err(e) => return Ok(failed(&pn.kind, ctx.lang, format!("{e:#}"))),
             Ok(a) => a,
         };
 

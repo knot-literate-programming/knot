@@ -41,12 +41,8 @@ Implement standard editor capabilities by acting as a smart proxy between the cl
 
 Features specific to the multi-language nature of Knot.
 
-- [ ] **Hybrid Formatting**
-  - [ ] Strategy: 
-    1. Send document to `tinymist` for text formatting.
-    2. Extract text edits, filter out those touching chunks.
-    3. Format chunks locally using `Air` (R) or `Black` (Python).
-    4. Merge edits intelligently.
+- [x] **Hybrid Formatting**: Typst text with the embedded Typstyle, chunks with
+  `Air` (R) and `Ruff` (Python) (`handlers/formatting.rs`).
 - [x] **Python/R Parity (Core Engine)**
   - [x] Harmonize Python executor structure with R.
   - [x] Implement hash verification for constant loading in Python.

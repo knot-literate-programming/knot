@@ -4,17 +4,12 @@ A `.knot` file is a valid Typst document with two additions: **code chunks** and
 **inline expressions**. Everything else — headings, paragraphs, equations, figures,
 references — is standard Typst.
 
-## The required import
+## No import needed
 
-Every `.knot` document must start with:
-
-```typst
-#import "lib/knot.typ": *
-#show: knot-init
-```
-
-`knot-init` installs the Typst functions (`code-chunk`, etc.) that Knot's output
-relies on. Without it, the compiled `.typ` will not render correctly.
+Knot's Typst library (`code-chunk` and the other functions its output relies
+on) is embedded in every compiled `.typ` file. A `.knot` document needs no
+`#import` for it: start directly with your content, or with the imports and
+`#show` rules of your own template.
 
 ## Code chunks
 
@@ -39,17 +34,16 @@ The language tag (`r`, `python`) determines which interpreter runs the block.
 Options are specified as YAML comments at the top of the block, prefixed with `#|`:
 
 ~~~typst
-```{r}
-#| label: summary-stats
-#| echo: false
+```{r summary-stats}
+#| show: output
 #| fig-width: 6
 x <- rnorm(100)
-hist(x)
-typst(current_plot())
+base_plot(hist(x))
 ```
 ~~~
 
-See [Chunk Options](./chunk-options.md) for the complete reference.
+The label (`summary-stats`) goes in the fence header, after the language. See
+[Chunk Options](./chunk-options.md) for the complete reference.
 
 ## Inline expressions
 
@@ -86,9 +80,6 @@ The main file can contain a `/* KNOT-INJECT-CHAPTERS */` placeholder where the
 compiled include files will be inserted:
 
 ```typst
-#import "lib/knot.typ": *
-#show: knot-init
-
 = My Book
 
 /* KNOT-INJECT-CHAPTERS */
