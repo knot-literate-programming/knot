@@ -35,9 +35,8 @@
   meta_file <- Sys.getenv("KNOT_METADATA_FILE")
   if (meta_file == "") return(FALSE)
 
-  if (!requireNamespace("jsonlite", quietly = TRUE)) {
-    return(FALSE)
-  }
+  # jsonlite is checked when the interpreter starts: without it, results and
+  # errors could not be reported, and the interpreter does not start.
 
   # Update internal state
   if (type == "result" && !is.null(metadata)) {

@@ -15,6 +15,9 @@ use std::time::Duration;
 
 use super::BOUNDARY;
 
+/// Startup line listing required R packages that cannot be loaded.
+const MISSING: &str = "KNOT_MISSING_R_PACKAGES:";
+
 pub struct RProcess {
     child: Option<Child>,
     pub(super) stdin: Option<ChildStdin>,
@@ -72,6 +75,17 @@ impl RProcess {
         // Source the combined temp file
         writeln!(stdin, "source(\"{}\")", temp_path)?;
 
+        // Report the packages the helpers need but cannot load.
+        let required: Vec<_> = crate::defaults::REQUIRED_R_PACKAGES
+            .iter()
+            .map(|p| format!("'{p}'"))
+            .collect();
+        writeln!(
+            stdin,
+            "local({{ p <- c({}); m <- p[!vapply(p, requireNamespace, TRUE, quietly = TRUE)]; if (length(m)) cat('{MISSING}', m, '\\n', file=stdout()) }})",
+            required.join(", ")
+        )?;
+
         // Send boundary markers to signal end of initialization
         writeln!(stdin, "cat('{}\\n', file=stdout())", BOUNDARY)?;
         writeln!(stdin, "cat('{}\\n', file=stderr())", BOUNDARY)?;
@@ -85,7 +99,12 @@ impl RProcess {
         self.child = Some(child);
         self._helper_file = Some(temp_file);
 
-        self.during_startup(|process| process.read_until_boundary().map(drop))?;
+        let (startup, _) = self.during_startup(|process| process.read_until_boundary())?;
+        if let Some(line) = startup.lines().find_map(|line| line.strip_prefix(MISSING)) {
+            let missing: Vec<_> = line.split_whitespace().collect();
+            self.terminate();
+            anyhow::bail!(crate::defaults::missing_r_packages_message(&missing));
+        }
 
         // NOW start the main loop which will wait for code on stdin
         let stdin = self.stdin.as_mut().unwrap();
