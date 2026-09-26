@@ -103,6 +103,18 @@ fn project_diagnostics(uri: &Url, text: &str) -> Vec<Diagnostic> {
     missing.chain(warnings).collect()
 }
 
+/// Whether a Typst diagnostic of a per-file virtual document reports a name of
+/// Knot's embedded library as unknown: those documents do not contain the
+/// library (it would shift positions), but the compiled document always does,
+/// so the error is false (#143). Real errors of the compiled document reach
+/// the editor through [`route_project_diagnostics`].
+pub fn is_missing_library_name(message: &str) -> bool {
+    message
+        .strip_prefix("unknown variable: ")
+        .map(|rest| rest.split(['\n', ' ']).next().unwrap_or(""))
+        .is_some_and(|name| knot_core::library_names().contains(&name))
+}
+
 /// Route the Typst diagnostics of a project's assembled `main.typ` to the
 /// source files they concern (main or include), through the '#KNOT-SYNC'
 /// markers of `typ_content`. A diagnostic that maps to no source line (the
@@ -436,6 +448,17 @@ mod tests {
                 DiagnosticSeverity::WARNING
             ]
         );
+    }
+
+    #[test]
+    fn unknown_library_names_are_not_reported_in_per_file_documents() {
+        assert!(knot_core::library_names().contains(&"knot-data"));
+        assert!(is_missing_library_name(
+            "unknown variable: knot-data\nHint: if you meant to use subtraction, try adding spaces"
+        ));
+        assert!(is_missing_library_name("unknown variable: code-chunk"));
+        assert!(!is_missing_library_name("unknown variable: knot-dta"));
+        assert!(!is_missing_library_name("expected expression"));
     }
 
     #[test]

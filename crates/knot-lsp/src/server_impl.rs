@@ -626,6 +626,7 @@ impl KnotLanguageServer {
                 {
                     return;
                 }
+                diagnostics.retain(|d| !crate::diagnostics::is_missing_library_name(&d.message));
                 for d in &mut diagnostics {
                     if let (Some(start), Some(end)) = (
                         doc.mapper.typ_to_knot_position(d.range.start),
