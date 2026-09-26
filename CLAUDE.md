@@ -220,6 +220,7 @@ Knot has two separate, intentionally asymmetric styling systems:
 - Produce the PDF and LSP messages from one shared helper in `knot-core` (e.g. `defaults::unsupported_language_message`).
 - An execution error in the PDF is an error in the LSP, not a warning.
 - Code marked `#| eval: false` is display-only: it is not an error.
+- While typing, a chunk being edited (its text differs from the saved file) is shown as modified, without its option errors: the editor reports them at once, and the preview shows them on save (`Compiler::with_saved_source`). A chunk saved with invalid options keeps its error block.
 - Runtime text (messages, code, outputs) must be escaped with the helpers in `typst_syntax.rs`, never inserted as raw markup.
 - Messages are plain text in both the PDF and the editor: quote literals with single quotes ('#| eval: false', 'knot clean'), never with Markdown backticks.
 - Document-level warnings (configuration, snapshot budget) go at the end of the document: content placed before a template's page rules would add a page.

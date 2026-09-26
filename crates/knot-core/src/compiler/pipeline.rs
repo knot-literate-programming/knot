@@ -115,6 +115,9 @@ pub struct PlannedNode {
     pub snapshot_warning_threshold: Option<u64>,
     /// Budget warning computed from reusable snapshots for the immediate preview.
     pub cached_snapshot_warning: Option<String>,
+    /// A chunk of an unsaved buffer whose text differs from the saved file:
+    /// the user is editing it (see [`crate::Compiler::with_saved_source`]).
+    pub unsaved_edit: bool,
 }
 
 /// A node after the execution phase: Typst output is fully determined.

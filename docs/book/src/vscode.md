@@ -27,6 +27,11 @@ those whose code you have changed since the last compile — show an **amber bor
 
 No code executes while you type. The preview is pure Typst — immediate.
 
+A chunk you are editing stays amber even when its options are momentarily
+invalid (for example halfway through typing `show: both`): the editor
+underlines the error at once, and the preview shows it only if you save the
+chunk that way.
+
 ### On save
 
 1. **Phase 0** (< 50 ms): Knot assembles a preview using cached outputs for
