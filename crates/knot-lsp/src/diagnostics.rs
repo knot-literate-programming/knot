@@ -77,10 +77,29 @@ fn project_diagnostics(uri: &Url, text: &str) -> Vec<Diagnostic> {
                 knot_core::project::missing_include_message(name),
             )
         });
+    // The compiler checks the same sources (includes as saved on disk).
+    let includes: Vec<String> = config
+        .document
+        .includes
+        .iter()
+        .flatten()
+        .filter_map(|name| {
+            knot_core::project::resolve_include(&root, name)
+                .ok()
+                .flatten()
+        })
+        .filter_map(|path| std::fs::read_to_string(path).ok())
+        .collect();
+    let sources: Vec<&str> = std::iter::once(text)
+        .chain(includes.iter().map(String::as_str))
+        .collect();
+    let codly = knot_core::codly::missing_import_warning(&config, &sources);
     let warnings = config
         .warnings
         .iter()
-        .map(|warning| on_line(0, DiagnosticSeverity::WARNING, warning.clone()));
+        .cloned()
+        .chain(codly)
+        .map(|warning| on_line(0, DiagnosticSeverity::WARNING, warning));
     missing.chain(warnings).collect()
 }
 
@@ -400,6 +419,29 @@ mod tests {
             errors[0].message,
             knot_core::missing_dependency_message(std::path::Path::new("data/gone.csv"))
         );
+    }
+
+    #[test]
+    fn codly_options_without_a_codly_import_are_a_warning_on_the_main_file() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("knot.toml"),
+            "[document]\nmain = 'main.knot'\n\n[chunk-defaults]\ncodly-lang-outset = '(x: 0pt)'\n",
+        )
+        .unwrap();
+        let main = root.path().join("main.knot");
+        let uri = Url::from_file_path(&main).unwrap();
+        let text = "= Title\n";
+        std::fs::write(&main, text).unwrap();
+        let warnings = get_diagnostics(&uri, text, false);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert_eq!(warnings[0].severity, Some(DiagnosticSeverity::WARNING));
+        assert_eq!(
+            warnings[0].message,
+            knot_core::codly::missing_import_message(&["codly-lang-outset".into()])
+        );
+        let imported = "#import \"@preview/codly:1.3.0\": *\n#show: codly-init\n= Title\n";
+        assert!(get_diagnostics(&uri, imported, false).is_empty());
     }
 
     #[test]

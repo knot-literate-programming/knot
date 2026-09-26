@@ -35,6 +35,9 @@ pub(super) fn resolve_options(
     for (key, value) in &chunk.codly_options {
         merged_codly_options.insert(key.clone(), value.clone());
     }
+    if config.ignore_codly_options {
+        merged_codly_options.clear();
+    }
 
     let resolved_options = chunk_options.resolve();
     (chunk_options, resolved_options, merged_codly_options)

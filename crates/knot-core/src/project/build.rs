@@ -141,7 +141,7 @@ impl ProjectBuild {
     /// With `workspace`, copy the committed caches of `main` and `includes`
     /// into a private workspace; otherwise read them in place (preview).
     fn with_sources(
-        config: Config,
+        mut config: Config,
         root: PathBuf,
         paths: ProjectPaths,
         main: Source,
@@ -149,6 +149,14 @@ impl ProjectBuild {
         cancellation: Cancellation,
         workspace: bool,
     ) -> Result<Self> {
+        let sources: Vec<&str> = std::iter::once(&main)
+            .chain(found(&includes))
+            .map(|source| source.text.as_str())
+            .collect();
+        if let Some(warning) = crate::codly::missing_import_warning(&config, &sources) {
+            config.warnings.push(warning);
+            config.ignore_codly_options = true;
+        }
         if !workspace {
             return Ok(Self {
                 config,

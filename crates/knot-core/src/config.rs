@@ -41,6 +41,10 @@ pub struct Config {
     /// editor; the ignored keys do not affect the rest of the configuration.
     #[serde(skip)]
     pub warnings: Vec<String>,
+    /// Set when `codly-*` options are used but no source imports codly's
+    /// `local()` (see [`crate::codly`]): the options are then ignored.
+    #[serde(skip)]
+    pub ignore_codly_options: bool,
     /// R-specific error chunk defaults ([r-error] in knot.toml)
     #[serde(default, rename = "r-error")]
     pub r_error: Option<ChunkDefaults>,
