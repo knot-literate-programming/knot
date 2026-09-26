@@ -38,6 +38,13 @@ pub struct ChunkCacheEntry {
     pub error: Option<crate::executors::side_channel::RuntimeError>,
     pub dependencies: Vec<String>,
     pub updated_at: String,
+    /// The successful result of an older version of the chunk, kept so that
+    /// the live preview can show it (marked stale) while the chunk waits to
+    /// run; not a current result: its warnings are not reported. A new result
+    /// of the chunk replaces it, and it becomes current again if the chunk
+    /// returns to that version.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub superseded: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

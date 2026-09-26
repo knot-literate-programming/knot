@@ -267,7 +267,8 @@ pub fn get_diagnostics(uri: &Url, text: &str, include_runtime: bool) -> Vec<Diag
         let cache_dir = get_cache_dir(&project_root, &path);
 
         if let Ok(cache) = Cache::new(cache_dir) {
-            for chunk_cache in cache.metadata.chunks {
+            // Superseded entries are older versions kept for the preview.
+            for chunk_cache in cache.metadata.chunks.into_iter().filter(|c| !c.superseded) {
                 // Match cache entry with parsed chunk by ordinal index
                 // This is stable even when the document is edited before the chunk.
                 if let Some(parsed_chunk) = doc.chunks.iter().find(|c| c.index == chunk_cache.index)

@@ -132,10 +132,7 @@ impl Cache {
         let entry = self.metadata.chunks.iter().find(|entry| {
             entry.language == language
                 && entry.error.is_none()
-                && match label {
-                    Some(label) => entry.name.as_deref() == Some(label),
-                    None => entry.name.is_none() && entry.index == index,
-                }
+                && Self::is_entry_of(entry, index, label)
         })?;
         match self.get_cached_result(&entry.hash).ok()? {
             ExecutionAttempt::Success(mut output) => {
@@ -143,6 +140,15 @@ impl Cache {
                 Some(output)
             }
             ExecutionAttempt::RuntimeError(_) => None,
+        }
+    }
+
+    /// Whether `entry` belongs to the chunk at `index` with `label`: by its
+    /// label when it has one (it survives moves), otherwise by position.
+    pub fn is_entry_of(entry: &ChunkCacheEntry, index: usize, label: Option<&str>) -> bool {
+        match label {
+            Some(label) => entry.name.as_deref() == Some(label),
+            None => entry.name.is_none() && entry.index == index,
         }
     }
 
@@ -211,11 +217,19 @@ impl Cache {
                 .map(|p| p.to_string_lossy().into_owned())
                 .collect(),
             updated_at: Utc::now().to_rfc3339(),
+            superseded: false,
         }
     }
 
     fn save_chunk_entry(&mut self, entry: ChunkCacheEntry) -> Result<()> {
-        self.metadata.chunks.retain(|old| old.index != entry.index);
+        // One entry per chunk: also drop the superseded result of the same
+        // labelled chunk at another position.
+        self.metadata.chunks.retain(|old| {
+            old.index != entry.index
+                && !(entry.name.is_some()
+                    && old.name == entry.name
+                    && old.language == entry.language)
+        });
         self.metadata.chunks.push(entry);
         self.save_metadata()
     }

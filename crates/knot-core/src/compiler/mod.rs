@@ -518,8 +518,22 @@ impl Compiler {
                 let Some(node) = planned.iter().find(|node| {
                     node.hash == entry.hash && matches!(node.need, ExecutionNeed::CacheHit(_))
                 }) else {
-                    return false;
+                    // The previous result of a chunk that must run is kept,
+                    // superseded, for the preview (`Cache::previous_result`):
+                    // if the chunk does not run (its chain is suspended), it
+                    // is still there while the user fixes the error.
+                    let previous = entry.error.is_none()
+                        && planned.iter().any(|node| {
+                            node.previous.is_some()
+                                && matches!(node.need, ExecutionNeed::MustExecute)
+                                && entry.language == node.lang
+                                && matches!(&node.kind, PlannedNodeKind::Chunk { node: chunk, .. }
+                                    if Cache::is_entry_of(entry, chunk.index, chunk.label.as_deref()))
+                        });
+                    entry.superseded = previous;
+                    return previous;
                 };
+                entry.superseded = false;
                 if let PlannedNodeKind::Chunk { node: chunk, .. } = &node.kind {
                     // Labels and skipped chunks can change without changing the
                     // execution hash. Keep editor diagnostics aligned with the AST.
