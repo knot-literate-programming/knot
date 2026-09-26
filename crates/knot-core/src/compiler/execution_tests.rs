@@ -345,3 +345,28 @@ fn a_failed_inline_expression_shows_its_cause() {
         "{error}"
     );
 }
+
+#[test]
+fn a_missing_dependency_rejects_the_chunk_and_is_shown() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("main.knot");
+    std::fs::write(&path, "").unwrap();
+    let mut compiler = Compiler::new(&path).unwrap();
+    let doc = Document::parse(
+        "```{r}\n#| depends: [data/gone.csv]\nx <- 1\n```\n```{r}\ny <- 2\n```\n".into(),
+    );
+    let (planned, _, typ) = compiler
+        .plan_and_partial(&doc, "main.knot", Phase0Mode::Pending)
+        .unwrap();
+    assert!(matches!(planned[0].need, ExecutionNeed::Rejected));
+    let message = crate::missing_dependency_message(Path::new("data/gone.csv"));
+    // Escaped as a Typst string: the message has no quote or backslash.
+    assert!(typ.contains(&message), "{typ}");
+    // Creating the file makes the chunk runnable again.
+    std::fs::create_dir(root.path().join("data")).unwrap();
+    std::fs::write(root.path().join("data/gone.csv"), "a\n").unwrap();
+    let (planned, _, _) = compiler
+        .plan_and_partial(&doc, "main.knot", Phase0Mode::Pending)
+        .unwrap();
+    assert!(matches!(planned[0].need, ExecutionNeed::MustExecute));
+}

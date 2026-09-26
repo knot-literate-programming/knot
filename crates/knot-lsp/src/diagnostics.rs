@@ -120,9 +120,19 @@ pub fn get_diagnostics(uri: &Url, text: &str, include_runtime: bool) -> Vec<Diag
     // on the main file, as the PDF shows them in the main document.
     diagnostics.extend(project_diagnostics(uri, text));
 
-    // Check for errors in chunks (parsing/options)
+    // Missing `depends` files, resolved like the compiler does.
+    let project = uri
+        .to_file_path()
+        .ok()
+        .and_then(|path| Config::find_and_load(&path).ok());
+
+    // Check for errors in chunks (parsing/options, missing dependencies)
     for chunk in &doc.chunks {
-        for error in &chunk.errors {
+        let missing = project
+            .as_ref()
+            .map(|(config, root)| knot_core::dependency_errors(chunk, config, root, text))
+            .unwrap_or_default();
+        for error in chunk.errors.iter().chain(&missing) {
             let target_line = if let Some(offset) = error.line_offset {
                 chunk.range.start.line + offset
             } else {
@@ -366,6 +376,29 @@ mod tests {
                 DiagnosticSeverity::ERROR,
                 DiagnosticSeverity::WARNING
             ]
+        );
+    }
+
+    #[test]
+    fn missing_dependencies_are_errors_on_the_depends_line() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("knot.toml"),
+            "[document]\nmain = 'main.knot'\n",
+        )
+        .unwrap();
+        std::fs::create_dir(root.path().join("data")).unwrap();
+        std::fs::write(root.path().join("data/here.csv"), "a\n").unwrap();
+        let text = "```{r}\n#| depends: [data/here.csv, data/gone.csv]\nx <- 1\n```\n";
+        let main = root.path().join("main.knot");
+        std::fs::write(&main, text).unwrap();
+        let errors = get_diagnostics(&Url::from_file_path(&main).unwrap(), text, false);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors[0].range.start.line, 1);
+        assert_eq!(errors[0].severity, Some(DiagnosticSeverity::ERROR));
+        assert_eq!(
+            errors[0].message,
+            knot_core::missing_dependency_message(std::path::Path::new("data/gone.csv"))
         );
     }
 

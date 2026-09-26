@@ -25,6 +25,7 @@ mod node_output;
 mod options;
 
 pub use execution::ProgressEvent;
+pub use options::{dependency_errors, missing_dependency_message};
 pub use pipeline::{
     ChunkExecutionState, ExecutedNode, ExecutionNeed, PlannedNode, PlannedNodeKind,
 };
@@ -259,6 +260,7 @@ impl Compiler {
         info!("🔧 Processing {} executable nodes...", nodes.len());
         let planned = self.plan_pass(
             nodes,
+            &doc.source,
             &cache,
             &doc.snapshots,
             doc.snapshot_warning_threshold,
@@ -275,6 +277,7 @@ impl Compiler {
     fn plan_pass(
         &mut self,
         nodes: Vec<ExecutableNode>,
+        source: &str,
         cache: &Arc<Mutex<Cache>>,
         snapshots: &HashMap<String, bool>,
         warning_threshold: Option<u64>,
@@ -310,9 +313,21 @@ impl Compiler {
                 previous_hash.clone()
             };
             let (hash, need, kind) = match node {
-                ExecutableNode::Chunk(chunk) => {
+                ExecutableNode::Chunk(mut chunk) => {
                     let (chunk_options, resolved_options, merged_codly_options) =
                         resolve_options(&chunk, &self.config, &ChunkExecutionState::Ready);
+                    // A missing dependency rejects the chunk, like invalid options.
+                    let missing = options::missing_dependencies(
+                        &chunk,
+                        &chunk_options.depends,
+                        &self.project_root,
+                        source,
+                    );
+                    let mut hashed_options = chunk_options.clone();
+                    if !missing.is_empty() {
+                        hashed_options.depends.clear();
+                        chunk.errors.extend(missing);
+                    }
                     let name = chunk
                         .label
                         .as_deref()
@@ -321,7 +336,7 @@ impl Compiler {
                     let hash = compute_hash(
                         &lang,
                         &chunk.code,
-                        &chunk_options,
+                        &hashed_options,
                         &hash_context,
                         &self.project_root,
                     )?;

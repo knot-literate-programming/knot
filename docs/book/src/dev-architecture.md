@@ -116,7 +116,7 @@ enum ExecutionNeed {
     CacheHitInline(String),      // inline expression found in cache
     MustExecute,                 // must re-run
     Skip,                        // eval: false
-    Rejected,                    // invalid options: not executed, chain suspended
+    Rejected,                    // invalid options or missing depends file
 }
 
 // The result of running (or attempting to run) a chunk

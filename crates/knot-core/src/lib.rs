@@ -38,7 +38,7 @@ pub use compiler::formatters::CodeFormatter;
 pub use compiler::sync;
 pub use compiler::{
     BuildDiagnostic, CompiledDocument, ExecutedNode, Phase0Mode, PlannedNode, ProgressEvent,
-    assemble_pass, planned_to_partial_nodes,
+    assemble_pass, dependency_errors, missing_dependency_message, planned_to_partial_nodes,
 };
 pub use config::{ChunkDefaults, Config};
 pub use defaults::Defaults;

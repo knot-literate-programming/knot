@@ -104,6 +104,10 @@ Refer to the codly documentation for the full list of available options.
 one of them changes, the chunk and the following chunks in its language are
 executed again, and `knot watch` rebuilds the document.
 
+A file that does not exist is an error, shown on the chunk in the PDF and in the
+editor: the chunk is not executed and the following chunks in its language are
+suspended, until the file is created.
+
 ~~~typst
 ```{r}
 #| depends: [data/raw.csv]

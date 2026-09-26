@@ -69,7 +69,7 @@ cd editors/vscode && npm ci && npm run compile
 
 The core loop lives in `crates/knot-core/src/compiler/`:
 
-**Pass 1 – Planning** (`pipeline.rs`): Parse the `.knot` document, resolve chunk options, compute SHA-256 hashes (chained sequentially so that editing chunk N invalidates N+1, N+2, …), and classify each node as `Skip`, `CacheHit`, `CacheHitInline`, `MustExecute` or `Rejected` (invalid options: not executed, chain suspended).
+**Pass 1 – Planning** (`pipeline.rs`): Parse the `.knot` document, resolve chunk options, compute SHA-256 hashes (chained sequentially so that editing chunk N invalidates N+1, N+2, …), and classify each node as `Skip`, `CacheHit`, `CacheHitInline`, `MustExecute` or `Rejected` (invalid options or missing `depends` file: not executed, chain suspended).
 
 **Pass 2 – Execution** (`execution.rs`): Chunks tagged `MustExecute` are grouped by language via `group_by_language()`, then R and Python chains run **in parallel** via `std::thread::scope`. Within each language chain execution is sequential (preserving interpreter state). Results are written to cache.
 
