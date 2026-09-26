@@ -28,7 +28,7 @@ Planning does four things:
    - `Skip` — `eval: false` option
    - `CacheHit(attempt)` — matching result and restorable snapshot are intact (cached runtime errors need no snapshot)
    - `MustExecute` — missing/invalid cache, disabled reuse, or an upstream node that must execute
-   - `Rejected` — invalid chunk options: not executed, and the language chain is
+   - `Rejected` — invalid chunk options or a missing `depends` file: not executed, and the language chain is
      suspended as after a runtime error
 
 4. **Apply Phase0Mode** when assembling the partial document (for live preview):
