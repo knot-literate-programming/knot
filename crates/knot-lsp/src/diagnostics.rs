@@ -24,6 +24,32 @@ fn lsp_severity(severity: knot_core::parser::ast::Severity) -> DiagnosticSeverit
     }
 }
 
+/// A diagnostic covering `line` of `text`.
+fn line_diagnostic(
+    text: &str,
+    line: usize,
+    severity: DiagnosticSeverity,
+    message: String,
+) -> Diagnostic {
+    let width = text.lines().nth(line).unwrap_or("").encode_utf16().count() as u32;
+    Diagnostic {
+        range: Range {
+            start: Position {
+                line: line as u32,
+                character: 0,
+            },
+            end: Position {
+                line: line as u32,
+                character: width.max(1),
+            },
+        },
+        severity: Some(severity),
+        source: Some("knot".to_string()),
+        message,
+        ..Diagnostic::default()
+    }
+}
+
 /// Diagnostics of the project configuration, when `uri` is the project's main
 /// file: errors for missing includes (on the injection line, where the PDF
 /// renders them) and `knot.toml` warnings (on the first line; the PDF lists
@@ -32,9 +58,32 @@ fn project_diagnostics(uri: &Url, text: &str) -> Vec<Diagnostic> {
     let Ok(path) = uri.to_file_path() else {
         return Vec::new();
     };
-    let Ok((config, root)) = Config::find_and_load(&path) else {
-        return Vec::new();
+    // Without a knot.toml Knot uses the default configuration: an error means
+    // that the project's knot.toml cannot be loaded. Nothing compiles then;
+    // every document shows why (#151).
+    let (config, root) = match Config::find_and_load(&path) {
+        Ok(found) => found,
+        Err(error) => {
+            return vec![line_diagnostic(
+                text,
+                0,
+                DiagnosticSeverity::ERROR,
+                format!("{error:#}"),
+            )];
+        }
     };
+    // A main document set in knot.toml but missing: the project cannot
+    // compile. (Without knot.toml, or without 'main', files stand alone.)
+    if config.document.main.is_some()
+        && let Err(error) = knot_core::ProjectPaths::resolve(&config, &root)
+    {
+        return vec![line_diagnostic(
+            text,
+            0,
+            DiagnosticSeverity::ERROR,
+            format!("{error:#}"),
+        )];
+    }
     let is_main = config
         .document
         .main
@@ -448,6 +497,44 @@ mod tests {
                 DiagnosticSeverity::WARNING
             ]
         );
+    }
+
+    #[test]
+    fn an_unreadable_configuration_or_a_missing_main_document_is_an_error() {
+        let root = tempfile::tempdir().unwrap();
+        let chapter = root.path().join("chapter.knot");
+        let uri = Url::from_file_path(&chapter).unwrap();
+        std::fs::write(&chapter, "= Chapter\n").unwrap();
+        // An unclosed string: the TOML error, with its position, on every document.
+        std::fs::write(
+            root.path().join("knot.toml"),
+            "[document]\nmain = \"main.knot\n",
+        )
+        .unwrap();
+        let errors = get_diagnostics(&uri, "= Chapter\n", false);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors[0].severity, Some(DiagnosticSeverity::ERROR));
+        assert_eq!(errors[0].range.start.line, 0);
+        assert!(
+            errors[0].message.contains("TOML parse error at line 2"),
+            "{}",
+            errors[0].message
+        );
+        // Fixed, but the main document does not exist.
+        std::fs::write(
+            root.path().join("knot.toml"),
+            "[document]\nmain = \"main.knot\"\n",
+        )
+        .unwrap();
+        let errors = get_diagnostics(&uri, "= Chapter\n", false);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].message.starts_with("Main file not found"),
+            "{}",
+            errors[0].message
+        );
+        std::fs::write(root.path().join("main.knot"), "").unwrap();
+        assert!(get_diagnostics(&uri, "= Chapter\n", false).is_empty());
     }
 
     #[test]

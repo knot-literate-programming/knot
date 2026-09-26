@@ -343,7 +343,7 @@ export async function activate(context: ExtensionContext) {
         const clientOptions: LanguageClientOptions = {
             initializationOptions: toolPaths,
             documentSelector: [{ scheme: 'file', language: 'knot' }],
-            synchronize: { configurationSection: 'knot', fileEvents: workspace.createFileSystemWatcher('**/*.knot') },
+            synchronize: { configurationSection: 'knot', fileEvents: workspace.createFileSystemWatcher('**/{*.knot,knot.toml}') },
             outputChannel: outputChannel,
         };
 

@@ -254,6 +254,34 @@ impl LanguageServer for KnotLanguageServer {
         self.client.publish_diagnostics(uri, vec![], None).await;
     }
 
+    /// `knot.toml` changed (the editor watches it): its errors, or their fix,
+    /// concern every open document of the project, and the preview (#151).
+    async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
+        if !params
+            .changes
+            .iter()
+            .any(|change| change.uri.path().ends_with("/knot.toml"))
+        {
+            return;
+        }
+        let open: Vec<(Url, String)> = self
+            .state
+            .documents
+            .read()
+            .await
+            .iter()
+            .map(|(uri, doc)| (uri.clone(), doc.text.clone()))
+            .collect();
+        for (uri, text) in open {
+            let diagnostics = crate::diagnostics::get_diagnostics(&uri, &text, true);
+            if let Some(doc) = self.state.documents.write().await.get_mut(&uri) {
+                doc.knot_diagnostics = diagnostics;
+            }
+            self.publish_combined_diagnostics(&uri).await;
+            self.queue_compile(&uri, false, false).await;
+        }
+    }
+
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         let uri = params.text_document.uri;
         self.queue_compile(&uri, true, false).await;

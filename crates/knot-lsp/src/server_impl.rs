@@ -98,8 +98,8 @@ impl KnotLanguageServer {
                 Ok(result)
             }
             Err(e) => {
-                log::warn!("[startPreview] Error: {e}");
-                Ok(serde_json::json!({"status": "error", "message": e.to_string()}))
+                log::warn!("[startPreview] Error: {e:#}");
+                Ok(serde_json::json!({"status": "error", "message": format!("{e:#}")}))
             }
         }
     }
