@@ -352,6 +352,21 @@ impl LanguageServer for KnotLanguageServer {
 
 #[tokio::main]
 async fn main() {
+    // The editor starts the server without arguments; these are for people.
+    match std::env::args().nth(1).as_deref() {
+        Some("--version" | "-V") => {
+            println!("knot-lsp {}", env!("CARGO_PKG_VERSION"));
+            return;
+        }
+        Some("--help" | "-h") => {
+            println!(
+                "knot-lsp {}: the Knot language server, started by the editor over stdio.\n\nUsage: knot-lsp [--version | --help]",
+                env!("CARGO_PKG_VERSION")
+            );
+            return;
+        }
+        _ => {}
+    }
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .target(env_logger::Target::Stderr)
         .init();

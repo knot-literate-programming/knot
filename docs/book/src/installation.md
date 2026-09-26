@@ -118,7 +118,8 @@ You need [Rust](https://rustup.rs) 1.92+ and [Node.js](https://nodejs.org) 22+.
 knot --version
 knot-lsp --version
 typst --version
-tinymist --version
 ```
 
-All four commands should print a version string without errors.
+Each command should print a version string without errors. If you installed
+the `tinymist` binary (for `knot watch --preview` or another editor), check it
+with `tinymist --version`; in VS Code, the Tinymist extension is enough.
