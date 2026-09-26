@@ -908,7 +908,7 @@ dependencies = [
 
 [[package]]
 name = "knot-cli"
-version = "0.4.0-rc.2"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -928,7 +928,7 @@ dependencies = [
 
 [[package]]
 name = "knot-core"
-version = "0.4.0-rc.2"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -951,7 +951,7 @@ dependencies = [
 
 [[package]]
 name = "knot-lsp"
-version = "0.4.0-rc.2"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "env_logger",

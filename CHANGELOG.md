@@ -3,11 +3,12 @@
 All notable changes to Knot. Versions follow [Semantic Versioning](https://semver.org);
 Knot is experimental (0.x): the document format and options may still change.
 
-## 0.4.0 — unreleased
+## 0.4.0 — 2026-09-27
 
-Release candidates: `v0.4.0-rc.1`, `v0.4.0-rc.2`. A first release for external users: write, compute and preview a Typst document
+A first release for external users: write, compute and preview a Typst document
 with R and Python, see errors in context, and validate the final document by a
-full, strict re-execution. See the [release plan](https://github.com/knot-literate-programming/knot/issues/110).
+full, strict re-execution. See the [release plan](https://github.com/knot-literate-programming/knot/issues/110);
+validated through the release candidates `v0.4.0-rc.1` and `v0.4.0-rc.2`.
 
 ### Highlights
 
