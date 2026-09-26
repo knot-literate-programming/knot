@@ -45,13 +45,13 @@ brew install typst
 cargo install --locked typst-cli
 ```
 
-**Tinymist** is the Typst language server. Download the binary for your platform
-from the [Tinymist releases page](https://github.com/Myriad-Dreamin/tinymist/releases)
-and place it somewhere in your `PATH`.
-
-> **Note:** The Tinymist VS Code extension bundles its own binary, but Knot's LSP
-> spawns a *separate* Tinymist subprocess and needs the binary available in `PATH`
-> independently.
+**Tinymist** is the Typst language server. In VS Code, installing the
+[Tinymist extension](https://marketplace.visualstudio.com/items?itemName=myriad-dreamin.tinymist)
+is enough: Knot's language server runs its own Tinymist process from the binary
+bundled with that extension. `knot watch --preview` and other editors need the
+`tinymist` binary on your `PATH` (from the
+[Tinymist releases page](https://github.com/Myriad-Dreamin/tinymist/releases)) or
+selected with `[tools] tinymist` in `knot.toml`.
 
 ### Per language (install what you use)
 
@@ -64,6 +64,16 @@ and place it somewhere in your `PATH`.
 
 You only need the tools for the languages you actually use. If your document has
 no R chunks, you do not need R.
+
+Knot's R helpers use three CRAN packages: `jsonlite` (every R chunk),
+`digest` (figures, tables and data exports) and `svglite` (SVG figures):
+
+```r
+install.packages(c("jsonlite", "digest", "svglite"))
+```
+
+Python needs no package for Knot itself; install the libraries your chunks use,
+for example `matplotlib` for figures and `pandas` for data frames.
 
 ## Build from source
 

@@ -4,8 +4,13 @@ Knot is a literate programming system for [Typst](https://typst.app). It lets yo
 embed executable R and Python code directly inside `.knot` documents, which compile
 to `.typ` files that Typst renders into PDF (or any other format Typst supports).
 
-If you have used RMarkdown or Quarto, the idea will feel familiar. The differences
-are in the details — and the details matter.
+If you have used RMarkdown or Quarto, the idea will feel familiar. Knot's bet is
+narrower: **the final document is the notebook**. R and Python compute, Typst
+composes, and compilation verifies. The code runs in document order, and what the
+PDF shows — results and errors alike — is what that execution produced.
+
+Knot is experimental (0.x): the format, options and configuration may still
+change. See [Status and limitations](#status-and-limitations) below.
 
 ---
 
@@ -19,7 +24,8 @@ In practice this means:
 
 - Your analysis, your methodology, and your conclusions live in the same file as the
   code that produces them.
-- The document is always reproducible: running it again produces exactly the same output.
+- The document can be checked: running it again from a clean state reproduces the
+  output, as far as the code, its data and its environment are themselves stable.
 - There is no "copy the number from the script into the report" step. The number *is*
   the report.
 
@@ -124,14 +130,14 @@ Re-executing chunk 4 requires that the R (or Python) environment be in the same
 state it was in *just before* chunk 4 last ran. Knot achieves this through
 **environment snapshots**.
 
-Before executing each chunk, Knot saves a snapshot of the interpreter's state
+After executing each chunk, Knot saves a snapshot of the interpreter's state
 (the set of live objects and their values). When a downstream chunk must be
-re-executed, Knot restores the snapshot from just before that chunk and then
+re-executed, Knot restores the snapshot left by the chunk just before it and then
 runs the chunk — without having to re-execute all the upstream chunks.
 
-This means that if only chunk 5 changes in a 20-chunk document, Knot restores
-the snapshot from before chunk 5 and executes only chunk 5. The other 19 chunks
-are served from cache.
+This means that if chunk 5 changes in a 20-chunk document, Knot restores the
+snapshot left by chunk 4 and executes chunks 5 to 20 (their cache keys changed
+with chunk 5's). Chunks 1 to 4 are served from cache.
 
 ---
 
@@ -188,8 +194,9 @@ experience:
    all unchanged chunks. The chunk you edited shows a thick amber dotted border;
    downstream chunks invalidated by the hash cascade show a thin amber dashed border.
 
-2. **You save** — Knot immediately assembles a Phase 0 preview (cache hits in full,
-   pending chunks shown with an orange border). This appears in under 50 ms.
+2. **You save** — Knot immediately assembles a preview from the cache (cache hits
+   in full, chunks that must run shown with an orange border), before running
+   any code.
 
 3. **Chunks execute** — as each chunk finishes, its result streams into the preview
    in real time. You see results appear one by one, not all at once at the end.
@@ -237,9 +244,11 @@ as the only typesetting target, with reproducibility as a first-class constraint
   At render time, the document is executed linearly from a fresh environment.
   This split is a frequent source of frustration: code that worked interactively
   breaks at render because it silently depended on state that no longer exists.
-  Knot has only one mode. Every compilation is a linear execution from a clean
-  state, with the cache as the only shortcut. There is no gap between "works in
-  the session" and "works in the document".
+  Knot has only one execution order: the document's. Every compilation runs the
+  chunks linearly; the cache and the snapshots only skip work whose inputs have
+  not changed, and `knot build --strict --no-snapshots` runs everything from a
+  clean state. There is no gap between "works in the session" and "works in the
+  document". See [From exploration to publication](./exploration-to-publication.md).
 - **Typst instead of LaTeX.** Typst's syntax is clean, its compilation is fast,
   and its layout model is modern. For users who do not need LaTeX compatibility,
   it removes a significant source of friction.
@@ -255,5 +264,22 @@ as the only typesetting target, with reproducibility as a first-class constraint
 | Output formats | PDF (via Typst) | Many | Many |
 | Execution order | Always linear | Linear at render, non-linear interactively | Linear at render, non-linear interactively |
 | Caching | Chained SHA-256 | knitr cache (per chunk) | Freeze / cache |
-| Live preview | Streaming, per-chunk | None / slow | Limited |
+| Live preview | Streaming, per-chunk | Re-knit | Re-render on save |
 | Bidirectional sync | Yes | No | Partial |
+
+---
+
+## Status and limitations
+
+Knot is experimental (0.x). Known limitations of the current version:
+
+- Output is explicit: plots appear through `typst(p)`, `base_plot({ ... })` (R)
+  or `typst(current_plot())` (Python), and a Python chunk does not display its
+  last expression. A chunk shows at most one plot and one table, not in emission
+  order.
+- Data frames are rendered as plain tables; for publication, export the data
+  with `export_data` and compose the table in Typst.
+- Snapshots are an optimisation: some objects cannot be restored. Knot does not
+  record package versions or pin the environment.
+- R and Python only; PDF output only, through Typst; editor integration for VS
+  Code only.

@@ -181,13 +181,17 @@ else
     BLOCKING_OK=false
 fi
 
-# Tinymist — required for VS Code live preview
-if command -v tinymist >/dev/null 2>&1; then
+# Tinymist — required for the live preview. In VS Code, Knot uses the binary
+# bundled with the Tinymist extension; `knot watch --preview` needs it on PATH.
+if command -v code >/dev/null 2>&1 \
+    && code --list-extensions 2>/dev/null | grep -qi '^myriad-dreamin\.tinymist$'; then
+    ok "Tinymist VS Code extension found"
+elif command -v tinymist >/dev/null 2>&1; then
     ok "tinymist found"
 else
-    err "tinymist not found — VS Code preview will not work."
-    info "Install: https://github.com/Myriad-Dreamin/tinymist/releases"
-    info "Or install the 'Tinymist Typst' VS Code extension and add its binary to PATH."
+    err "Tinymist not found — the VS Code preview will not work."
+    info "Install the 'Tinymist Typst' VS Code extension (myriad-dreamin.tinymist),"
+    info "or the binary from https://github.com/Myriad-Dreamin/tinymist/releases"
     BLOCKING_OK=false
 fi
 
@@ -195,6 +199,12 @@ fi
 if command -v Rscript >/dev/null 2>&1; then
     ok "$(Rscript --version 2>&1 | head -1)"
     HAS_R=true
+    # Packages used by Knot's R helpers.
+    MISSING_R=$(Rscript -e 'p <- c("jsonlite", "digest", "svglite"); cat(p[!vapply(p, requireNamespace, TRUE, quietly = TRUE)])' 2>/dev/null || true)
+    if [ -n "$MISSING_R" ]; then
+        warn "R packages missing: $MISSING_R — R chunks need them."
+        info "Install in R: install.packages(c(\"jsonlite\", \"digest\", \"svglite\"))"
+    fi
 else
     warn "R not found — R chunks will not execute."
     info "Install: https://cran.r-project.org"

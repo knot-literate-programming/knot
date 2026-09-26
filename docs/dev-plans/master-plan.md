@@ -35,7 +35,7 @@ documentation and polish before the public launch.
 - Intelligent SHA-256 chained cache (editing chunk N invalidates N+1, N+2, …)
 - Rich output: text, plots (SVG/PNG), DataFrames → Typst tables, mixed types
 - Multi-language: R and Python in the same document
-- Snapshots: interpreter state saved per chunk (opt-in per document) so that a
+- Snapshots: interpreter state saved per chunk (on by default, disabled per document and language) so that a
   cache miss restarts from the previous chunk; `knot build --no-snapshots`
   re-executes everything
 - Errors visible in the PDF: document, option, runtime and infrastructure errors
