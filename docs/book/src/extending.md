@@ -139,6 +139,7 @@ make it shadow the built-in version.
 | `is-pending` | bool | `false` | Live preview: execution in progress (orange border) |
 | `is-modified` | bool | `false` | Live preview: directly edited chunk (amber border) |
 | `is-modified-cascade` | bool | `false` | Live preview: hash-cascaded chunk (muted amber) |
+| `is-stale` | bool | `false` | Live preview: `output` is the chunk's previous result, shown until it runs again |
 | `state-styles` | dict | `knot-state-styles` | Live preview style overrides |
 
 Either `label` or `caption` creates a figure of kind `raw`. Without either,

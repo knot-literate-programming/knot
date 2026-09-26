@@ -118,6 +118,9 @@ pub struct PlannedNode {
     /// A chunk of an unsaved buffer whose text differs from the saved file:
     /// the user is editing it (see [`crate::Compiler::with_saved_source`]).
     pub unsaved_edit: bool,
+    /// For a chunk that must run again: its previous successful result, shown
+    /// marked stale in the live preview until the new one replaces it.
+    pub previous: Option<crate::executors::ExecutionOutput>,
 }
 
 /// A node after the execution phase: Typst output is fully determined.

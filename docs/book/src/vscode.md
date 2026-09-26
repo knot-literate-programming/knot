@@ -54,6 +54,12 @@ chunk that way.
 | 2 pt orange solid | Compile in progress — chunk queued for execution |
 | White semi-transparent overlay | Inert — execution suspended due to an upstream error |
 
+A chunk waiting to run again keeps showing its previous result, under a light
+veil and inside its amber or orange border, until the new result replaces it:
+the page does not jump, and the state stays visible when only the output is
+shown. Data exported with `export_data` are not reused this way, so a table or
+figure drawn in Typst from them shows as pending until the chunk has run.
+
 These styles are defined by the `knot-state-styles` dictionary of Knot's
 embedded Typst library. Redefine it at the top of your `.knot` file to change
 the preview appearance:

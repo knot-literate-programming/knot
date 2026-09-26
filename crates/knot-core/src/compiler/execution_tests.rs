@@ -399,3 +399,46 @@ fn invalid_options_of_a_chunk_being_typed_are_not_shown_until_saved() {
         assert!(typ.contains("Invalid chunk options"), "{typ}");
     }
 }
+
+#[test]
+fn a_chunk_waiting_to_run_shows_its_previous_result_as_stale_in_the_preview_only() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("main.knot");
+    std::fs::write(&path, "").unwrap();
+    let mut compiler = Compiler::new(&path).unwrap();
+    let session = || SessionExecutor {
+        calls: Arc::new(AtomicUsize::new(0)),
+        fail_save: false,
+        fail_load: false,
+        non_reusable_from: None,
+    };
+    run_with(&mut compiler, "```{python}\nfirst\n```", session());
+    let edited = "```{python}\nedited\n```";
+    let (_, _, typ) = compiler
+        .plan_and_partial(
+            &Document::parse(edited.into()),
+            "main.knot",
+            Phase0Mode::Modified,
+        )
+        .unwrap();
+    assert!(
+        typ.contains("is-stale: true") && typ.contains("done"),
+        "{typ}"
+    );
+    // Once executed, the result is current.
+    let output = run_with(&mut compiler, edited, session());
+    assert!(
+        output
+            .iter()
+            .all(|(_, node)| !node.typst_content.contains("is-stale"))
+    );
+    // A chunk showing no output has no stale result to show.
+    let (_, _, typ) = compiler
+        .plan_and_partial(
+            &Document::parse("```{python}\n#| show: code\nagain\n```".into()),
+            "main.knot",
+            Phase0Mode::Pending,
+        )
+        .unwrap();
+    assert!(!typ.contains("is-stale"), "{typ}");
+}
