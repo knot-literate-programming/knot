@@ -56,6 +56,19 @@ pub use project::{
 /// projects do not need a `lib/` directory or an `#import` statement.
 pub const LIB_TYP: &str = include_str!("../../../knot-typst-package/lib.typ");
 
+/// Names defined at the top level of the embedded library ([`LIB_TYP`]):
+/// always defined in a compiled document, whatever its source.
+pub fn library_names() -> Vec<&'static str> {
+    LIB_TYP
+        .lines()
+        .filter_map(|line| line.strip_prefix("#let "))
+        .filter_map(|rest| {
+            let end = rest.find(|c: char| !(c.is_alphanumeric() || c == '-' || c == '_'))?;
+            (end > 0).then(|| &rest[..end])
+        })
+        .collect()
+}
+
 /// R helper scripts embedded in the binary, loaded into every R executor session.
 ///
 /// Each entry is `(filename, source_code)`. Scripts are sourced in order.
