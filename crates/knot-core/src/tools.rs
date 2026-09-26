@@ -109,6 +109,40 @@ fn editor_first(
     which::which_in(client?, paths.as_ref(), cwd).ok()
 }
 
+/// The Python interpreter: the `[tools] python` setting, otherwise `python3`.
+/// On Windows, standard installations provide `python` and the `py` launcher
+/// but no `python3`, and the Microsoft Store stubs (in `WindowsApps`) open the
+/// Store instead of running Python: `python3`, `python` then `py` are tried,
+/// stubs skipped (#155).
+pub fn resolve_python(configured: Option<&Path>) -> Result<PathBuf> {
+    if configured.is_none() && cfg!(windows) {
+        let cwd = std::env::current_dir()?;
+        return first_python(std::env::var_os("PATH"), &cwd).with_context(|| {
+            "Python not found: install Python 3 (for example from python.org), or set its path with '[tools] python' in knot.toml. The Microsoft Store 'python3' shortcut is not an interpreter."
+        });
+    }
+    resolve_binary("python3", configured, None)
+}
+
+/// The first of `python3`, `python` and `py` on `paths` that is not a
+/// Microsoft Store stub.
+fn first_python(paths: Option<std::ffi::OsString>, cwd: &Path) -> Option<PathBuf> {
+    ["python3", "python", "py"].into_iter().find_map(|name| {
+        which::which_in_all(name, paths.as_ref(), cwd)
+            .ok()?
+            .find(|path| !is_store_stub(path))
+    })
+}
+
+fn is_store_stub(path: &Path) -> bool {
+    path.components().any(|component| {
+        component
+            .as_os_str()
+            .to_string_lossy()
+            .eq_ignore_ascii_case("WindowsApps")
+    })
+}
+
 fn resolve_in(
     name: &str,
     configured: Option<&Path>,
@@ -246,6 +280,44 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.to_string().contains("Configured tool"));
+    }
+
+    /// An executable named `name` in `root/directory`.
+    fn named(root: &Path, directory: &str, name: &str) -> PathBuf {
+        let directory = root.join(directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        let target = directory.join(if cfg!(windows) {
+            format!("{name}.exe")
+        } else {
+            name.to_string()
+        });
+        std::fs::copy(std::env::current_exe().unwrap(), &target).unwrap();
+        target
+    }
+
+    #[test]
+    fn python_candidates_skip_the_store_stubs() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let stub = named(root, "Microsoft/WindowsApps", "python3");
+        let python = named(root, "Python312", "python");
+        let paths = |dirs: &[&Path]| Some(std::env::join_paths(dirs).unwrap());
+        // The stub comes first on PATH: the real 'python' is chosen.
+        assert_eq!(
+            first_python(
+                paths(&[stub.parent().unwrap(), python.parent().unwrap()]),
+                root
+            ),
+            Some(python.clone())
+        );
+        // Only the 'py' launcher (python.org's default: python not on PATH).
+        let py = named(root, "Windows", "py");
+        assert_eq!(
+            first_python(paths(&[stub.parent().unwrap(), py.parent().unwrap()]), root),
+            Some(py)
+        );
+        // Only the stub: no interpreter.
+        assert_eq!(first_python(paths(&[stub.parent().unwrap()]), root), None);
     }
 
     #[test]
