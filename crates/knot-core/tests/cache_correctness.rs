@@ -860,3 +860,52 @@ fn a_corrupted_snapshot_is_caught_at_restore_and_then_re_executed() {
     assert!(!repaired.contains("Execution Error"), "{repaired}");
     assert!(repaired.contains("42"), "{repaired}");
 }
+
+#[test]
+#[ignore = "requires Python"]
+fn a_chunk_suspended_by_an_error_keeps_its_previous_result_for_the_preview() {
+    let (root, path, mut compiler) = fixture();
+    let second = "```{python}\nprint('second', x)\n```\n";
+    compile(
+        &mut compiler,
+        &format!("```{{python}}\nx = 1\n```\n{second}"),
+    );
+
+    // An error suspends the second chunk: it does not run, its previous
+    // result is kept, superseded (the editor ignores its warnings).
+    let failed = compile(
+        &mut compiler,
+        &format!("```{{python}}\nraise ValueError('boom')\n```\n{second}"),
+    );
+    assert!(
+        failed.contains("boom") && !failed.contains("is-stale"),
+        "{failed}"
+    );
+    let entries = cache(root.path(), &path).metadata.chunks;
+    assert!(
+        entries.iter().any(|e| e.index == 1 && e.superseded),
+        "{entries:?}"
+    );
+
+    // While the fix runs, the preview shows it, marked stale.
+    let fixed = format!("```{{python}}\nx = 2\n```\n{second}");
+    let (_, _, preview) = compiler
+        .plan_and_partial(
+            &Document::parse(fixed.clone()),
+            "main.knot",
+            Phase0Mode::Pending,
+        )
+        .unwrap();
+    assert!(
+        preview.contains("is-stale: true") && preview.contains("second 1"),
+        "{preview}"
+    );
+    // Then the new result replaces it.
+    let output = compile(&mut compiler, &fixed);
+    assert!(
+        output.contains("second 2") && !output.contains("is-stale"),
+        "{output}"
+    );
+    let entries = cache(root.path(), &path).metadata.chunks;
+    assert!(entries.iter().all(|e| !e.superseded), "{entries:?}");
+}
