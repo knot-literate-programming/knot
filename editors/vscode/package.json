@@ -243,7 +243,29 @@
           "description": "Path to Ruff formatter executable (used for Python chunks)"
         }
       }
-    }
+    },
+    "colors": [
+      {
+        "id": "knot.rChunkBackground",
+        "description": "Background of R chunks in .knot files.",
+        "defaults": {
+          "light": "#CE412B12",
+          "dark": "#CE412B24",
+          "highContrast": "#CE412B33",
+          "highContrastLight": "#CE412B1F"
+        }
+      },
+      {
+        "id": "knot.pythonChunkBackground",
+        "description": "Background of Python chunks in .knot files.",
+        "defaults": {
+          "light": "#3572A514",
+          "dark": "#3572A533",
+          "highContrast": "#3572A544",
+          "highContrastLight": "#3572A524"
+        }
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run typecheck && npm run clean && npm run bundle -- --production",
