@@ -27,6 +27,28 @@ pub fn to_virtual_uri(uri: &Url) -> Url {
 ///
 /// Implement the Mirror Mask strategy: keep opening/closing markers and mask only the code with spaces.
 /// This preserves exact width and line count without any external markers.
+/// Push a chunk's opening fence line with everything after its backticks
+/// replaced by spaces of the same UTF-16 width (line breaks kept).
+fn push_masked_fence(output: &mut String, line: &str) {
+    let backticks_end = line
+        .find('`')
+        .map(|start| {
+            start
+                + line[start..]
+                    .find(|c| c != '`')
+                    .unwrap_or(line.len() - start)
+        })
+        .unwrap_or(0);
+    output.push_str(&line[..backticks_end]);
+    for character in line[backticks_end..].chars() {
+        if matches!(character, '\n' | '\r') {
+            output.push(character);
+        } else {
+            output.extend(std::iter::repeat_n(' ', character.len_utf16()));
+        }
+    }
+}
+
 pub fn transform_to_typst(knot_content: &str) -> String {
     let doc = Document::parse(knot_content.to_string());
 
@@ -58,12 +80,14 @@ pub fn transform_to_typst(knot_content: &str) -> String {
         if is_chunk {
             let chunk_raw = &knot_content[start..end];
 
-            // 1. Keep opening fence line as-is (e.g. "  ```{r}\n")
+            // 1. Keep the opening fence's indentation and backticks, and mask
+            //    the rest ("{r label}"): Typst would read it as a language tag
+            //    glued to the backticks, and warn (Typst 0.15).
             let header_end = chunk_raw
                 .find('\n')
                 .map(|p| p + 1)
                 .unwrap_or(chunk_raw.len());
-            output.push_str(&chunk_raw[..header_end]);
+            push_masked_fence(&mut output, &chunk_raw[..header_end]);
 
             // 2. Replace body (options + code) with blank lines, preserving line count.
             //    Tinymist doesn't format inside raw blocks so content is irrelevant;
@@ -137,8 +161,13 @@ mod tests {
         let output_typ = transform_to_typst(input);
 
         assert_eq!(input.lines().count(), output_typ.lines().count());
-        // Fences must be preserved, code body replaced with a blank line
-        assert!(output_typ.contains("```{r}\n\n```"));
+        // Fences keep their backticks and width, code body replaced with a
+        // blank line; no language tag glued to the backticks (Typst warns).
+        assert!(output_typ.contains("```   \n\n```"), "{output_typ:?}");
+        assert_eq!(
+            input.lines().nth(1).map(|l| l.encode_utf16().count()),
+            output_typ.lines().nth(1).map(|l| l.encode_utf16().count())
+        );
     }
 
     #[test]
@@ -148,12 +177,12 @@ mod tests {
 
         // Line count must be identical
         assert_eq!(input.lines().count(), output_typ.lines().count());
-        // Indented fences must be preserved exactly
-        assert!(output_typ.contains("  ```{r}\n"));
+        // Indented fences keep their indentation, backticks and width
+        assert!(output_typ.contains("  ```   \n"));
         assert!(output_typ.contains("\n  ```\n"));
         // The body (options + code = 2 lines) must be replaced by 2 blank lines
-        let chunk_start = output_typ.find("  ```{r}\n").unwrap();
-        let after_header = &output_typ[chunk_start + "  ```{r}\n".len()..];
+        let chunk_start = output_typ.find("  ```   \n").unwrap();
+        let after_header = &output_typ[chunk_start + "  ```   \n".len()..];
         assert!(after_header.starts_with("\n\n  ```"));
     }
 
