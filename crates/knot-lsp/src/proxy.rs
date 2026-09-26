@@ -103,11 +103,18 @@ impl TinymistProxy {
         root_uri: Option<Url>,
         path_override: Option<PathBuf>,
     ) -> Result<(Self, mpsc::Receiver<Value>)> {
+        // An unreadable knot.toml must not keep Tinymist down: its error is
+        // reported on the documents, and fixing the file is enough (#151).
         let config = root_uri
             .as_ref()
             .and_then(|uri| uri.to_file_path().ok())
-            .map(|root| knot_core::Config::find_and_load(&root).map(|(config, _)| config))
-            .transpose()?
+            .and_then(|root| match knot_core::Config::find_and_load(&root) {
+                Ok((config, _)) => Some(config),
+                Err(error) => {
+                    log::warn!("Starting Tinymist with the default tools: {error:#}");
+                    None
+                }
+            })
             .unwrap_or_default();
         // The editor keeps its bundled Tinymist up to date; prefer it to PATH.
         let tinymist_path = knot_core::tools::resolve_editor_binary(
