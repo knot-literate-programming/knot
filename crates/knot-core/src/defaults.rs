@@ -79,6 +79,22 @@ pub fn unsupported_language_message(language: &str) -> Option<String> {
     ))
 }
 
+/// R packages without which Knot's R helpers cannot report results or errors.
+pub const REQUIRED_R_PACKAGES: &[&str] = &["jsonlite"];
+
+/// Error when a package required by Knot's R helpers is not installed; the R
+/// interpreter then does not start, and the PDF shows it on the first R chunk.
+pub fn missing_r_packages_message(packages: &[&str]) -> String {
+    let quoted: Vec<_> = packages.iter().map(|p| format!("'{p}'")).collect();
+    format!(
+        "Knot needs the R package{} {} to report results and errors. Install {} in R with install.packages(c({})).",
+        if packages.len() > 1 { "s" } else { "" },
+        quoted.join(", "),
+        if packages.len() > 1 { "them" } else { "it" },
+        quoted.join(", ")
+    )
+}
+
 /// Warning shown in the PDF and in the editor on the first chunk of a language
 /// chain whose session could not be saved as a reusable snapshot.
 pub fn non_reusable_snapshot_message(language: &str) -> String {
