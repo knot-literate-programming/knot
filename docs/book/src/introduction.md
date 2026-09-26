@@ -9,6 +9,8 @@ narrower: **the final document is the notebook**. R and Python compute, Typst
 composes, and compilation verifies. The code runs in document order, and what the
 PDF shows — results and errors alike — is what that execution produced.
 
+![Editing a .knot file: the preview updates while typing, a chunk runs again on save, an R error appears in place, then is fixed](./images/demo.gif)
+
 Knot is experimental (0.x): the format, options and configuration may still
 change. See [Status and limitations](#status-and-limitations) below.
 
