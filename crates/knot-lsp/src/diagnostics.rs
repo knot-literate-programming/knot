@@ -103,6 +103,45 @@ fn project_diagnostics(uri: &Url, text: &str) -> Vec<Diagnostic> {
     missing.chain(warnings).collect()
 }
 
+/// Route the Typst diagnostics of a project's assembled `main.typ` to the
+/// source files they concern (main or include), through the '#KNOT-SYNC'
+/// markers of `typ_content`. A diagnostic that maps to no source line (the
+/// embedded library, generated code) goes on the first line of the main file,
+/// so that no error is lost. Ranges cover the whole source line, read with
+/// `source_line`.
+pub fn route_project_diagnostics(
+    typ_content: &str,
+    project_root: &std::path::Path,
+    main_file: &std::path::Path,
+    diagnostics: Vec<Diagnostic>,
+    source_line: impl Fn(&std::path::Path, usize) -> Option<String>,
+) -> std::collections::HashMap<std::path::PathBuf, Vec<Diagnostic>> {
+    let blocks = knot_core::sync::parse_knot_markers(typ_content);
+    let mut routed: std::collections::HashMap<_, Vec<_>> = std::collections::HashMap::new();
+    for mut diagnostic in diagnostics {
+        let (path, line) = knot_core::sync::map_typ_line_to_knot(
+            diagnostic.range.start.line as usize,
+            &blocks,
+            project_root,
+        )
+        .unwrap_or_else(|| (main_file.to_path_buf(), 0));
+        let width =
+            source_line(&path, line).map_or(1, |text| text.encode_utf16().count().max(1) as u32);
+        diagnostic.range = Range {
+            start: Position {
+                line: line as u32,
+                character: 0,
+            },
+            end: Position {
+                line: line as u32,
+                character: width,
+            },
+        };
+        routed.entry(path).or_default().push(diagnostic);
+    }
+    routed
+}
+
 /// Generate diagnostics for a document
 pub fn get_diagnostics(uri: &Url, text: &str, include_runtime: bool) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
@@ -396,6 +435,72 @@ mod tests {
                 DiagnosticSeverity::WARNING
             ]
         );
+    }
+
+    #[test]
+    fn typst_diagnostics_of_the_assembled_document_reach_their_source_file() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("knot.toml"),
+            "[document]\nmain = 'main.knot'\nincludes = ['chapter.knot']\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.path().join("main.knot"),
+            "= Main\n\n/* KNOT-INJECT-CHAPTERS */\n",
+        )
+        .unwrap();
+        let chapter = "= Chapter\n\nSome prose.\n#import \"@preview/pkg:0.7.0\" as gg\n";
+        std::fs::write(root.path().join("chapter.knot"), chapter).unwrap();
+        let build = knot_core::project::ProjectBuild::prepare_preview(
+            root.path(),
+            &Default::default(),
+            Default::default(),
+        )
+        .unwrap();
+        let typ = build
+            .phase0(knot_core::Phase0Mode::Pending)
+            .unwrap()
+            .typ_content;
+        let at = |line: usize| Diagnostic {
+            range: Range {
+                start: Position {
+                    line: line as u32,
+                    character: 8,
+                },
+                end: Position {
+                    line: line as u32,
+                    character: 30,
+                },
+            },
+            message: "package requires Typst 0.15.0 or newer".into(),
+            ..Diagnostic::default()
+        };
+        let import = typ
+            .lines()
+            .position(|l| l.starts_with("#import \"@preview/pkg"))
+            .unwrap();
+        // Line 1 is in the embedded library: it maps to no source line.
+        let routed = route_project_diagnostics(
+            &typ,
+            root.path(),
+            &root.path().join("main.knot"),
+            vec![at(import), at(1)],
+            |path, line| {
+                std::fs::read_to_string(path)
+                    .ok()?
+                    .lines()
+                    .nth(line)
+                    .map(String::from)
+            },
+        );
+        let in_chapter = &routed[&root.path().join("chapter.knot")];
+        assert_eq!(in_chapter.len(), 1);
+        assert_eq!(in_chapter[0].range.start.line, 3);
+        assert_eq!(in_chapter[0].range.end.character, 34);
+        let in_main = &routed[&root.path().join("main.knot")];
+        assert_eq!(in_main[0].range.start.line, 0);
+        assert_eq!(in_main[0].message, "package requires Typst 0.15.0 or newer");
     }
 
     #[test]

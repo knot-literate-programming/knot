@@ -173,7 +173,10 @@ impl KnotLanguageServer {
                 .await?;
             self.state.tinymist_overlay.write().await.insert(
                 main_typ_path.clone(),
-                TinymistOverlay::Active { next_version: 2 },
+                TinymistOverlay::Active {
+                    next_version: 2,
+                    content: typ_content.clone(),
+                },
             );
         }
         drop(gate);
@@ -376,13 +379,17 @@ impl KnotLanguageServer {
     ) -> anyhow::Result<()> {
         let version = {
             let mut overlays = self.state.tinymist_overlay.write().await;
-            overlays
-                .get_mut(main_typ_path)
-                .map(|TinymistOverlay::Active { next_version }| {
+            overlays.get_mut(main_typ_path).map(
+                |TinymistOverlay::Active {
+                     next_version,
+                     content: sent,
+                 }| {
                     let version = *next_version;
                     *next_version += 1;
+                    content.clone_into(sent);
                     version
-                })
+                },
+            )
         };
         if let (Some(version), Ok(uri)) = (version, Url::from_file_path(main_typ_path)) {
             let proxy = self.state.tinymist.read().await.as_ref().cloned();
@@ -450,16 +457,46 @@ impl KnotLanguageServer {
     }
 
     /// Merge Knot and Tinymist diagnostics and publish to the LSP client.
+    /// Publish the Knot, per-file Tinymist and project Typst diagnostics of
+    /// `uri`, which need not be open: an error of the assembled document in an
+    /// include is shown on that file. A project diagnostic repeating a per-file
+    /// one (same line and message) is not shown twice.
     pub(crate) async fn publish_combined_diagnostics(&self, uri: &Url) {
-        let docs = self.state.documents.read().await;
-        if let Some(doc) = docs.get(uri) {
-            let mut combined = doc.knot_diagnostics.clone();
-            combined.extend(doc.tinymist_diagnostics.clone());
-            let _ = self
-                .client
-                .publish_diagnostics(uri.clone(), combined, Some(doc.version))
-                .await;
+        let project: Vec<_> = self
+            .state
+            .project_diagnostics
+            .read()
+            .await
+            .values()
+            .filter_map(|files| files.get(uri))
+            .flatten()
+            .cloned()
+            .collect();
+        let (mut combined, version) = {
+            let docs = self.state.documents.read().await;
+            match docs.get(uri) {
+                Some(doc) => {
+                    let mut combined = doc.knot_diagnostics.clone();
+                    combined.extend(doc.tinymist_diagnostics.clone());
+                    (combined, Some(doc.version))
+                }
+                // Closed files are cleared by `handle_project_diagnostics`.
+                None if project.is_empty() => return,
+                None => (Vec::new(), None),
+            }
+        };
+        for diagnostic in project {
+            if !combined.iter().any(|shown| {
+                shown.message == diagnostic.message
+                    && shown.range.start.line == diagnostic.range.start.line
+            }) {
+                combined.push(diagnostic);
+            }
         }
+        let _ = self
+            .client
+            .publish_diagnostics(uri.clone(), combined, version)
+            .await;
     }
 }
 
@@ -573,6 +610,11 @@ impl KnotLanguageServer {
                 ),
             )
         {
+            if let Some((typ_path, content)) = self.overlay_content(&virtual_uri).await {
+                self.handle_project_diagnostics(&typ_path, &content, diagnostics)
+                    .await;
+                return;
+            }
             let uri = self.resolve_virtual_uri(&virtual_uri);
             let mut docs = self.state.documents.write().await;
             if let Some(doc) = docs.get_mut(&uri) {
@@ -597,6 +639,105 @@ impl KnotLanguageServer {
             drop(docs);
             self.publish_combined_diagnostics(&uri).await;
         }
+    }
+
+    /// The path and last content of the project overlay (assembled `main.typ`)
+    /// that `uri` designates, if any.
+    async fn overlay_content(&self, uri: &Url) -> Option<(std::path::PathBuf, String)> {
+        let path = uri.to_file_path().ok()?;
+        let canonical = path.canonicalize().ok();
+        let overlays = self.state.tinymist_overlay.read().await;
+        overlays
+            .iter()
+            .find_map(|(typ_path, TinymistOverlay::Active { content, .. })| {
+                (*typ_path == path
+                    || typ_path.canonicalize().ok() == canonical && canonical.is_some())
+                .then(|| (typ_path.clone(), content.clone()))
+            })
+    }
+
+    /// Diagnostics of a project's assembled `main.typ`: route them to their
+    /// source files (#137), replace the project's previous ones, and publish
+    /// every file whose diagnostics changed.
+    async fn handle_project_diagnostics(
+        &self,
+        typ_path: &Path,
+        content: &str,
+        diagnostics: Vec<tower_lsp::lsp_types::Diagnostic>,
+    ) {
+        let Ok((config, root)) = Config::find_and_load(typ_path) else {
+            return;
+        };
+        let Ok(paths) = knot_core::ProjectPaths::resolve(&config, &root) else {
+            return;
+        };
+        // Open documents, by canonical path: their text and the URI the
+        // editor uses for them.
+        let open: std::collections::HashMap<_, _> = self
+            .state
+            .documents
+            .read()
+            .await
+            .iter()
+            .filter_map(|(uri, doc)| {
+                let path = uri.to_file_path().ok()?.canonicalize().ok()?;
+                Some((path, (uri.clone(), doc.text.clone())))
+            })
+            .collect();
+        let routed = crate::diagnostics::route_project_diagnostics(
+            content,
+            &root,
+            &paths.main_file,
+            diagnostics,
+            |path, line| {
+                let text = match path.canonicalize().ok().and_then(|p| open.get(&p)) {
+                    Some((_, text)) => text.clone(),
+                    None => std::fs::read_to_string(path).ok()?,
+                };
+                text.lines().nth(line).map(str::to_string)
+            },
+        );
+        let routed: std::collections::HashMap<Url, _> = routed
+            .into_iter()
+            .filter_map(|(path, diagnostics)| {
+                let uri = match path.canonicalize().ok().and_then(|p| open.get(&p)) {
+                    Some((uri, _)) => uri.clone(),
+                    None => Url::from_file_path(&path).ok()?,
+                };
+                Some((uri, diagnostics))
+            })
+            .collect();
+        let mut uris: Vec<Url> = routed.keys().cloned().collect();
+        let previous = self
+            .state
+            .project_diagnostics
+            .write()
+            .await
+            .insert(typ_path.to_path_buf(), routed)
+            .unwrap_or_default();
+        for uri in previous.into_keys() {
+            if !uris.contains(&uri) {
+                uris.push(uri);
+            }
+        }
+        let open_uris: Vec<Url> = open.into_values().map(|(uri, _)| uri).collect();
+        for uri in uris {
+            if open_uris.contains(&uri) || self.has_project_diagnostics(&uri).await {
+                self.publish_combined_diagnostics(&uri).await;
+            } else {
+                // A closed file whose errors are gone.
+                let _ = self.client.publish_diagnostics(uri, Vec::new(), None).await;
+            }
+        }
+    }
+
+    async fn has_project_diagnostics(&self, uri: &Url) -> bool {
+        self.state
+            .project_diagnostics
+            .read()
+            .await
+            .values()
+            .any(|files| files.get(uri).is_some_and(|d| !d.is_empty()))
     }
 
     /// Handle a `window/showDocument` request sent by the Tinymist subprocess when the
