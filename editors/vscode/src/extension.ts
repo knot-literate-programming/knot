@@ -20,7 +20,7 @@ import {
     UriHandler,
     TextEditorDecorationType,
     TextEditor,
-    ColorThemeKind,
+    ThemeColor,
     SnippetString,
     OutputChannel,
 } from 'vscode';
@@ -74,46 +74,52 @@ type StartPreviewResult =
 // Chunk background decorations
 // ---------------------------------------------------------------------------
 
-let chunkDecorationType: TextEditorDecorationType | undefined;
+// Chunk fences as the parser accepts them: optional indentation, any case,
+// the 'py' alias, and a label or options after the language.
+const CHUNK_START_RE = /^\s*```\{\s*(r|python|py)\b[^}]*\}/i;
+const CHUNK_END_RE = /^\s*```\s*$/;
 
-const CHUNK_START_RE = /^```\{(?:r|python)(?:\s+[^\s}]+)?\s*\}/;
-const CHUNK_END_RE = /^```\s*$/;
+// One background per language, as theme colors contributed in package.json
+// (knot.rChunkBackground, knot.pythonChunkBackground): they follow the theme
+// and can be changed in 'workbench.colorCustomizations'.
+let chunkDecorationTypes: Map<string, TextEditorDecorationType> | undefined;
 
-function ensureChunkDecorationType(): TextEditorDecorationType {
-    if (!chunkDecorationType) {
-        const isDark = window.activeColorTheme.kind !== ColorThemeKind.Light;
-        chunkDecorationType = window.createTextEditorDecorationType({
-            backgroundColor: isDark ? 'rgba(255, 255, 255, 0.07)' : 'rgba(0, 0, 0, 0.05)',
-            isWholeLine: true,
-        });
+function ensureChunkDecorationTypes(): Map<string, TextEditorDecorationType> {
+    if (!chunkDecorationTypes) {
+        chunkDecorationTypes = new Map(
+            ['r', 'python'].map((language) => [
+                language,
+                window.createTextEditorDecorationType({
+                    backgroundColor: new ThemeColor(`knot.${language}ChunkBackground`),
+                    isWholeLine: true,
+                }),
+            ])
+        );
     }
-    return chunkDecorationType;
+    return chunkDecorationTypes;
 }
 
 function applyChunkDecorations(editor: TextEditor): void {
     if (editor.document.languageId !== 'knot') return;
     const doc = editor.document;
-    const ranges: Range[] = [];
-    let chunkStart = -1;
+    const ranges = new Map<string, Range[]>([['r', []], ['python', []]]);
+    let chunk: { start: number; language: string } | undefined;
     for (let i = 0; i < doc.lineCount; i++) {
         const lineText = doc.lineAt(i).text;
-        if (chunkStart === -1 && CHUNK_START_RE.test(lineText)) {
-            chunkStart = i;
-        } else if (chunkStart !== -1 && CHUNK_END_RE.test(lineText)) {
-            ranges.push(new Range(chunkStart, 0, i, lineText.length));
-            chunkStart = -1;
+        const start = chunk ? null : CHUNK_START_RE.exec(lineText);
+        if (start) {
+            const language = start[1].toLowerCase() === 'r' ? 'r' : 'python';
+            chunk = { start: i, language };
+        } else if (chunk && CHUNK_END_RE.test(lineText)) {
+            ranges.get(chunk.language)!.push(new Range(chunk.start, 0, i, lineText.length));
+            chunk = undefined;
         }
     }
-    editor.setDecorations(ensureChunkDecorationType(), ranges);
-}
-
-function refreshChunkDecorations(): void {
-    chunkDecorationType?.dispose();
-    chunkDecorationType = undefined;
-    for (const editor of window.visibleTextEditors) {
-        applyChunkDecorations(editor);
+    for (const [language, type] of ensureChunkDecorationTypes()) {
+        editor.setDecorations(type, ranges.get(language)!);
     }
 }
+
 let syncDebounceTimer: ReturnType<typeof setTimeout> | undefined;
 let forwardSyncTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -169,9 +175,10 @@ export async function activate(context: ExtensionContext) {
     await commands.executeCommand('setContext', 'knot.documentHasChanges', false);
 
     // Apply chunk background decorations and keep them updated.
-    if (window.activeTextEditor) {
-        applyChunkDecorations(window.activeTextEditor);
-    }
+    window.visibleTextEditors.forEach(applyChunkDecorations);
+    context.subscriptions.push(
+        window.onDidChangeVisibleTextEditors((editors) => editors.forEach(applyChunkDecorations))
+    );
     context.subscriptions.push(
         window.onDidChangeActiveTextEditor((editor) => {
             if (editor) applyChunkDecorations(editor);
@@ -186,9 +193,6 @@ export async function activate(context: ExtensionContext) {
                 }
             }
         })
-    );
-    context.subscriptions.push(
-        window.onDidChangeActiveColorTheme(() => refreshChunkDecorations())
     );
 
     // Activate Run button whenever the user edits a .knot document.
@@ -434,7 +438,7 @@ function insertChunk(lang: string): void {
 
 export async function deactivate(): Promise<void> {
     if (client) await client.stop();
-    chunkDecorationType?.dispose();
+    chunkDecorationTypes?.forEach((type) => type.dispose());
 }
 
 async function openPreview(outputChannel: OutputChannel): Promise<void> {

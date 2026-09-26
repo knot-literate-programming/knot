@@ -64,6 +64,19 @@ See [Extending Knot](./extending.md#overriding-knot-state-styles).
 
 > These styles appear **only in the live preview** — they never show up in the final PDF.
 
+## Chunk colors
+
+In the editor, R and Python chunks have a light background in their language's
+color (the colors of the `knot init` template). Change them, for all themes or
+per theme, in your VS Code settings:
+
+```json
+"workbench.colorCustomizations": {
+  "knot.rChunkBackground": "#CE412B20",
+  "knot.pythonChunkBackground": "#3572A520"
+}
+```
+
 ## Bidirectional sync
 
 **Forward sync** (source → PDF): move your cursor in the `.knot` editor. The PDF
