@@ -11,9 +11,13 @@ use tower_lsp::lsp_types::{Diagnostic, Url};
 /// Version counter for an opened generated Typst overlay. An absent map entry
 /// means didOpen has not been sent; each project has its own entry.
 pub enum TinymistOverlay {
-    /// Next didChange version (didOpen uses 1).
-    Active { next_version: u64 },
+    /// Next didChange version (didOpen uses 1), and the last content sent, to
+    /// map Tinymist's diagnostics of the assembled file back to the sources.
+    Active { next_version: u64, content: String },
 }
+
+/// Diagnostics per source file.
+pub type FileDiagnostics = HashMap<Url, Vec<Diagnostic>>;
 
 /// State specific to a single opened document
 pub struct DocumentState {
@@ -57,6 +61,10 @@ pub struct ServerState {
     /// See [`TinymistOverlay`] for the state machine.
     pub tinymist_overlay: Arc<RwLock<HashMap<PathBuf, TinymistOverlay>>>,
 
+    /// Typst diagnostics of each project's assembled `main.typ` (keyed by its
+    /// path), routed to the source files they concern.
+    pub project_diagnostics: Arc<RwLock<HashMap<PathBuf, FileDiagnostics>>>,
+
     /// Per-project request ordering and publication gates.
     pub compilations: Arc<crate::compilation::Projects>,
 
@@ -76,6 +84,7 @@ impl ServerState {
             formatter: Arc::new(RwLock::new(None)),
             preview_info: Arc::new(RwLock::new(HashMap::new())),
             tinymist_overlay: Arc::new(RwLock::new(HashMap::new())),
+            project_diagnostics: Arc::new(RwLock::new(HashMap::new())),
             compilations: Arc::new(crate::compilation::Projects::default()),
             air_path_override: Arc::new(RwLock::new(None)),
             ruff_path_override: Arc::new(RwLock::new(None)),
