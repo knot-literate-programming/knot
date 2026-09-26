@@ -34,14 +34,13 @@ typst(df)
 
 ## Combining a table and a plot
 
-A chunk can emit both a table and a plot. Use `typst()` twice:
+A chunk can emit both a table and a plot:
 
 ~~~typst
 ```{r}
 #| show: "output"
 df <- aggregate(mpg ~ cyl, data = mtcars, mean)
 typst(df)
-barplot(df$mpg, names.arg = df$cyl, ylab = "Mean MPG", xlab = "Cylinders")
-typst(current_plot())
+base_plot(barplot(df$mpg, names.arg = df$cyl, ylab = "Mean MPG", xlab = "Cylinders"))
 ```
 ~~~

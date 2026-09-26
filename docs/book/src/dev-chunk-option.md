@@ -83,10 +83,11 @@ if options.center_output {
 
 ---
 
-## Step 5 — Handle it in `lib/knot.typ`
+## Step 5 — Handle it in `knot-typst-package/lib.typ`
 
 If the option affects rendering, add the corresponding logic to the
-`code-chunk` function in `lib/knot.typ`. For `center-output`:
+`code-chunk` function in `knot-typst-package/lib.typ`, the Typst library
+embedded in every compiled document. For `center-output`:
 
 ```typst
 #let code-chunk(

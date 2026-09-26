@@ -15,7 +15,7 @@ Be respectful, inclusive, and constructive. We follow the common standards of th
 ## Development Setup
 
 ### Prerequisites
-- **Rust** 1.80+ — [Install from rustup.rs](https://rustup.rs/)
+- **Rust** 1.92+ — [Install from rustup.rs](https://rustup.rs/)
 - **Node.js** 20+ — For building the VS Code extension
 - **Typst CLI** — For document rendering
 - **R** and **Python 3.8+** — For testing executors

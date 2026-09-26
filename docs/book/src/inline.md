@@ -32,7 +32,7 @@ sees all variables defined by R chunks above it in the same file:
 ~~~typst
 ```{r}
 model <- lm(mpg ~ wt, data = mtcars)
-coef_wt <- coef(model)["wt"]
+coef_wt <- coef(model)[["wt"]]
 ```
 
 A one-unit increase in weight is associated with a

@@ -47,7 +47,7 @@ cargo run -- clean             # wipe cache
 | `knot watch --preview` | file change | `tinymist preview` subprocess | no |
 | VS Code preview | `didSave` / Run button | LSP → our Tinymist subprocess | yes |
 
-`knot build` and `knot watch` use `compile_project_full(path, None)` (non-streaming). VS Code preview uses `compile_project_full(path, Some(tx))` (streaming) so chunks appear as they complete.
+`knot build` and `knot watch` use `ProjectBuild::prepare` + `compile(None)` (non-streaming). VS Code preview uses `compile(Some(callback))` (streaming) so chunks appear as they complete.
 
 ## Before committing
 
@@ -69,7 +69,7 @@ cd editors/vscode && npm ci && npm run compile
 
 The core loop lives in `crates/knot-core/src/compiler/`:
 
-**Pass 1 – Planning** (`pipeline.rs`): Parse the `.knot` document, resolve chunk options, compute SHA-256 hashes (chained sequentially so that editing chunk N invalidates N+1, N+2, …), and classify each node as `Skip`, `CacheHit`, or `MustExecute`.
+**Pass 1 – Planning** (`pipeline.rs`): Parse the `.knot` document, resolve chunk options, compute SHA-256 hashes (chained sequentially so that editing chunk N invalidates N+1, N+2, …), and classify each node as `Skip`, `CacheHit`, `CacheHitInline`, `MustExecute` or `Rejected` (invalid options: not executed, chain suspended).
 
 **Pass 2 – Execution** (`execution.rs`): Chunks tagged `MustExecute` are grouped by language via `group_by_language()`, then R and Python chains run **in parallel** via `std::thread::scope`. Within each language chain execution is sequential (preserving interpreter state). Results are written to cache.
 
@@ -77,13 +77,13 @@ The core loop lives in `crates/knot-core/src/compiler/`:
 
 Key types:
 ```
-ExecutionNeed        ::= Skip | CacheHit(ExecutionAttempt) | MustExecute
+ExecutionNeed        ::= Skip | CacheHit(ExecutionAttempt) | CacheHitInline(String) | MustExecute | Rejected
 ExecutionAttempt     ::= Success(ExecutionOutput) | RuntimeError(RuntimeError)
 ChunkExecutionState  ::= Ready            -- cache hit or just executed
                        | Inert            -- suspended due to upstream error
-                       | Pending          -- do_compile Phase 0: orange border
-                       | Modified         -- do_phase0_only: first MustExecute in chain (amber strong)
-                       | ModifiedCascade  -- do_phase0_only: subsequent MustExecute in chain (amber muted)
+                       | Pending          -- Phase 0 on save/Run: orange border
+                       | Modified         -- Phase 0 while typing: first MustExecute in chain (amber strong)
+                       | ModifiedCascade  -- Phase 0 while typing: subsequent MustExecute in chain (amber muted)
 Phase0Mode           ::= Pending | Modified | Blocked  -- Blocked: invalid YAML header, nothing runs
 ```
 
@@ -94,20 +94,23 @@ Phase0Mode           ::= Pending | Modified | Blocked  -- Blocked: invalid YAML 
 The compiler supports a two-phase API for live preview:
 
 **Phase 0** (`plan_and_partial` in `mod.rs`): runs Pass 1 only — no code executed. Cache hits render with real output; `MustExecute` nodes render as visual placeholders controlled by `Phase0Mode`:
-- `Phase0Mode::Pending` — compilation is in progress (`do_compile`): all pending chunks show orange border.
-- `Phase0Mode::Modified` — user is editing without compiling (`do_phase0_only`): first `MustExecute` per language chain shows amber (strong), subsequent ones amber (muted) to distinguish direct edits from hash-cascade invalidations.
+- `Phase0Mode::Pending` — compilation is in progress (save or Run): all pending chunks show orange border.
+- `Phase0Mode::Modified` — user is editing without compiling (typing): first `MustExecute` per language chain shows amber (strong), subsequent ones amber (muted) to distinguish direct edits from hash-cascade invalidations.
 
-**Phase 0 project-level** (`project.rs`):
-- `compile_project_phase0(path, mode)` — reads from disk, instant.
-- `compile_project_phase0_unsaved(path, unsaved_path, content, mode)` — uses in-memory buffer for one file (typing-time updates).
+**`ProjectBuild`** (`project/build.rs`) is the project-level API used by the CLI and the LSP:
+- `ProjectBuild::prepare(path, buffers, cancellation)` — captures the configuration and every source (applying open buffers) and copies the committed caches into a private workspace; nothing shared is modified.
+- `ProjectBuild::prepare_preview(...)` — same capture without the copy: reads the committed caches directly, for Phase 0 only (never executes). This keeps a keystroke at a few ms whatever the snapshot size (see `docs/dev-plans/perf-baseline.md`, `examples/bench_live.rs`).
+- `build.phase0(mode)` — Phase 0 for the whole project.
+- `build.compile(on_progress)` — full compilation; `on_progress` receives a complete `ProjectOutput` after each executed chunk (streaming).
+- `build.publish(output, complete)` — writes `main.typ`; with `complete`, publishes the workspace caches and artifacts atomically.
 
-**Streaming execution** (`execute_and_assemble_streaming` + `ProgressEvent`): after Phase 0, Pass 2 runs in a separate thread and emits a `ProgressEvent { doc_idx, executed }` after each node completes. The caller replaces the matching entry in the partial buffer and re-assembles, pushing incremental `.typ` updates to Tinymist.
-
-**Full project** (`compile_project_full(path, on_progress)`): assembles includes + main file; passes streaming sender if provided. Used by `knot watch` (no streaming) and the LSP (streaming).
+`ProjectOutput` carries `errors` and `warnings` (`BuildDiagnostic`), which `knot build --strict` turns into a failing exit status. `compile_project_full` and `compile_project_phase0*` in `project.rs` are thin wrappers over `ProjectBuild`.
 
 ## Cache
 
 `crates/knot-core/src/cache/` — SHA-256 addressed, persisted as `.knot_cache/metadata.json`. The hash of chunk N includes the hash of chunk N-1, so any change cascades invalidations forward.
+
+**Snapshots** (`compiler/snapshot_manager.rs`, `resources/*/session.*`): after a chunk executes, the interpreter state can be saved (R: `save.image` + attached packages; Python: pickled `__main__`, re-imported modules, RNG state) so that a later cache miss restarts from the previous chunk instead of re-running the chain. They are enabled per document in the YAML header (`snapshots: {r: true}`). Validation is cheap on the hot path (`snapshot_is_valid`: size + mtime) and complete at restore (`snapshot_is_intact`: full hash). `knot build --no-snapshots` re-executes everything, and `--strict --no-snapshots` is the reproducibility check.
 
 `ExecutorManager` (in `executors/manager.rs`) uses a take/put-back pattern so executors can be moved into threads safely.
 
@@ -129,7 +132,7 @@ The side-channel (`executors/side_channel.rs`) is a temporary JSON file that let
 `knot-lsp` is a **proxy to Tinymist** (the official Typst LSP). It:
 
 - Intercepts LSP requests from the editor, transforms `.knot` coordinates to virtual `.typ` coordinates via `position_mapper.rs`, forwards them to a Tinymist subprocess, and transforms responses back.
-- Adds Knot-specific features directly: chunk-option completion (`handlers/completion.rs`), hover docs (`handlers/hover.rs`), document formatting (Air for R, Ruff for Python, Tinymist for Typst via `handlers/formatting.rs`), diagnostics merging (`diagnostics.rs`), and document symbols (`symbols.rs`).
+- Adds Knot-specific features directly: chunk-option completion (`handlers/completion.rs`), hover docs (`handlers/hover.rs`), document formatting (Air for R, Ruff for Python, embedded Typstyle for Typst via `handlers/formatting.rs`), diagnostics merging (`diagnostics.rs`), and document symbols (`symbols.rs`).
 - Manages preview and sync via `knot/startPreview` and `knot/syncForward` custom LSP methods (see `sync.rs`).
 
 `ServerState` uses `Arc<RwLock<>>` throughout for concurrent access.
@@ -138,12 +141,12 @@ The side-channel (`executors/side_channel.rs`) is a temporary JSON file that let
 
 `knot/startPreview` starts a Tinymist preview task **in our own Tinymist subprocess** (not the VS Code extension's). This gives us access to the task ID and static server port. The extension then opens `http://127.0.0.1:{port}` in the browser.
 
-Two compilation paths run in the LSP:
+Compilation requests go through `compilation.rs`. Each project has one publication gate; `queue_compile` begins a new request, which cancels the previous one (its publications are discarded):
 
-- **`do_phase0_only`** (triggered on every `didChange`): runs `compile_project_phase0_unsaved` with `Phase0Mode::Modified` — instant, no subprocess, shows amber borders on modified chunks. No generation guard (idempotent).
-- **`do_compile`** (triggered on `didSave` or Run button): runs Phase 0 with `Phase0Mode::Pending` (orange), then full streaming compilation via `compile_project_full`. Protected by `compile_generation: Arc<AtomicU64>` — incremented on each `didSave` so stale in-flight compiles are discarded.
+- **Typing** (`didChange`): debounced 300 ms, then `run_preview` — `ProjectBuild::prepare_preview` + `phase0(Phase0Mode::Modified)` under the gate. Instant, nothing executed, amber borders on modified chunks.
+- **Save or Run** (`didSave`, Run button): `ProjectBuild::prepare`, Phase 0 with `Phase0Mode::Pending` (orange), then `build.compile` streaming each executed chunk, then final publication and diagnostics refresh.
 
-`TinymistOverlay { Inactive | Active { next_version } }` tracks whether `didOpen` has been sent to Tinymist. `apply_update(content, path, generation)` writes `.typ` to disk and sends `textDocument/didChange` to the Tinymist subprocess when the overlay is `Active`.
+`TinymistOverlay::Active { next_version }` (one entry per project; no entry means `didOpen` not sent yet) tracks the version of the generated `.typ` overlay; `send_overlay` sends `didOpen` or `textDocument/didChange` to our Tinymist subprocess.
 
 ## Sync Mapping
 
@@ -159,15 +162,16 @@ Two compilation paths run in the LSP:
 
 ## Chunk Options
 
-Options are written as YAML comments at the top of a chunk:
-```
-#| label: my-chunk
-#| echo: false
+Options are written as YAML comments at the top of a chunk; the label goes in the fence header:
+~~~
+```{r my-chunk}
+#| show: output
 #| fig-width: 6
-#| freeze: [x, df]
+#| caption: A figure
 ```
+~~~
 
-Freeze objects: after a `freeze: [x]` chunk executes, Knot stores SHA-256 hashes of the named objects. After every subsequent `MustExecute` chunk in that language, `check_freeze_contract` verifies the hashes and cascades `Inert` on violation (`compiler/freeze.rs`).
+The reference table in `docs/book/src/chunk-options.md` is generated from `ChunkOptions::option_metadata()` (`cargo run -p knot-core --example chunk_options_reference`); `tests/docs_reference.rs` fails when it is stale.
 
 ## Configuration (`knot.toml`)
 
@@ -177,13 +181,13 @@ main = "main.knot"
 includes = ["chapter1.knot"]
 
 [execution]
-timeout_secs = 30
+timeout-secs = 30
 
 [chunk-defaults]
-echo = true
+show = "both"
 
 [r-chunks]
-warning = false
+warnings-visibility = "none"
 
 [python-chunks]
 # Python-specific defaults
@@ -202,11 +206,11 @@ Knot has two separate, intentionally asymmetric styling systems:
 - Examples: code block background, border, inset, output layout
 
 **2. Execution state styles** — appear **only in live preview**, never in the final PDF
-- Configured directly in `lib/knot.typ` via the `knot-state-styles` dictionary
+- Configured directly in `knot-typst-package/lib.typ` (embedded in every compiled `.typ`) via the `knot-state-styles` dictionary
 - Implemented purely in Typst; Rust only sets boolean flags (`is-pending`, `is-modified`, etc.)
 - Examples: orange border for pending chunks, amber for modified, white overlay for inert
 
-**Rule**: do not route state styles through `knot.toml` or the Rust config pipeline — `lib/knot.typ` is the right and only place for them.
+**Rule**: do not route state styles through `knot.toml` or the Rust config pipeline — `knot-typst-package/lib.typ` is the right and only place for them.
 
 ## Errors Are Visible in the PDF
 
@@ -229,5 +233,5 @@ Open gaps are tracked in issue #96.
 - Parsing uses the **winnow** combinator library (`parser/winnow_parser.rs`).
 - New chunk options must be added to `OptionMetadata` (drives both completion and docs).
 - The `Show` enum (`Both | Code | Output | None`) controls what appears in the output `.typ`.
-- `WarningsVisibility` (`Show | Hide | Above | Below`) controls where R/Python warnings appear.
+- `WarningsVisibility` (`Below | Inline | None`) controls where R/Python warnings appear.
 - Graphics require environment variables to be set in the **child** process (not the parent Rust process).

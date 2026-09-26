@@ -71,18 +71,16 @@ Run **Developer: Reload Window** in VS Code afterwards. Rust, Node.js and the
 ```bash
 knot init my-project
 cd my-project
-code .           # open in VS Code, then click "Start Preview"
+code .           # open main.knot, then click "Open Preview" in the editor title bar
 ```
 
-A `.knot` file is a Typst document with executable code blocks:
+A `.knot` file is a Typst document with executable code blocks. Below the
+template's codly configuration in `main.knot`, write:
 
 ~~~typst
-#import "lib/knot.typ": *
-
 = My Analysis
 
-```{r}
-#| label: summary
+```{r summary}
 x <- c(2, 4, 6, 8, 10)
 summary(x)
 ```
@@ -99,7 +97,7 @@ typst(current_plot())
 
 Compile to PDF:
 ```bash
-knot build       # one-shot PDF
+knot build       # one-shot PDF: main.pdf
 knot watch       # rebuild on save
 ```
 

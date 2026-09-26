@@ -1,8 +1,6 @@
-# Knot generated files
-.*.typ
-
-# Generated figures by language
-generated-*-figures/
+# Knot generated files (the .typ file is named after the main document)
+main.typ
+_knot_files/
 
 # Knot cache
 .knot_cache/

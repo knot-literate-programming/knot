@@ -28,11 +28,13 @@ Planning does four things:
    - `Skip` — `eval: false` option
    - `CacheHit(attempt)` — matching result and restorable snapshot are intact (cached runtime errors need no snapshot)
    - `MustExecute` — missing/invalid cache, disabled reuse, or an upstream node that must execute
+   - `Rejected` — invalid chunk options: not executed, and the language chain is
+     suspended as after a runtime error
 
 4. **Apply Phase0Mode** when assembling the partial document (for live preview):
-   - `Phase0Mode::Pending` (during `do_compile`): all `MustExecute` chunks get
+   - `Phase0Mode::Pending` (on save or Run): all `MustExecute` chunks get
      `ChunkExecutionState::Pending` (orange border).
-   - `Phase0Mode::Modified` (during `do_phase0_only`): the first `MustExecute`
+   - `Phase0Mode::Modified` (while typing): the first `MustExecute`
      per language chain gets `Modified` (amber thick), subsequent ones get
      `ModifiedCascade` (amber thin) — distinguishing direct edits from
      hash-cascade invalidations.
@@ -114,10 +116,25 @@ incremental updates to Tinymist after each chunk completes.
 
 ## Entry points
 
-For most purposes you will use the project-level API in `project.rs`:
+The CLI and the LSP use `ProjectBuild` (`project/build.rs`):
 
 ```rust
-// One-shot compilation (used by knot build / knot watch)
+// Capture sources (with open buffers) and copy the caches into a private
+// workspace; nothing shared is modified until `publish`.
+ProjectBuild::prepare(root, &buffers, cancellation) -> Result<ProjectBuild>
+// Same capture without copying the caches: Phase 0 only (typing).
+ProjectBuild::prepare_preview(root, &buffers, cancellation) -> Result<ProjectBuild>
+
+build.phase0(mode) -> Result<ProjectOutput>
+// `on_progress` receives the complete output after each executed chunk.
+build.compile(on_progress) -> Result<ProjectOutput>
+// Writes main.typ; `complete` also publishes caches and artifacts atomically.
+build.publish(&output, complete) -> Result<()>
+```
+
+`project.rs` keeps thin wrappers over it:
+
+```rust
 pub fn compile_project_full(
     root: &Path,
     on_progress: Option<Box<dyn Fn(String) + Send>>,

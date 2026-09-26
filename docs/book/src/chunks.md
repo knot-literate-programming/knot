@@ -40,8 +40,7 @@ The `show` option controls what appears in the compiled document:
 ```{r}
 #| show: "output"
 x <- rnorm(1000)
-hist(x, col = "steelblue", main = "Distribution of x")
-typst(current_plot())
+base_plot(hist(x, col = "steelblue", main = "Distribution of x"))
 ```
 ~~~
 
@@ -79,8 +78,7 @@ A chunk label is written in the fence header. A caption is an independent
 ```{r fig-histogram}
 #| caption: Distribution of simulated data
 #| show: "output"
-hist(rnorm(500), col = "steelblue")
-typst(current_plot())
+base_plot(hist(rnorm(500), col = "steelblue"))
 ```
 
 As shown in @fig-histogram, the distribution is approximately normal.

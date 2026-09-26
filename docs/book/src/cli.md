@@ -11,7 +11,8 @@ knot init <name>
 ```
 
 Creates a new project directory `<name>` with a `knot.toml`, a `main.knot`
-template, and the `lib/knot.typ` helper file.
+template and a `.gitignore`. No Typst import is needed: Knot's Typst library is
+embedded in every compiled `.typ` file.
 
 ## knot build
 

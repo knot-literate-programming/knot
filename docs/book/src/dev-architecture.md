@@ -24,8 +24,9 @@ The heart of the system. Everything that makes Knot work lives here:
 - **Cache** (`cache/`): SHA-256 addressed persistent cache in `.knot_cache/`.
 - **Executors** (`executors/`): Persistent R and Python subprocesses.
 - **Backend** (`backend.rs`): Renders `Node`s into `.typ` text.
-- **Project** (`project.rs`): Top-level API — `compile_project_full`,
-  `compile_project_phase0`, etc.
+- **Project** (`project.rs`, `project/build.rs`): Top-level API —
+  `ProjectBuild` (isolated build workspace, atomic publication) and thin
+  wrappers such as `compile_project_full`.
 
 `knot-core` has no tokio dependency. Concurrency is `std::thread::scope`.
 
@@ -42,7 +43,7 @@ capabilities:
 ### knot-cli
 
 A thin binary over `knot-core`. Most commands delegate directly to project-level
-functions (`compile_project_full`, etc.).
+functions (`ProjectBuild`, etc.).
 
 ### editors/vscode
 
@@ -54,26 +55,29 @@ auto-redirect from `.typ` to `.knot`).
 
 ## Data flow: a save event
 
-Here is the full path a `didSave` event takes from VS Code to a rendered PDF:
+Here is the full path a `didSave` event takes from VS Code to a rendered PDF
+(`crates/knot-lsp/src/compilation.rs`):
 
 ```
 [VS Code]
   didSave
     │
     ▼
-[knot-lsp — server_impl.rs::did_save]
-  ├── increment compile_generation
-  ├── spawn do_compile(generation)
+[knot-lsp — queue_compile(full)]
+  ├── begin a new request for the project: cancels the previous one
+  │   (typing, save or Run) and invalidates its publications
   │
-  └── [do_compile]
-        ├── Phase 0: compile_project_phase0 (instant, orange placeholders)
-        │     └── apply_update → textDocument/didChange → Tinymist
+  └── [run_compilation]
+        ├── ProjectBuild::prepare — isolated workspace with the open buffers
         │
-        ├── Streaming: compile_project_full(path, Some(callback))
+        ├── Phase 0: build.phase0(Pending) (instant, orange placeholders)
+        │     └── publish → textDocument/didChange → Tinymist
+        │
+        ├── Streaming: build.compile(Some(callback))
         │     └── for each chunk executed:
-        │           apply_update → textDocument/didChange → Tinymist
+        │           publish → textDocument/didChange → Tinymist
         │
-        └── Final: apply_update + refresh_diagnostics
+        └── Final: build.publish(complete) + refresh diagnostics
                  → textDocument/didChange → Tinymist
                  → publishDiagnostics → VS Code
 
@@ -82,6 +86,12 @@ Here is the full path a `didSave` event takes from VS Code to a rendered PDF:
     → recompile .typ
     → push updated PDF to browser preview
 ```
+
+While typing (`didChange`), `queue_compile` waits 300 ms (each keystroke
+cancels the previous request), then `run_preview` renders Phase 0 in
+`Modified` mode with `ProjectBuild::prepare_preview`, which reads the committed
+caches without copying them. Nothing is executed. All publications of a
+project go through one gate, and only the current request may publish.
 
 ---
 
@@ -102,9 +112,11 @@ enum Show { Both, Code, Output, None }
 
 // What execution work is needed
 enum ExecutionNeed {
-    Skip,                        // eval: false
     CacheHit(ExecutionAttempt),  // hash matched cache
+    CacheHitInline(String),      // inline expression found in cache
     MustExecute,                 // must re-run
+    Skip,                        // eval: false
+    Rejected,                    // invalid options: not executed, chain suspended
 }
 
 // The result of running (or attempting to run) a chunk
@@ -126,9 +138,9 @@ enum ChunkExecutionState {
 ### In knot-lsp
 
 ```rust
-// Whether Tinymist has received didOpen for the virtual .typ
+// Per project: didChange version of the generated .typ overlay in Tinymist
+// (no entry: didOpen not sent yet)
 enum TinymistOverlay {
-    Inactive,
     Active { next_version: u64 },
 }
 ```

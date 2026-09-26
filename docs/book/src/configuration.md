@@ -23,24 +23,25 @@ includes = ["chapter1.knot", "chapter2.knot"]
 
 [execution]
 # Abort chunk execution after this many seconds (default: 30)
-timeout_secs = 60
+timeout-secs = 60
 
 [chunk-defaults]
 # Default options applied to every chunk in every language.
-# All chunk options are valid here.
-echo = true
-warning = true
+# Chunk options are valid here, except caption (see the "In knot.toml"
+# column of the chunk options reference).
+show = "both"
+warnings-visibility = "below"
 fig-width = 6
 fig-height = 4
 fig-format = "svg"
 
 [r-chunks]
 # Defaults applied to R chunks only (override [chunk-defaults]).
-warning = false
+warnings-visibility = "none"
 
 [python-chunks]
 # Defaults applied to Python chunks only (override [chunk-defaults]).
-fig-dpi = 200
+dpi = 200
 
 [codly]
 # Options passed to the codly Typst package for syntax highlighting.

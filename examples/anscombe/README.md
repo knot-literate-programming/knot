@@ -31,10 +31,16 @@ knot build
 ```
 
 On Windows, activate the environment with `.venv\Scripts\Activate.ps1` in
-PowerShell instead. Knot currently invokes `python3`; check that `python3 -m pip show pandas plotnine`
-finds the installed packages. On Windows, activating a virtual environment alone
-may not provide a `python3` executable. Use a Python installation exposing that
-command and install the dependencies through `python3 -m pip` in that environment.
+PowerShell instead. Knot runs `python3` from `PATH` unless `knot.toml` selects an
+interpreter. To use the virtual environment without activating it (in the editor
+too), add to `knot.toml`:
+
+```toml
+[tools]
+python = '.venv/bin/python'          # Windows: '.venv\Scripts\python.exe'
+```
+
+See [External tools](../../docs/book/src/configuration.md#external-tools).
 
 Open `main.pdf`. Typst downloads its pinned packages on the first compilation;
 subsequent builds can use the local package cache. The CSV is versioned, so the

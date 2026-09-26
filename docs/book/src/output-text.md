@@ -50,12 +50,25 @@ theme_set(theme_minimal())
 
 ## Warnings
 
-R and Python warnings are captured separately from standard output. By default
-they appear below the output block. Control this with `warning` and `warning-pos`:
+R and Python warnings are captured separately from standard output. Control
+where they appear with `warnings-visibility`:
+
+| Value | Effect |
+|---|---|
+| `below` (default) | Warnings in a block below the chunk |
+| `inline` | Warnings inside the chunk, next to the output |
+| `none` | Warnings hidden |
 
 ~~~typst
 ```{r}
-#| warning: false
-log(-1)   ← warning suppressed
+#| warnings-visibility: none
+log(-1)
 ```
 ~~~
+
+To hide warnings in every R chunk, set the default in `knot.toml`:
+
+```toml
+[r-chunks]
+warnings-visibility = "none"
+```

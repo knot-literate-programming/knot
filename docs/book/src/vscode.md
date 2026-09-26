@@ -5,8 +5,8 @@ files: live preview, bidirectional sync, completion, diagnostics, and formatting
 
 ## Starting the preview
 
-Open a `.knot` file and click **Start Preview** in the status bar, or use the
-command palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and run **Knot: Start Preview**.
+Open a `.knot` file and click **Open Preview** in the editor title bar, or use
+the command palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and run **Knot: Open Preview**.
 
 A browser window opens with a live, streaming preview of your document.
 
@@ -49,18 +49,18 @@ No code executes while you type. The preview is pure Typst — immediate.
 | 2 pt orange solid | Compile in progress — chunk queued for execution |
 | White semi-transparent overlay | Inert — execution suspended due to an upstream error |
 
-These styles are defined in `lib/knot.typ` via the `knot-state-styles` dictionary
-and can be customised per project:
+These styles are defined by the `knot-state-styles` dictionary of Knot's
+embedded Typst library. Redefine it at the top of your `.knot` file to change
+the preview appearance:
 
 ```typst
-// In lib/knot.typ — override any entry to change the preview appearance
 #let knot-state-styles = (
-  pending: (stroke: 2pt + rgb("#f97316")),
-  modified: (stroke: (thickness: 5pt, paint: rgb("#fcd34d"), dash: "densely-dotted")),
-  "modified-cascade": (stroke: (thickness: 1pt, paint: rgb("#fcd34d"), dash: "dashed")),
-  inert: (overlay-fill: white.transparentize(40%)),
+  ..knot-state-styles,         // keep the other defaults
+  pending: (stroke: 3pt + blue),
 )
 ```
+
+See [Extending Knot](./extending.md#overriding-knot-state-styles).
 
 > These styles appear **only in the live preview** — they never show up in the final PDF.
 

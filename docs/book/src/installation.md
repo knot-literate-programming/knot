@@ -92,7 +92,7 @@ cargo install --locked --force --path crates/knot-cli
 cargo install --locked --force --path crates/knot-lsp
 ```
 
-You need [Rust](https://rustup.rs) 1.80+ and [Node.js](https://nodejs.org) 20+.
+You need [Rust](https://rustup.rs) 1.92+ and [Node.js](https://nodejs.org) 20+.
 
 ## Verifying the installation
 
