@@ -7,6 +7,10 @@
 #   curl -sSf https://raw.githubusercontent.com/knot-literate-programming/knot/master/install.sh | bash
 #   bash install.sh [--prefix DIR]   (default: ~/.local/bin)
 #
+# The latest stable release is installed. To install a given release, such as
+# a pre-release, set KNOT_VERSION to its tag:
+#   curl -sSf https://raw.githubusercontent.com/knot-literate-programming/knot/master/install.sh | KNOT_VERSION=v0.4.0-rc.1 bash
+#
 
 set -euo pipefail
 
@@ -75,10 +79,16 @@ else
     fatal "Neither curl nor wget found. Please install one of them."
 fi
 
-# ── Fetch latest release metadata ─────────────────────────────────────────────
-step "Fetching latest release"
-
-RELEASE_JSON=$(fetch "https://api.github.com/repos/$REPO/releases/latest")
+# ── Fetch release metadata ─────────────────────────────────────────────────────
+# GitHub's "latest" release excludes pre-releases: KNOT_VERSION selects one.
+if [ -n "${KNOT_VERSION:-}" ]; then
+    step "Fetching release $KNOT_VERSION"
+    RELEASE_JSON=$(fetch "https://api.github.com/repos/$REPO/releases/tags/$KNOT_VERSION") \
+        || fatal "Release $KNOT_VERSION not found: https://github.com/$REPO/releases"
+else
+    step "Fetching latest release"
+    RELEASE_JSON=$(fetch "https://api.github.com/repos/$REPO/releases/latest")
+fi
 VERSION=$(printf '%s' "$RELEASE_JSON" \
     | grep '"tag_name"' | head -1 \
     | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')

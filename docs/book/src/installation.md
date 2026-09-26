@@ -9,19 +9,27 @@ curl -sSf https://raw.githubusercontent.com/knot-literate-programming/knot/maste
 ```
 
 This script:
-1. Detects your platform (macOS arm64/x86_64, Linux x86_64/arm64).
+1. Detects your platform (macOS arm64/x86_64, Linux x86_64).
 2. Downloads the prebuilt `knot` and `knot-lsp` binaries from the [latest release](https://github.com/knot-literate-programming/knot/releases).
 3. Installs them to `~/.local/bin` (override with `--prefix DIR`).
 4. Installs the VS Code extension if the `code` command is available.
 5. Checks that all prerequisites are present and tells you what is missing.
 
+To install a given release instead of the latest stable one, for example a
+pre-release, set `KNOT_VERSION` to its tag:
+
+```bash
+curl -sSf https://raw.githubusercontent.com/knot-literate-programming/knot/master/install.sh | KNOT_VERSION=v0.4.0-rc.1 bash
+```
+
 **Windows (PowerShell)**
 
 ```powershell
-powershell -c "irm https://github.com/knot-literate-programming/knot/releases/latest/download/knot-installer.ps1 | iex"
+powershell -c "irm https://github.com/knot-literate-programming/knot/releases/latest/download/knot-cli-installer.ps1 | iex"
+powershell -c "irm https://github.com/knot-literate-programming/knot/releases/latest/download/knot-lsp-installer.ps1 | iex"
 ```
 
-This installs `knot` and `knot-lsp` to `%USERPROFILE%\.cargo\bin` and adds it to your `PATH`. Then install the VS Code extension manually: download the `.vsix` file from the [latest release](https://github.com/knot-literate-programming/knot/releases) and run:
+The two installers put `knot` and `knot-lsp` in `%USERPROFILE%\.cargo\bin` and add it to your `PATH`. For a given release, replace `latest/download` with `download/<tag>` (for example `download/v0.4.0-rc.1`). Then install the VS Code extension manually: download the `.vsix` file from the [latest release](https://github.com/knot-literate-programming/knot/releases) and run:
 
 ```powershell
 code --install-extension knot-*.vsix

@@ -50,3 +50,4 @@
 - [The Language Server](./dev-lsp.md)
 - [Testing](./dev-testing.md)
 - [Contributing](./dev-contributing.md)
+- [Releasing](./dev-releasing.md)

@@ -87,7 +87,8 @@ curl -sSf https://raw.githubusercontent.com/knot-literate-programming/knot/maste
 
 **Windows (PowerShell)**
 ```powershell
-powershell -c "irm https://github.com/knot-literate-programming/knot/releases/latest/download/knot-installer.ps1 | iex"
+powershell -c "irm https://github.com/knot-literate-programming/knot/releases/latest/download/knot-cli-installer.ps1 | iex"
+powershell -c "irm https://github.com/knot-literate-programming/knot/releases/latest/download/knot-lsp-installer.ps1 | iex"
 ```
 
 The installers download the prebuilt `knot` and `knot-lsp` binaries for your platform. The macOS/Linux script also installs the VS Code extension and checks that all prerequisites are in place; on Windows, download the `.vsix` from the [latest release](https://github.com/knot-literate-programming/knot/releases) and install it with `code --install-extension knot-*.vsix`.
