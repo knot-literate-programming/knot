@@ -118,6 +118,9 @@ Resolution order is:
 1. The explicit entry in `[tools]`. An invalid entry produces an error without
    falling back to a different installation.
 2. The default command in `PATH`: `python3`, `R`, `typst`, `tinymist`, `air`, or `ruff`.
+   On Windows, Python is looked up as `python3`, then `python`, then the `py`
+   launcher (standard installations have no `python3`), skipping the Microsoft
+   Store shortcuts, which are not interpreters.
 3. Common installation directories: `~/bin`, `~/.cargo/bin`, `/usr/local/bin`
    and `/opt/homebrew/bin` on Unix; the home directories and
    `%LOCALAPPDATA%/Programs/<command>` on Windows.

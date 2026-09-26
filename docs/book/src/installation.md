@@ -81,7 +81,10 @@ install.packages(c("jsonlite", "digest", "svglite"))
 ```
 
 Python needs no package for Knot itself; install the libraries your chunks use,
-for example `matplotlib` for figures and `pandas` for data frames.
+for example `matplotlib` for figures and `pandas` for data frames. On Windows,
+Knot finds a python.org installation through `python` or the `py` launcher; to
+use another interpreter (a virtual environment, conda), set `[tools] python`
+in `knot.toml` (see [External tools](./configuration.md#external-tools)).
 
 ## Build from source
 

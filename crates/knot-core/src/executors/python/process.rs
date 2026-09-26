@@ -87,7 +87,7 @@ impl PythonProcess {
     }
 
     pub fn initialize(&mut self) -> Result<()> {
-        let executable = crate::tools::resolve_binary("python3", self.executable.as_deref(), None)?;
+        let executable = crate::tools::resolve_python(self.executable.as_deref())?;
         let mut child = Command::new(&executable)
             .arg("-u") // Unbuffered
             .arg("-c") // Execute the wrapper passed as string
