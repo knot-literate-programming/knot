@@ -12,7 +12,10 @@ executable R and Python code. R and Python compute, Typst composes, and
 compilation verifies. The code runs in document order: what you read in the PDF
 is what was executed, errors included, shown where they occur.
 
-<!-- TODO(#2): add demo GIF here -->
+<p align="center">
+  <img src="docs/book/src/images/demo.gif" width="800"
+       alt="Editing a .knot file: the preview updates while typing, a chunk runs again on save, an R error appears in place, then is fixed">
+</p>
 
 ## A scientific report, end to end
 

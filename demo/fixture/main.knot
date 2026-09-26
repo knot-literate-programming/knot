@@ -1,0 +1,23 @@
+#import "lib/demo.typ": *
+#show: demo
+
+= Old Faithful
+
+```{r model}
+fit <- lm(eruptions ~ waiting, data = faithful)
+```
+
+An eruption lasts `{r} round(mean(faithful$eruptions), 1)` minutes.
+
+```{r figure}
+#| show: output
+library(ggplot2)
+p <- ggplot(faithful, aes(waiting, eruptions)) +
+  geom_point(colour = "#176b87")
+typst(p)
+```
+
+```{python waits}
+waits = [79, 54, 74, 62, 85]
+print(f"Mean wait: {sum(waits) / len(waits)} min")
+```

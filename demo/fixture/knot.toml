@@ -1,0 +1,22 @@
+# The document recorded by demo/record.py.
+[document]
+main = "main.knot"
+
+[chunk-defaults]
+fig-width = 6.0
+fig-height = 3.0
+fig-format = "svg"
+layout = "vertical"
+gutter = "0.6em"
+code-radius = '4pt'
+code-inset = '0.5em'
+output-stroke = '1pt + rgb("#999999")'
+output-inset = '0.5em'
+output-radius = '4pt'
+codly-lang-outset = '(x: 0pt, y: 0pt)'
+
+[r-chunks]
+code-stroke = '1pt + rgb("#CE412B")'
+
+[python-chunks]
+code-stroke = '1pt + rgb("#3572A5")'

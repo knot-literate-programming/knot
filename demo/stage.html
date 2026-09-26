@@ -1,0 +1,77 @@
+<!doctype html>
+<!-- Staging page recorded by demo/record.py: the .knot source on the left
+     (driven by the script), Knot's live preview on the right. -->
+<html>
+<head>
+<meta charset="utf-8">
+<title>Knot demo</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1f2328; --muted: #8c959f; --border: #d0d7de;
+    --r: rgba(206, 65, 43, 0.14); --python: rgba(53, 114, 165, 0.18);
+  }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+    font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+  #app { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 100%; height: 100%; }
+  #editor { display: flex; flex-direction: column; border-right: 1px solid var(--border);
+    min-width: 0; min-height: 0; }
+  #tab { font-size: 13px; padding: 8px 14px; border-bottom: 1px solid var(--border); background: #f6f8fa; }
+  #tab .dirty { color: var(--muted); margin-left: 6px; }
+  #source { flex: 1; min-height: 0; overflow: hidden; margin: 0; padding: 10px 12px 10px 0;
+    font: 14px/1.55 "SF Mono", Menlo, Consolas, monospace; }
+  .line { display: flex; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .line .no { width: 3em; padding-right: 1em; text-align: right; color: var(--muted); flex: none; }
+  .line.r { background: var(--r); }
+  .line.python { background: var(--python); }
+  .cursor { display: inline-block; width: 2px; height: 1.2em; background: var(--fg);
+    vertical-align: text-bottom; margin: 0 -1px; }
+  #status { font-size: 12px; padding: 6px 14px; border-top: 1px solid var(--border);
+    background: #f6f8fa; color: #57606a; min-height: 1.4em; }
+  #preview { border: 0; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="editor">
+    <div id="tab">main.knot<span class="dirty" id="dirty"></span></div>
+    <pre id="source"></pre>
+    <div id="status"></div>
+  </div>
+  <iframe id="preview"></iframe>
+</div>
+<script>
+  const preview = new URLSearchParams(location.search).get("preview");
+  if (preview) document.getElementById("preview").src = preview;
+
+  // Chunk fences as the parser accepts them (see editors/vscode/src/extension.ts).
+  const START = /^\s*```\{\s*(r|python|py)\b[^}]*\}/i, END = /^\s*```\s*$/;
+
+  function escape(text) {
+    return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  // Render the source with chunk backgrounds and the cursor at `offset`.
+  window.render = ({ text, offset, dirty, status, firstLine }) => {
+    const lines = text.split("\n");
+    let position = 0, chunk = null, html = "";
+    lines.forEach((line, index) => {
+      const start = !chunk && START.exec(line);
+      if (start) chunk = start[1].toLowerCase() === "r" ? "r" : "python";
+      let content = escape(line);
+      if (offset >= position && offset <= position + line.length) {
+        const column = offset - position;
+        content = escape(line.slice(0, column)) + '<span class="cursor"></span>' + escape(line.slice(column));
+      }
+      if (index >= firstLine) {
+        html += `<div class="line ${chunk || ""}"><span class="no">${index + 1}</span>${content || " "}</div>`;
+      }
+      if (chunk && !start && END.test(line)) chunk = null;
+      position += line.length + 1;
+    });
+    document.getElementById("source").innerHTML = html;
+    document.getElementById("dirty").textContent = dirty ? "●" : "";
+    document.getElementById("status").textContent = status || "";
+  };
+</script>
+</body>
+</html>
