@@ -112,12 +112,27 @@ mkdir -p "$INSTALL_DIR"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
+# Check a download against its published SHA-256 checksum.
+verify_checksum() {
+    local file="$1" checksum_url="$2" expected actual
+    [ -n "$checksum_url" ] || fatal "No checksum published for $(basename "$file")."
+    expected=$(fetch "$checksum_url" | awk '{print $1}')
+    if command -v sha256sum >/dev/null 2>&1; then
+        actual=$(sha256sum "$file" | awk '{print $1}')
+    else
+        actual=$(shasum -a 256 "$file" | awk '{print $1}')
+    fi
+    [ "$expected" = "$actual" ] || fatal "Checksum mismatch for $(basename "$file"): download again."
+}
+
 install_binary() {
     local crate="$1"   # e.g. knot-cli
     local binary="$2"  # e.g. knot
 
+    # The archive exactly: the release also has '-update' binaries and checksums.
+    local archive="${crate}-${TARGET}.tar.xz"
     local url
-    url=$(asset_url "${crate}.*${TARGET}")
+    url=$(asset_url "/${archive}\"")
     if [ -z "$url" ]; then
         warn "No prebuilt binary for ${crate} on ${TARGET}."
         info "Build from source: cargo install --path crates/${crate}"
@@ -125,8 +140,9 @@ install_binary() {
     fi
 
     info "Downloading ${binary}..."
-    fetch_to "$url" "$TMP/${crate}.tar.gz"
-    tar -xzf "$TMP/${crate}.tar.gz" -C "$TMP"
+    fetch_to "$url" "$TMP/${archive}"
+    verify_checksum "$TMP/${archive}" "$(asset_url "/${archive}.sha256\"")"
+    tar -xf "$TMP/${archive}" -C "$TMP"
 
     local bin_path
     bin_path=$(find "$TMP" -name "$binary" -type f | head -1)
@@ -149,7 +165,7 @@ case ":$PATH:" in
     *)
         warn "$INSTALL_DIR is not in your PATH."
         info "Add to your shell profile (~/.bashrc, ~/.zshrc, etc.):"
-        info "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+        info "  export PATH=\"$INSTALL_DIR:\$PATH\""
         ;;
 esac
 
@@ -165,12 +181,12 @@ if command -v code >/dev/null 2>&1; then
         ok "VS Code extension installed"
     else
         warn "No .vsix found in this release."
-        info "Download manually: https://github.com/$REPO/releases/latest"
+        info "Download manually: https://github.com/$REPO/releases/tag/$VERSION"
     fi
 else
     warn "'code' command not found — skipping VS Code extension."
     info "To install manually:"
-    info "  1. Download the .vsix from: https://github.com/$REPO/releases/latest"
+    info "  1. Download the .vsix from: https://github.com/$REPO/releases/tag/$VERSION"
     info "  2. In VS Code: Extensions panel → '...' menu → 'Install from VSIX...'"
     info "  macOS: run 'Shell Command: Install code command in PATH' in VS Code first."
 fi
