@@ -5,7 +5,7 @@ Knot is experimental (0.x): the document format and options may still change.
 
 ## 0.4.0 — unreleased
 
-Release candidate: `v0.4.0-rc.1`. A first release for external users: write, compute and preview a Typst document
+Release candidates: `v0.4.0-rc.1`, `v0.4.0-rc.2`. A first release for external users: write, compute and preview a Typst document
 with R and Python, see errors in context, and validate the final document by a
 full, strict re-execution. See the [release plan](https://github.com/knot-literate-programming/knot/issues/110).
 
@@ -75,6 +75,9 @@ full, strict re-execution. See the [release plan](https://github.com/knot-litera
 - Typst errors in included files reach the editor (#142); no false errors for the
   library's names or on chunk fences (#144, #150).
 - Documentation brought in line with the current behaviour (#129, #134).
+- Installation, found by the install smoke test (#154): `install.sh` downloads
+  the right archive and verifies its checksum (it could not install on macOS or
+  Linux), and `knot-lsp --version` prints its version (#157).
 
 ### Compatibility notes
 
