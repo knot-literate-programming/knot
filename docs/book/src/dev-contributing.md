@@ -7,7 +7,7 @@
 | Tool | Version | Purpose |
 |---|---|---|
 | Rust | 1.92+ | Build all crates |
-| Node.js | 20+ | Build the VS Code extension |
+| Node.js | 22+ | Build the VS Code extension |
 | Typst | latest | Document rendering in tests |
 | Tinymist | latest | Needed by the LSP |
 | R | 4.0+ | Run R executor tests |

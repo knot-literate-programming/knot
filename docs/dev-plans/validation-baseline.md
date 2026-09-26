@@ -40,7 +40,7 @@ unconfirmed. No release was published.
 Python dependencies were installed in `/tmp/knot-validation-venv`, without
 changing the global Python installation. Integration tests used this environment
 on PATH, `MPLBACKEND=Agg` and a writable `MPLCONFIGDIR` under `/tmp`.
-CI retains Python 3.10 and Node 20, so its environments differ from this machine.
+CI retains Python 3.10 and Node 22, so its environments differ from this machine.
 
 ## Findings and changes
 
