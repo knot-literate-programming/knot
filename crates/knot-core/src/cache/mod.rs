@@ -118,6 +118,34 @@ impl Cache {
         storage::get_cached_result(&self.cache_dir, hash, &self.metadata)
     }
 
+    /// The last successful result of a chunk (the entry with its label when
+    /// it has one, otherwise at its position) in `language`, without its data
+    /// exports: the live preview shows it, marked stale, while the chunk waits
+    /// to run again. Old exports are not reused, so that nothing built from
+    /// them in Typst looks current.
+    pub fn previous_result(
+        &self,
+        index: usize,
+        label: Option<&str>,
+        language: &str,
+    ) -> Option<ExecutionOutput> {
+        let entry = self.metadata.chunks.iter().find(|entry| {
+            entry.language == language
+                && entry.error.is_none()
+                && match label {
+                    Some(label) => entry.name.as_deref() == Some(label),
+                    None => entry.name.is_none() && entry.index == index,
+                }
+        })?;
+        match self.get_cached_result(&entry.hash).ok()? {
+            ExecutionAttempt::Success(mut output) => {
+                output.exports.clear();
+                Some(output)
+            }
+            ExecutionAttempt::RuntimeError(_) => None,
+        }
+    }
+
     /// Save chunk execution result to cache
     pub fn save_result(
         &mut self,

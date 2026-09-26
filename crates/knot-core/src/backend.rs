@@ -60,6 +60,29 @@ impl Default for TypstBackend {
 }
 
 impl TypstBackend {
+    /// A chunk waiting to run again (modified or pending), shown in the live
+    /// preview with its previous result, marked stale (`is-stale`), so that
+    /// the page keeps its layout and the state stays visible even when only
+    /// the output is shown. The previous result carries no data exports.
+    pub(crate) fn format_stale_chunk(
+        &self,
+        chunk: &Chunk,
+        codly_options: &HashMap<String, String>,
+        resolved_options: &ResolvedChunkOptions,
+        previous: &ExecutionOutput,
+        state: &ChunkExecutionState,
+    ) -> String {
+        chunk_call(
+            chunk,
+            codly_options,
+            resolved_options,
+            previous,
+            state,
+            None,
+            true,
+        )
+    }
+
     /// Creates a new `TypstBackend`.
     pub fn new() -> Self {
         Self
@@ -87,7 +110,15 @@ impl Backend for TypstBackend {
         if matches!(resolved_options.show, Show::None) && chunk.errors.is_empty() {
             return exports;
         }
-        let call = chunk_call(chunk, codly_options, resolved_options, output, state, None);
+        let call = chunk_call(
+            chunk,
+            codly_options,
+            resolved_options,
+            output,
+            state,
+            None,
+            false,
+        );
         format!("{exports}{call}")
     }
 }
@@ -117,12 +148,14 @@ impl TypstBackend {
             &empty,
             &ChunkExecutionState::Ready,
             Some(error),
+            false,
         )
     }
 }
 
 /// The `#code-chunk(...)` (or `#knot-replace(...)`) call of a chunk; `error`
-/// is extra error content appended after the chunk's option errors.
+/// is extra error content appended after the chunk's option errors, and
+/// `stale` marks the output as a previous result (live preview only).
 fn chunk_call(
     chunk: &Chunk,
     codly_options: &HashMap<String, String>,
@@ -130,9 +163,13 @@ fn chunk_call(
     output: &ExecutionOutput,
     state: &ChunkExecutionState,
     error: Option<&str>,
+    stale: bool,
 ) -> String {
     let mut args = vec![];
     push_base_args(chunk, state, error, &mut args);
+    if stale {
+        args.push("is-stale: true".to_string());
+    }
     push_warnings_arg(chunk, output, resolved_options, &mut args);
     push_code_arg(chunk, codly_options, resolved_options, &mut args);
     push_output_arg(output, resolved_options, &mut args);

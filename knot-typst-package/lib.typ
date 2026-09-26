@@ -50,6 +50,10 @@
   inert: (
     overlay-fill: white.transparentize(40%),
   ),
+  // The previous result of a chunk waiting to run again, until the new one.
+  stale: (
+    overlay-fill: white.transparentize(35%),
+  ),
 )
 
 #let code-chunk(
@@ -81,6 +85,7 @@
   is-pending: false,
   is-modified: false,
   is-modified-cascade: false,
+  is-stale: false, // output is the previous result (live preview only)
   state-styles: knot-state-styles,
   ..rest,
 ) = {
@@ -93,12 +98,14 @@
   let left-ratio = if ratio-parts.len() >= 1 { float(ratio-parts.at(0)) } else { 1.0 }
   let right-ratio = if ratio-parts.len() >= 2 { float(ratio-parts.at(1)) } else { 1.0 }
 
+  // Visual state borders: driven by state-styles dict (customizable via knot-state-styles).
+  let state-stroke = if is-pending { state-styles.pending.stroke } else if is-modified {
+    state-styles.modified.stroke
+  } else if is-modified-cascade { state-styles.at("modified-cascade").stroke } else { none }
+
   // Wrap code in styled block
   let code-block = if code != none {
-    // Visual state borders: driven by state-styles dict (customizable via knot-state-styles).
-    let effective-stroke = if is-pending { state-styles.pending.stroke } else if is-modified {
-      state-styles.modified.stroke
-    } else if is-modified-cascade { state-styles.at("modified-cascade").stroke } else { code-stroke }
+    let effective-stroke = if state-stroke != none { state-stroke } else { code-stroke }
     let b = block(
       fill: code-background,
       stroke: effective-stroke,
@@ -120,13 +127,23 @@
 
   // Wrap output in styled block
   let output-block = if output != none {
-    block(
+    // A stale output carries the state border when no code shows it, under a veil.
+    let b = block(
       fill: output-background,
-      stroke: output-stroke,
+      stroke: if is-stale and code == none and state-stroke != none { state-stroke } else { output-stroke },
       radius: output-radius,
       inset: output-inset,
       width: 100%,
     )[#output]
+    if is-stale {
+      let veil = state-styles.at("stale", default: (overlay-fill: white.transparentize(35%)))
+      block(width: 100%, clip: true, radius: output-radius)[
+        #b
+        #place(top + left, rect(width: 100%, height: 5000pt, fill: veil.overlay-fill))
+      ]
+    } else {
+      b
+    }
   } else { none }
 
   // Warning blocks (reused for both inline and below positioning)

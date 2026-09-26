@@ -93,7 +93,7 @@ Phase0Mode           ::= Pending | Modified | Blocked  -- Blocked: invalid YAML 
 
 The compiler supports a two-phase API for live preview:
 
-**Phase 0** (`plan_and_partial` in `mod.rs`): runs Pass 1 only — no code executed. Cache hits render with real output; `MustExecute` nodes render as visual placeholders controlled by `Phase0Mode`:
+**Phase 0** (`plan_and_partial` in `mod.rs`): runs Pass 1 only — no code executed. Cache hits render with real output; `MustExecute` nodes render as visual placeholders controlled by `Phase0Mode`, with their previous successful result when the cache has one (`Cache::previous_result`, by label or position; without data exports), marked `is-stale` so that the preview keeps its layout:
 - `Phase0Mode::Pending` — compilation is in progress (save or Run): all pending chunks show orange border.
 - `Phase0Mode::Modified` — user is editing without compiling (typing): first `MustExecute` per language chain shows amber (strong), subsequent ones amber (muted) to distinguish direct edits from hash-cascade invalidations.
 

@@ -75,17 +75,7 @@ pub(super) fn skip_output(
 ) -> String {
     match &pn.kind {
         PlannedNodeKind::Chunk { node: chunk, data } => {
-            let editing = matches!(
-                state,
-                ChunkExecutionState::Modified | ChunkExecutionState::ModifiedCascade
-            );
-            let chunk = if editing && chunk.errors.iter().any(|e| e.is_error()) {
-                let mut chunk = chunk.clone();
-                chunk.errors.retain(|e| !e.is_error());
-                std::borrow::Cow::Owned(chunk)
-            } else {
-                std::borrow::Cow::Borrowed(chunk)
-            };
+            let chunk = shown_chunk(chunk, state);
             let empty = ExecutionOutput {
                 result: ExecutionResult::Text(String::new()),
                 exports: Vec::new(),
@@ -101,6 +91,43 @@ pub(super) fn skip_output(
             )
         }
         PlannedNodeKind::Inline { .. } => String::new(),
+    }
+}
+
+/// The chunk as rendered in `state`: a chunk being edited (modified) shows
+/// no option errors, its text being incomplete while the user types.
+fn shown_chunk<'a>(chunk: &'a Chunk, state: &ChunkExecutionState) -> std::borrow::Cow<'a, Chunk> {
+    let editing = matches!(
+        state,
+        ChunkExecutionState::Modified | ChunkExecutionState::ModifiedCascade
+    );
+    if editing && chunk.errors.iter().any(|e| e.is_error()) {
+        let mut chunk = chunk.clone();
+        chunk.errors.retain(|e| !e.is_error());
+        std::borrow::Cow::Owned(chunk)
+    } else {
+        std::borrow::Cow::Borrowed(chunk)
+    }
+}
+
+/// Format a node waiting to run (pending or modified): with its previous
+/// result, marked stale, when the cache has one, so that the page keeps its
+/// layout; otherwise with an empty output.
+pub(super) fn waiting_output(
+    pn: &PlannedNode,
+    backend: &TypstBackend,
+    state: &ChunkExecutionState,
+) -> String {
+    match (&pn.kind, &pn.previous) {
+        (PlannedNodeKind::Chunk { node: chunk, data }, Some(previous)) => backend
+            .format_stale_chunk(
+                &shown_chunk(chunk, state),
+                &data.merged_codly_options,
+                &data.resolved_options,
+                previous,
+                state,
+            ),
+        _ => skip_output(pn, backend, state),
     }
 }
 

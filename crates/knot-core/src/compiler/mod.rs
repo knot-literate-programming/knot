@@ -108,7 +108,7 @@ use anyhow::Result;
 use log::info;
 
 use execution::{ChainOutput, group_by_language, run_language_chain};
-use node_output::{format_executed_node, skip_output};
+use node_output::{format_executed_node, skip_output, waiting_output};
 use options::{compute_hash, resolve_options};
 
 /// Represents a node in the document that can be executed.
@@ -436,11 +436,26 @@ impl Compiler {
             } else {
                 need
             };
+            // A chunk that must run again keeps showing its previous result,
+            // marked stale, in the live preview.
+            let previous = match &kind {
+                PlannedNodeKind::Chunk { node, data }
+                    if matches!(need, ExecutionNeed::MustExecute)
+                        && !matches!(
+                            data.resolved_options.show,
+                            crate::parser::Show::Code | crate::parser::Show::None
+                        ) =>
+                {
+                    cache.previous_result(node.index, node.label.as_deref(), &lang)
+                }
+                _ => None,
+            };
             planned.push(PlannedNode {
                 snapshots: enabled,
                 snapshot_warning_threshold: warning_threshold,
                 cached_snapshot_warning: None,
                 unsaved_edit,
+                previous,
                 kind,
                 lang,
                 hash,
@@ -865,7 +880,7 @@ pub fn planned_to_partial_nodes(
                 } else {
                     match mode {
                         Phase0Mode::Pending => (
-                            skip_output(pn, backend, &ChunkExecutionState::Pending),
+                            waiting_output(pn, backend, &ChunkExecutionState::Pending),
                             None,
                         ),
                         Phase0Mode::Blocked => unreachable!("blocked nodes render as inert"),
@@ -873,14 +888,18 @@ pub fn planned_to_partial_nodes(
                             if must_execute_langs.contains(&pn.lang) {
                                 // Subsequent MustExecute in the same chain = cascade.
                                 (
-                                    skip_output(pn, backend, &ChunkExecutionState::ModifiedCascade),
+                                    waiting_output(
+                                        pn,
+                                        backend,
+                                        &ChunkExecutionState::ModifiedCascade,
+                                    ),
                                     None,
                                 )
                             } else {
                                 // First MustExecute for this language = direct edit.
                                 must_execute_langs.insert(pn.lang.clone());
                                 (
-                                    skip_output(pn, backend, &ChunkExecutionState::Modified),
+                                    waiting_output(pn, backend, &ChunkExecutionState::Modified),
                                     None,
                                 )
                             }
