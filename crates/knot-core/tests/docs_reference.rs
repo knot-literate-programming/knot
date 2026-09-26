@@ -7,7 +7,8 @@ fn chunk_options_page_embeds_the_generated_reference() {
         env!("CARGO_MANIFEST_DIR"),
         "/../../docs/book/src/chunk-options.md"
     );
-    let page = std::fs::read_to_string(path).unwrap();
+    // Windows checkouts may convert line endings to CRLF.
+    let page = std::fs::read_to_string(path).unwrap().replace("\r\n", "\n");
     let begin = page
         .find("<!-- BEGIN CHUNK OPTIONS")
         .expect("the page has a BEGIN CHUNK OPTIONS marker");
