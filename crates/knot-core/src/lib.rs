@@ -19,6 +19,7 @@ pub mod backend;
 pub mod cache;
 pub mod cancellation;
 mod cleaning;
+pub mod codly;
 pub mod compiler;
 pub mod config;
 pub mod defaults;

@@ -84,6 +84,11 @@ jobs:
         run: |
           python -m pip install -r examples/anscombe/requirements.txt
 
+      # The first matplotlib import builds its font cache, which can exceed a
+      # chunk timeout on a fresh runner when several tests do it in parallel.
+      - name: Warm up Python imports
+        run: python -c "import matplotlib.pyplot, pandas"
+
       - name: Install system dependencies (Linux only)
         if: runner.os == 'Linux'
         run: |

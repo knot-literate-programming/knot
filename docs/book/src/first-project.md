@@ -32,7 +32,8 @@ command palette) to open the live preview.
 ## Write your first document
 
 The template starts with a codly configuration (syntax highlighting), which the
-styles in `knot.toml` rely on: keep it. Replace the rest of `main.knot` with:
+styles in `knot.toml` rely on: keep it (without it, Knot ignores the `codly-*`
+options and warns about them). Replace the rest of `main.knot` with:
 
 ~~~typst
 = My First Report

@@ -83,7 +83,8 @@ centred. See [Labels and cross-references](./chunks.md#labels-and-cross-referenc
 Options prefixed with `codly-` are passed directly to the
 [codly](https://typst.app/universe/package/codly) Typst package for syntax
 highlighting customisation. They require codly to be imported and initialised
-in the document (the `knot init` template does it):
+in the document (the `knot init` template does it). Without such an import, they
+are ignored and a warning, at the end of the PDF and in the editor, names them:
 
 ~~~typst
 #import "@preview/codly:1.3.0": *
