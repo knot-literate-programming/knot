@@ -139,7 +139,7 @@ The side-channel (`executors/side_channel.rs`) is a temporary JSON file that let
 
 ### LSP Preview Architecture
 
-`knot/startPreview` starts a Tinymist preview task **in our own Tinymist subprocess** (not the VS Code extension's). This gives us access to the task ID and static server port. The extension then opens `http://127.0.0.1:{port}` in the browser.
+`knot/startPreview` starts a Tinymist preview task **in our own Tinymist subprocess** (not the VS Code extension's). That subprocess runs the binary bundled with the Tinymist extension when the editor supplies it (`tools::resolve_editor_binary`: `[tools] tinymist`, then the editor's path, then `PATH`), so a stale `tinymist` on `PATH` cannot downgrade Typst in the preview. This gives us access to the task ID and static server port. The extension then opens `http://127.0.0.1:{port}` in the browser.
 
 Compilation requests go through `compilation.rs`. Each project has one publication gate; `queue_compile` begins a new request, which cancels the previous one (its publications are discarded):
 

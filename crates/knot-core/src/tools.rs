@@ -79,6 +79,36 @@ pub fn resolve_binary(
     )
 }
 
+/// Resolve a tool that the editor keeps matched to its own extension
+/// (Tinymist in VS Code): the project setting, then the editor-supplied binary,
+/// then the order of [`resolve_binary`]. A stale binary on PATH then never
+/// replaces the editor's. An editor path that no longer exists falls back.
+pub fn resolve_editor_binary(
+    name: &str,
+    configured: Option<&Path>,
+    client: Option<&Path>,
+) -> Result<PathBuf> {
+    let cwd = std::env::current_dir()?;
+    match editor_first(configured, client, std::env::var_os("PATH"), &cwd) {
+        Some(path) => Ok(path),
+        None => resolve_binary(name, configured, client),
+    }
+}
+
+/// The editor-supplied binary, when no project setting overrides it and it
+/// is executable.
+fn editor_first(
+    configured: Option<&Path>,
+    client: Option<&Path>,
+    paths: Option<std::ffi::OsString>,
+    cwd: &Path,
+) -> Option<PathBuf> {
+    if configured.is_some() {
+        return None;
+    }
+    which::which_in(client?, paths.as_ref(), cwd).ok()
+}
+
 fn resolve_in(
     name: &str,
     configured: Option<&Path>,
@@ -174,6 +204,32 @@ mod tests {
             resolve_in("fixture", None, Some(&client), None, &[], root).unwrap(),
             client
         );
+    }
+
+    #[test]
+    fn the_editor_binary_comes_after_the_project_setting_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let project = executable(root, "project");
+        let path = executable(root, "path");
+        let client = executable(root, "client");
+        let paths = || Some(std::env::join_paths([path.parent().unwrap()]).unwrap());
+        // Preferred over a binary on PATH...
+        assert_eq!(
+            editor_first(None, Some(&client), paths(), root),
+            Some(client.clone())
+        );
+        // ...but never over the project setting.
+        assert_eq!(
+            editor_first(Some(&project), Some(&client), paths(), root),
+            None
+        );
+        // A missing editor binary falls back to the usual order.
+        assert_eq!(
+            editor_first(None, Some(&root.join("gone")), paths(), root),
+            None
+        );
+        assert_eq!(editor_first(None, None, paths(), root), None);
     }
 
     #[test]

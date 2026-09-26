@@ -109,7 +109,8 @@ impl TinymistProxy {
             .map(|root| knot_core::Config::find_and_load(&root).map(|(config, _)| config))
             .transpose()?
             .unwrap_or_default();
-        let tinymist_path = knot_core::tools::resolve_binary(
+        // The editor keeps its bundled Tinymist up to date; prefer it to PATH.
+        let tinymist_path = knot_core::tools::resolve_editor_binary(
             "tinymist",
             config.tools.tinymist.as_deref(),
             path_override.as_deref(),

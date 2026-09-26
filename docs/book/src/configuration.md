@@ -124,6 +124,13 @@ Resolution order is:
 4. For LSP formatters and Tinymist, a path supplied by the editor through
    `initializationOptions` (`airPath`, `ruffPath`, `tinymistPath`).
 
+The language server's Tinymist is the exception: a path supplied by the editor
+comes right after `[tools]`, before `PATH`. The editor keeps the Tinymist bundled
+with its extension up to date, so an old `tinymist` left on `PATH` (with an older
+Typst, which may reject recent packages) cannot replace it in the preview. If
+the supplied path no longer exists, the usual order applies. `knot watch
+--preview` has no editor and uses the usual order.
+
 The VS Code client supplies available binaries from the installed Tinymist, Air
 and Ruff extensions. Its Air/Ruff path settings override those bundled candidates,
 but remain fallbacks after project settings and local discovery. Other LSP
