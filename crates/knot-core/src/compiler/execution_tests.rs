@@ -370,3 +370,32 @@ fn a_missing_dependency_rejects_the_chunk_and_is_shown() {
         .unwrap();
     assert!(matches!(planned[0].need, ExecutionNeed::MustExecute));
 }
+
+#[test]
+fn invalid_options_of_a_chunk_being_typed_are_not_shown_until_saved() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("main.knot");
+    let saved = "```{r}\n#| show: both\nx <- 1\n```\n";
+    let typed = "```{r}\n#| show: b\nx <- 1\n```\n";
+    std::fs::write(&path, saved).unwrap();
+    let render = |saved: Option<&str>, mode| {
+        let mut compiler = Compiler::new(&path).unwrap().with_saved_source(saved);
+        let (_, _, typ) = compiler
+            .plan_and_partial(&Document::parse(typed.into()), "main.knot", mode)
+            .unwrap();
+        typ
+    };
+    // While typing: shown as modified, without the error block.
+    let typing = render(Some(saved), Phase0Mode::Modified);
+    assert!(!typing.contains("Invalid chunk options"), "{typing}");
+    assert!(typing.contains("is-modified: true"), "{typing}");
+    // Saved with the invalid option, or compiled: the error is shown.
+    for (saved, mode) in [
+        (Some(typed), Phase0Mode::Modified),
+        (None, Phase0Mode::Modified),
+        (Some(saved), Phase0Mode::Pending),
+    ] {
+        let typ = render(saved, mode);
+        assert!(typ.contains("Invalid chunk options"), "{typ}");
+    }
+}

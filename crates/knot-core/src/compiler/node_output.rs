@@ -64,6 +64,10 @@ pub(super) fn inert_output(pn: &PlannedNode, backend: &TypstBackend, config: &Co
 }
 
 /// Format a node with empty output in the given execution state.
+///
+/// A chunk shown as being edited (modified) never shows option errors: its
+/// text is incomplete while the user types (they are reported in the editor,
+/// and in the PDF once saved).
 pub(super) fn skip_output(
     pn: &PlannedNode,
     backend: &TypstBackend,
@@ -71,6 +75,17 @@ pub(super) fn skip_output(
 ) -> String {
     match &pn.kind {
         PlannedNodeKind::Chunk { node: chunk, data } => {
+            let editing = matches!(
+                state,
+                ChunkExecutionState::Modified | ChunkExecutionState::ModifiedCascade
+            );
+            let chunk = if editing && chunk.errors.iter().any(|e| e.is_error()) {
+                let mut chunk = chunk.clone();
+                chunk.errors.retain(|e| !e.is_error());
+                std::borrow::Cow::Owned(chunk)
+            } else {
+                std::borrow::Cow::Borrowed(chunk)
+            };
             let empty = ExecutionOutput {
                 result: ExecutionResult::Text(String::new()),
                 exports: Vec::new(),
@@ -78,7 +93,7 @@ pub(super) fn skip_output(
             };
             format_output(
                 backend,
-                chunk,
+                &chunk,
                 &data.merged_codly_options,
                 &data.resolved_options,
                 &empty,

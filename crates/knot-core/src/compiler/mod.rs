@@ -132,9 +132,28 @@ pub struct Compiler {
     cache_dir: PathBuf,
     cancellation: crate::cancellation::Cancellation,
     no_snapshots: bool,
+    /// Source text of every chunk of the saved file, when the compiled text
+    /// is an unsaved buffer: chunks outside it are being edited.
+    saved_chunks: Option<HashSet<String>>,
 }
 
 impl Compiler {
+    /// Compile an unsaved buffer whose file on disk is `saved`: while typing,
+    /// invalid options of the chunks being edited do not replace their
+    /// rendering with an error block (the editor reports them; saving shows
+    /// them in the PDF).
+    pub fn with_saved_source(mut self, saved: Option<&str>) -> Self {
+        self.saved_chunks = saved.map(|text| {
+            Document::parse(text.to_string())
+                .chunks
+                .iter()
+                .filter_map(|chunk| text.get(chunk.start_byte..chunk.end_byte))
+                .map(str::to_string)
+                .collect()
+        });
+        self
+    }
+
     /// Override document settings and disable all session snapshots.
     pub fn with_snapshots_disabled(mut self, disabled: bool) -> Self {
         self.no_snapshots = disabled;
@@ -173,6 +192,7 @@ impl Compiler {
             cache_dir,
             cancellation,
             no_snapshots: false,
+            saved_chunks: None,
         }
     }
 
@@ -312,8 +332,14 @@ impl Compiler {
             } else {
                 previous_hash.clone()
             };
+            let mut unsaved_edit = false;
             let (hash, need, kind) = match node {
                 ExecutableNode::Chunk(mut chunk) => {
+                    unsaved_edit = self.saved_chunks.as_ref().is_some_and(|saved| {
+                        source
+                            .get(chunk.start_byte..chunk.end_byte)
+                            .is_some_and(|text| !saved.contains(text))
+                    });
                     let (chunk_options, resolved_options, merged_codly_options) =
                         resolve_options(&chunk, &self.config, &ChunkExecutionState::Ready);
                     // A missing dependency rejects the chunk, like invalid options.
@@ -414,6 +440,7 @@ impl Compiler {
                 snapshots: enabled,
                 snapshot_warning_threshold: warning_threshold,
                 cached_snapshot_warning: None,
+                unsaved_edit,
                 kind,
                 lang,
                 hash,
@@ -780,7 +807,18 @@ pub fn planned_to_partial_nodes(
             PlannedNodeKind::Inline { .. } => (false, 0),
         };
 
-        let (typst_content, error) = match &pn.need {
+        // While typing, a chunk being edited with invalid options is shown as
+        // modified, like one whose code changed: the incomplete text is
+        // reported in the editor, and in the PDF once saved.
+        let typing_rejected = matches!(pn.need, ExecutionNeed::Rejected)
+            && pn.unsaved_edit
+            && matches!(mode, Phase0Mode::Modified);
+        let need = if typing_rejected {
+            &ExecutionNeed::MustExecute
+        } else {
+            &pn.need
+        };
+        let (typst_content, error) = match need {
             ExecutionNeed::Skip => {
                 must_execute_langs.remove(&pn.lang);
                 (skip_output(pn, backend, &ChunkExecutionState::Ready), None)

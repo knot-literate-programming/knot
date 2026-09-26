@@ -96,7 +96,24 @@ pub fn parse_options(
         }
         Err(e) => {
             let mut errors = warnings;
-            let line_offset = if let Some(location) = e.location() {
+            let (key, message) = plain_option_error(&e);
+            // The error's location is in the YAML rebuilt without the codly
+            // options: prefer the line of the option it names.
+            let key_line = key.and_then(|key| {
+                options_block
+                    .lines()
+                    .enumerate()
+                    .find(|(_, line)| {
+                        line.trim()
+                            .strip_prefix("#|")
+                            .and_then(|rest| rest.trim_start().strip_prefix(key.as_str()))
+                            .is_some_and(|rest| rest.trim_start().starts_with(':'))
+                    })
+                    .map(|(i, _)| i + 1)
+            });
+            let line_offset = if key_line.is_some() {
+                key_line
+            } else if let Some(location) = e.location() {
                 let yaml_line = location.line() - 1;
                 if yaml_line < line_map.len() {
                     Some(line_map[yaml_line])
@@ -109,13 +126,35 @@ pub fn parse_options(
 
             errors.push(ChunkError::new(
                 format!(
-                    "Invalid chunk options: {e}. The chunk is not executed and later chunks in this language are suspended."
+                    "Invalid chunk options: {message}. The chunk is not executed and later chunks in this language are suspended."
                 ),
                 line_offset,
             ));
             (ChunkOptions::default(), codly_options, errors)
         }
     }
+}
+
+/// The option a YAML error names, and its message as plain text: single
+/// quotes instead of backticks, no position in the internal YAML.
+fn plain_option_error(error: &serde_yaml::Error) -> (Option<String>, String) {
+    let mut message = error.to_string();
+    if let Some(at) = message.rfind(" at line ")
+        && message[at + " at line ".len()..]
+            .split(" column ")
+            .all(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+    {
+        message.truncate(at);
+    }
+    let message = message
+        .replace("unknown variant", "invalid value")
+        .replace('`', "'");
+    let key = message
+        .split_once(": ")
+        .map(|(key, _)| key)
+        .filter(|key| !key.is_empty() && !key.contains(' '))
+        .map(String::from);
+    (key, message)
 }
 
 #[cfg(test)]
@@ -177,5 +216,18 @@ mod tests {
             errors.is_empty(),
             "Codly options should not trigger warnings"
         );
+    }
+
+    #[test]
+    fn invalid_values_are_reported_in_plain_text_on_their_line() {
+        // The codly option is removed before parsing: the error's own
+        // location would point at the wrong line.
+        let (_, _, errors) = parse_options("#| codly-zebra-fill: none\n#| show: b\n");
+        let error = errors.iter().find(|e| e.is_error()).unwrap();
+        assert_eq!(
+            error.message,
+            "Invalid chunk options: show: invalid value 'b', expected one of 'both', 'code', 'output', 'none', 'replace'. The chunk is not executed and later chunks in this language are suspended."
+        );
+        assert_eq!(error.line_offset, Some(2));
     }
 }

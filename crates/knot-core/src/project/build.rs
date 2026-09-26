@@ -15,6 +15,8 @@ struct Source {
     path: PathBuf,
     name: String,
     text: String,
+    /// The file as saved on disk, when an unsaved buffer replaces it.
+    saved: Option<String>,
 }
 
 /// An include listed in `knot.toml`, in order. A missing file is rendered as
@@ -70,12 +72,18 @@ impl ProjectBuild {
             let path = path
                 .canonicalize()
                 .with_context(|| format!("Source file not found: {name}"))?;
-            let text = match buffers.get(&path) {
-                Some(text) => (*text).clone(),
-                None => fs::read_to_string(&path)
-                    .with_context(|| format!("Cannot read source: {name}"))?,
+            let disk =
+                || fs::read_to_string(&path).with_context(|| format!("Cannot read source: {name}"));
+            let (text, saved) = match buffers.get(&path) {
+                Some(text) => ((*text).clone(), disk().ok()),
+                None => (disk()?, None),
             };
-            Ok(Source { path, name, text })
+            Ok(Source {
+                path,
+                name,
+                text,
+                saved,
+            })
         };
         let main = read(paths.main_file.clone(), paths.main_file_name.clone())?;
         let mut includes = Vec::new();
@@ -134,7 +142,12 @@ impl ProjectBuild {
             main_file_name: name.clone(),
             main_typ_path: root.join(format!(".{stem}.typ")),
         };
-        let main = Source { path, name, text };
+        let main = Source {
+            path,
+            name,
+            text,
+            saved: None,
+        };
         Self::with_sources(config, root, paths, main, Vec::new(), cancellation, true)
     }
 
@@ -230,6 +243,7 @@ impl ProjectBuild {
             self.cancellation.clone(),
         )
         .with_snapshots_disabled(self.no_snapshots)
+        .with_saved_source(source.saved.as_deref())
     }
     fn fix(&self, content: &str) -> Result<String> {
         // Relative artifacts are staged here; publication copies them to the
