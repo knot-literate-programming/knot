@@ -1,0 +1,134 @@
+# Install a published release with the documented commands, on runners where
+# Knot has never been installed, then run the README quick start and the
+# Anscombe reference build. Run it by hand for each release candidate and
+# release (Actions > Install smoke test > Run workflow), with its tag.
+name: Install smoke test
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to install (e.g. v0.4.0-rc.1)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    name: Install ${{ inputs.tag }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    env:
+      MPLBACKEND: Agg
+      TAG: ${{ inputs.tag }}
+    steps:
+      # The sources only provide the examples; Knot comes from the release.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      # Prerequisites a user installs before Knot (docs/book/src/installation.md).
+      - uses: typst-community/setup-typst@v5
+        with:
+          typst-version: '0.15.1'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Python packages
+        run: python -m pip install -r examples/anscombe/requirements.txt
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          packages: |
+            any::jsonlite
+            any::digest
+            any::svglite
+            any::ggplot2
+
+      # The documented install commands, unchanged except for the version.
+      - name: Install Knot (install.sh)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          curl -sSf https://raw.githubusercontent.com/knot-literate-programming/knot/master/install.sh \
+            | KNOT_VERSION="$TAG" bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Install Knot (PowerShell installers)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          powershell -c "irm https://github.com/knot-literate-programming/knot/releases/download/$env:TAG/knot-cli-installer.ps1 | iex"
+          powershell -c "irm https://github.com/knot-literate-programming/knot/releases/download/$env:TAG/knot-lsp-installer.ps1 | iex"
+          # The installers add the directory to the user PATH, read by new
+          # shells; later steps of this job need it explicitly.
+          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          if ($userPath -notlike "*\.cargo\bin*") { throw "The installers did not add .cargo\bin to the user PATH: $userPath" }
+          "$env:USERPROFILE\.cargo\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Installed versions
+        shell: bash
+        run: |
+          expected="${TAG#v}"
+          for binary in knot knot-lsp; do
+            version=$("$binary" --version)
+            echo "$version"
+            case "$version" in
+              *" $expected") ;;
+              *) echo "::error::$binary reports '$version', expected $expected"; exit 1 ;;
+            esac
+          done
+
+      - name: README quick start
+        shell: bash
+        run: |
+          cd "$RUNNER_TEMP"
+          knot init my-project
+          cd my-project
+          python - <<'EOF'
+          body = '''= My Analysis
+
+          ```{r summary}
+          x <- c(2, 4, 6, 8, 10)
+          summary(x)
+          ```
+
+          The mean is `{r} mean(x)` and the standard deviation is `{r} round(sd(x), 2)`.
+
+          ```{python}
+          import matplotlib.pyplot as plt
+          plt.plot([1, 4, 9, 16])
+          plt.title("Growth")
+          typst(current_plot())
+          ```
+          '''
+          import textwrap
+          text = open("main.knot").read()
+          body = textwrap.dedent(body)
+          open("main.knot", "w").write(text.replace("/* KNOT-INJECT-CHAPTERS */", body))
+          EOF
+          knot build --strict
+          test -s main.pdf
+
+      - name: Anscombe reference build (full replay, strict)
+        shell: bash
+        working-directory: examples/anscombe
+        run: |
+          knot build --strict --no-snapshots
+          test -s main.pdf
+
+      - name: Anscombe errors variant (must fail, PDF still written)
+        shell: bash
+        run: |
+          cp -R examples/anscombe "$RUNNER_TEMP/errors"
+          cd "$RUNNER_TEMP/errors"
+          cp knot-errors.toml knot.toml
+          if knot build --strict; then
+            echo "::error::the errors variant must fail with --strict"; exit 1
+          fi
+          test -s errors-main.pdf

@@ -52,7 +52,14 @@ binaries, the installers (`knot-cli-installer.sh`, `knot-cli-installer.ps1`,
 
 ## 3. Validate
 
-On a clean machine for each advertised platform, using only the published
+First run **Actions → Install smoke test → Run workflow** with the tag
+(`.github/workflows/install-smoke.yml`): on Linux, macOS and Windows runners
+where Knot has never been installed, it installs the release with the
+documented commands, checks the versions and the user `PATH`, runs the README
+quick start and builds Anscombe (the reference with `--strict --no-snapshots`,
+the errors variant, which must fail).
+
+Then, on a clean machine for each advertised platform, using only the published
 instructions:
 
 - install the candidate: `KNOT_VERSION=vX.Y.Z-rc.N` with `install.sh` (macOS,
