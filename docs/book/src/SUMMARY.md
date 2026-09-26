@@ -9,6 +9,7 @@
 - [Installation](./installation.md)
 - [Your First Project](./first-project.md)
 - [Scientific Reference Example](./scientific-example.md)
+- [From Exploration to Publication](./exploration-to-publication.md)
 
 # The Knot Language
 

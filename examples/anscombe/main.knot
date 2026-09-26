@@ -69,8 +69,8 @@ The fourth file, `anscombe-errors.knot`, is an opt-in diagnostic companion.
 
 == Re-execution and scope
 
-Use `knot build` while editing, then `knot build --no-snapshots` for a full
-re-execution. The input CSV is declared as a dependency in every reading chunk.
+Use `knot build` while editing, then `knot build --strict --no-snapshots` for
+the final validation: a full re-execution that fails on any error. The input CSV is declared as a dependency in every reading chunk.
 JSON exports and figures are managed by Knot's cache. Changing prose should
 reuse calculations; changing the CSV should invalidate them.
 

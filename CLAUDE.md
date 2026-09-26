@@ -110,7 +110,7 @@ The compiler supports a two-phase API for live preview:
 
 `crates/knot-core/src/cache/` — SHA-256 addressed, persisted as `.knot_cache/metadata.json`. The hash of chunk N includes the hash of chunk N-1, so any change cascades invalidations forward.
 
-**Snapshots** (`compiler/snapshot_manager.rs`, `resources/*/session.*`): after a chunk executes, the interpreter state can be saved (R: `save.image` + attached packages; Python: pickled `__main__`, re-imported modules, RNG state) so that a later cache miss restarts from the previous chunk instead of re-running the chain. They are enabled per document in the YAML header (`snapshots: {r: true}`). Validation is cheap on the hot path (`snapshot_is_valid`: size + mtime) and complete at restore (`snapshot_is_intact`: full hash). `knot build --no-snapshots` re-executes everything, and `--strict --no-snapshots` is the reproducibility check.
+**Snapshots** (`compiler/snapshot_manager.rs`, `resources/*/session.*`): after a chunk executes, the interpreter state can be saved (R: `save.image` + attached packages; Python: pickled `__main__`, re-imported modules, RNG state) so that a later cache miss restarts from the previous chunk instead of re-running the chain. They are on by default and can be disabled per document and language in the YAML header (`snapshots: {python: false}`). Validation is cheap on the hot path (`snapshot_is_valid`: size + mtime) and complete at restore (`snapshot_is_intact`: full hash). `knot build --no-snapshots` re-executes everything, and `--strict --no-snapshots` is the reproducibility check.
 
 `ExecutorManager` (in `executors/manager.rs`) uses a take/put-back pattern so executors can be moved into threads safely.
 
