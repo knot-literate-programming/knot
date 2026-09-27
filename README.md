@@ -7,10 +7,16 @@
 [![Documentation](https://img.shields.io/badge/docs-knot--literate--programming.github.io%2Fknot-blue)](https://knot-literate-programming.github.io/knot/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-**The final document is the notebook.** You write one Typst document with
-executable R and Python code. R and Python compute, Typst composes, and
-compilation verifies. The code runs in document order: what you read in the PDF
-is what was executed, errors included, shown where they occur.
+**Literate programming for Typst. Your code runs in document order — R and
+Python in parallel — while you keep writing.**
+
+- **One execution order: the document's.** There is no interactive session that
+  can drift from the rendered document: what you read in the PDF is what the
+  code, run from top to bottom, produced — errors included, shown where they
+  occur.
+- **You never wait to write.** The Typst preview follows your typing at once;
+  when you save, only the chunks affected by a change run again, R and Python
+  side by side, and their results appear as they are computed.
 
 <p align="center">
   <img src="docs/book/src/images/demo.gif" width="800"

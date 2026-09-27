@@ -5,9 +5,12 @@ embed executable R and Python code directly inside `.knot` documents, which comp
 to `.typ` files that Typst renders into PDF (or any other format Typst supports).
 
 If you have used RMarkdown or Quarto, the idea will feel familiar. Knot's bet is
-narrower: **the final document is the notebook**. R and Python compute, Typst
-composes, and compilation verifies. The code runs in document order, and what the
-PDF shows — results and errors alike — is what that execution produced.
+narrower: **your code runs in document order — R and Python in parallel — while
+you keep writing.** There is one execution order, the document's, so what the
+PDF shows — results and errors alike — is what the code run from top to bottom
+produced. And that linearity costs no waiting: the Typst preview follows your
+typing, and only the chunks a change affects run again, their results streaming
+in as they are computed.
 
 ![Editing a .knot file: the preview updates while typing, a chunk runs again on save, an R error appears in place, then is fixed](./images/demo.gif)
 
