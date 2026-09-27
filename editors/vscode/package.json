@@ -1,7 +1,7 @@
 {
   "name": "knot",
   "displayName": "Knot",
-  "description": "Language support for Knot files (.knot) - Literate programming with R and Typst",
+  "description": "Literate programming for Typst: R and Python run in document order, in parallel, while you keep writing",
   "version": "0.4.0",
   "publisher": "knot-dev",
   "engines": {
