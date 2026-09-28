@@ -909,3 +909,61 @@ fn a_chunk_suspended_by_an_error_keeps_its_previous_result_for_the_preview() {
     let entries = cache(root.path(), &path).metadata.chunks;
     assert!(entries.iter().all(|e| !e.superseded), "{entries:?}");
 }
+
+/// Edit the last chunk of `prefix + last` so that the prefix is restored from
+/// its snapshot, and return the output; the prefix must be a cache hit.
+fn compile_after_restore(compiler: &mut Compiler, prefix: &str, last: &str) -> String {
+    let first = format!("{prefix}```{{python}}\n{last}\n```\n");
+    compile(compiler, &first);
+    let edited = format!("{prefix}```{{python}}\n{last}\nprint('edited')\n```\n");
+    let hits = hits(&plan(compiler, &edited));
+    assert!(
+        hits[0] && !hits[hits.len() - 1],
+        "prefix restored: {hits:?}"
+    );
+    compile(compiler, &edited)
+}
+
+#[test]
+#[ignore = "requires Python"]
+fn restored_python_sessions_keep_submodule_imports() {
+    let (_root, _, mut compiler) = fixture();
+    let output = compile_after_restore(
+        &mut compiler,
+        "```{python}\nimport xml.dom.minidom\n```\n",
+        "print(xml.dom.minidom.parseString('<a/>').documentElement.tagName)",
+    );
+    assert!(!output.contains("AttributeError"), "{output}");
+    assert!(output.contains("edited"), "{output}");
+}
+
+#[test]
+#[ignore = "requires Python"]
+fn restored_python_sessions_keep_shared_references() {
+    // The whole namespace is serialized in one pass: aliases, nested
+    // references and cycles are the same objects after a restore.
+    let (_root, _, mut compiler) = fixture();
+    let prefix = "```{python}\nx = {'truc': [1, 2]}\ny = x\nz = x['truc']\nw = [None]\nw[0] = x\nx['self'] = x\n```\n";
+    let output = compile_after_restore(
+        &mut compiler,
+        prefix,
+        "x['truc'].append(3)\nprint(y is x, z is x['truc'], w[0] is x, x['self'] is x, y['truc'], z)",
+    );
+    assert!(
+        output.contains("True True True True [1, 2, 3] [1, 2, 3]"),
+        "{output}"
+    );
+}
+
+#[test]
+#[ignore = "requires R"]
+fn restored_r_sessions_keep_shared_environments() {
+    let (_root, _, mut compiler) = fixture();
+    let prefix = "```{r}\ne <- new.env()\ne$v <- 1\nf <- e\nl <- list(env = e)\n```\n";
+    let first = format!("{prefix}```{{r}}\nf$v <- 2\ncat(identical(e, f), e$v, l$env$v)\n```\n");
+    compile(&mut compiler, &first);
+    let edited = first.replace("cat(identical", "cat('edited', identical");
+    assert_eq!(hits(&plan(&mut compiler, &edited)), [true, false]);
+    let output = compile(&mut compiler, &edited);
+    assert!(output.contains("edited TRUE 2 2"), "{output}");
+}
