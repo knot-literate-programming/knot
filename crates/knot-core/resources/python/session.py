@@ -68,6 +68,16 @@ def save_session(path):
             except Exception:
                 reusable = False
 
+        # `import xml.dom.minidom` binds only `xml`: the submodules loaded under
+        # each bound package are imported again on restore, in their original
+        # order, so that `xml.dom.minidom` still resolves (#167).
+        packages = set(state['__knot_modules__'].values())
+        state['__knot_submodules__'] = [
+            name for name, module in list(sys.modules.items())
+            if module is not None
+            and any(name.startswith(package + '.') for package in packages)
+        ]
+
         replay_path = os.path.splitext(path)[0] + '.replay'
         if reusable:
             if os.path.exists(replay_path):
@@ -100,6 +110,13 @@ def load_session(path):
         modules = state.pop('__knot_modules__', {})
         for alias, name in modules.items():
             main_dict[alias] = importlib.import_module(name)
+        for name in state.pop('__knot_submodules__', []):
+            try:
+                importlib.import_module(name)
+            except Exception:
+                # A module that cannot be imported on its own (a lazy alias, a
+                # platform-specific part) was not needed to resolve names.
+                pass
         _restore_generator_states(state.pop('__knot_generators__', {}))
 
         main_dict.update(state)

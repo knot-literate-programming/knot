@@ -3,6 +3,14 @@
 All notable changes to Knot. Versions follow [Semantic Versioning](https://semver.org);
 Knot is experimental (0.x): the document format and options may still change.
 
+## Unreleased
+
+### Fixed
+
+- Python snapshots keep submodule imports: after `import xml.dom.minidom` (or
+  `import scipy.stats`), a chunk restored from a snapshot could fail with
+  `AttributeError` while a complete run succeeded (#167).
+
 ## 0.4.0 — 2026-09-27
 
 A first release for external users: write, compute and preview a Typst document
