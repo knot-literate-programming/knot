@@ -156,6 +156,9 @@ a type parameter on the function which may complicate call sites.
 
 ### Active
 
+- `cache-design.md`: guarantees of the cache and execution state, the captured
+  state model, and the planned directions (verification, checkpoints,
+  deduplication, early cutoff, automatic dependencies).
 - `lsp-navigation.md`: Roadmap for Go to Definition and References.
 - `pre-launch-checklist.md`: Steps before the public GitHub launch.
 
