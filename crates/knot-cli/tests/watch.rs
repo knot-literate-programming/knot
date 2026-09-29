@@ -37,9 +37,16 @@ fn editing_a_depends_file_triggers_a_rebuild() {
         .recv_timeout(Duration::from_secs(20))
         .expect("the dependency change must trigger a rebuild")
         .expect("events are still delivered");
+    // macOS (FSEvents) may also report the files written just before the
+    // watcher started (knot.toml, main.knot): watched, so reported, and
+    // harmless. What matters: the dependency triggers the rebuild, and the
+    // generated output does not.
     assert!(
-        changed.iter().all(|path| path.ends_with("data/input.csv")),
-        "only the watched dependency is reported: {changed:?}"
+        changed.iter().any(|path| path.ends_with("data/input.csv")),
+        "the dependency is reported: {changed:?}"
     );
-    assert!(!changed.is_empty());
+    assert!(
+        !changed.iter().any(|path| path.ends_with("main.typ")),
+        "the generated output is ignored: {changed:?}"
+    );
 }
